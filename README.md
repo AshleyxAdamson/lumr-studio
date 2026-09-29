@@ -2,7 +2,7 @@
 
 **Finally, an editing harness that cuts your speech without dropping you mid-word, and trims the gaps between your words so seamlessly nobody hears the edit.**
 
-Lumr Studio is a Claude Code plugin for talking-head video. Claude reads your whole take, cuts the dead air, the filler and the stumbles, and checks every join before you hear it. It's free and runs on your Mac (Apple Silicon for now). Your video never leaves it.
+Lumr Studio is a Claude Code plugin for talking-head video. Claude reads your whole take, cuts the dead air, the filler and the stumbles, and checks every join before you hear it. It's free, with no subscription, no per-minute fees and no API keys to buy: the models run on your Mac (Apple Silicon for now), so the only thing you need is the Claude Code you already use. Your video never leaves your machine.
 
 ## Why it's different
 
@@ -23,6 +23,7 @@ Lumr Studio is built around the join, where one kept word lands next to the next
 - **Checks every join.** Each edit comes back with a read of every join, from clipped laughs to unfinished sentences to gaps that are too tight. Claude fixes the flagged ones before you see the plan, and can look at any join as a picture of the frames, the sound wave and the words.
 - **No clicks.** Cuts land on the exact sample, with a 20 ms fade either side.
 - **Private and yours.** Nothing uploads, nothing renders until you say go, and there's no account or telemetry.
+- **Free, with nothing else to pay for.** Most tools like this charge a monthly subscription, and some add per-minute fees or need a paid transcription API. Lumr Studio's transcription and word timing run on your Mac, so there's no subscription, no usage bill and no API key beyond your Claude Code.
 
 On a 21:47 test take, measured word times took out more than twice as much at every pace (3:26 vs 1:25 at Standard) and cut 94 of 112 "likes" cleanly, against 28 without them.
 
