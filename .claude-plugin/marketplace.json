@@ -1,0 +1,16 @@
+{
+  "name": "lumr-studio",
+  "description": "Lumr Studio: a Claude plugin that cuts the gaps out of talking-head videos and helps you tweak the cut. Free to use. You can sell the videos you make, not the tool.",
+  "owner": {
+    "name": "Lumr Studio"
+  },
+  "plugins": [
+    {
+      "name": "lumr-studio",
+      "source": "./",
+      "description": "Cuts the gaps out of a talking-head recording and helps you tweak the cut. Claude proposes each cut with a reason, and your footage stays on your machine.",
+      "homepage": "https://github.com/AshleyxAdamson/lumr-studio",
+      "repository": "https://github.com/AshleyxAdamson/lumr-studio"
+    }
+  ]
+}

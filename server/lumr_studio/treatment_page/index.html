@@ -1,0 +1,3232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#15110d">
+<title>Shape the edit</title>
+<style>
+/* Colors, type and spacing come from the July editor design (dark cutting room,
+   warm lamp). Every color means one thing:
+   red = cut by Claude, teal = your own hand (a part you kept, a word you cut),
+   dim and struck = taken out by the pace, violet = needs a look,
+   amber = a cluster (three strengths of it, by how much changed there),
+   gold = the main action and what plays. */
+:root{
+  --ink:#15110d; --ink2:#1d1813; --ink3:#272019; --ink4:#322a20;
+  --line:#3a3027; --line2:#4a3e32;
+  --text:#f3e9d8; --text2:#b6a890; --text3:#9c907e;
+  --gold:#e9b44c; --gold-dim:#9a7a35; --gold-soft:#f0c876;
+  --red:#d8472b; --red-dim:#6e2417; --red-soft:#e8654b;
+  --red-lift:#f08a73;   /* red text over a lit background: a picked or hovered word, a note on the video */
+  --user:#37b9c4; --flag:#b692f6;
+  --heat1:rgba(245,165,36,.2); --heat2:rgba(245,165,36,.46); --heat3:rgba(245,165,36,.82);
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --serif:Georgia,"Times New Roman",serif;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px;
+  --r:6px;
+  --top-h:52px;
+  --aside-w:340px;
+  --bar-h:44px;          /* the whole-video bar under the video: tall enough to grab */
+  --transport-h:32px;    /* the row under the bar: the clock, Previous, Play, Next, Original | Edited */
+  --stage-gap:10px;      /* between the video, the bar, that row and the words */
+  --stage-pad-t:16px; --stage-pad-b:14px;
+  /* The height under the top line, less the bar, the row and the gaps, is shared by the video and the words.
+     They split it evenly, and the words stop growing at --words-most: past that, the rest goes to the video. */
+  --words-most:360px;
+  --room:calc(max(100vh, 620px) - var(--top-h) - var(--stage-pad-t) - var(--stage-pad-b) - var(--bar-h) - var(--transport-h) - 3 * var(--stage-gap));
+  --vid-w:max(calc(var(--room) / 2 * 16 / 9), calc((var(--room) - var(--words-most)) * 16 / 9));
+  --ease:cubic-bezier(.22,1,.36,1);
+}
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{height:100%}
+/* the page fits the window and does not scroll, unless the window is too short to hold it */
+@media (min-width:821px) and (min-height:620px){ html,body{overflow:hidden} }
+body{
+  background:var(--ink); color:var(--text);
+  font-family:var(--sans); font-size:13px; line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+button{font:inherit; color:inherit; background:none; border:none; cursor:pointer; touch-action:manipulation}
+button:disabled{cursor:default}
+ul,ol{list-style:none}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--gold); outline-offset:2px; border-radius:4px}
+.tnum{font-variant-numeric:tabular-nums}
+[hidden]{display:none!important}
+.sr-only{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
+kbd{
+  font-family:inherit; font-size:11px; color:var(--text);
+  background:var(--ink3); border:1px solid var(--line); border-radius:4px;
+  padding:1px 6px; display:inline-block; min-width:22px; text-align:center;
+}
+
+/* one button vocabulary: secondary = hairline outline, primary = gold fill */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  min-height:30px; padding:4px 12px; border-radius:var(--r);
+  border:1px solid var(--line2); background:var(--ink3); color:var(--text);
+  font-size:12px; white-space:nowrap;
+  transition:border-color .15s var(--ease), background-color .15s var(--ease);
+}
+.btn:hover:not(:disabled){border-color:var(--gold-dim); background:var(--ink4)}
+.btn:active:not(:disabled){background:var(--ink2)}
+.btn:disabled{opacity:.5}
+.btn.primary{background:var(--gold); border-color:var(--gold); color:var(--ink); font-weight:600}
+.btn.primary:hover:not(:disabled){background:var(--gold-soft); border-color:var(--gold-soft)}
+.btn.primary:disabled{background:var(--ink3); border-color:var(--line2); color:var(--text2); opacity:1; font-weight:400}
+.btn.quiet{background:none; border-color:transparent; color:var(--text2); padding:4px 8px}
+.btn.quiet:hover:not(:disabled){color:var(--text); background:var(--ink3); border-color:var(--line)}
+.btn[aria-busy="true"]{opacity:.7; cursor:progress}
+.btn svg{width:14px; height:14px; flex:none}
+.btn[aria-disabled="true"]{opacity:.45; cursor:default}
+.btn[aria-disabled="true"]:hover{border-color:var(--line2); background:var(--ink3)}
+.btn.quiet[aria-disabled="true"]:hover{color:var(--text2); background:none; border-color:transparent}
+.link{
+  min-height:24px; padding:2px 0; font-size:12px; color:var(--text2); white-space:nowrap;
+  text-decoration:underline; text-decoration-color:var(--line2); text-underline-offset:3px;
+}
+.link:hover{color:var(--text); text-decoration-color:var(--text2)}
+.link[aria-busy="true"]{opacity:.7; cursor:progress}
+
+/* two-way choice: Original | Edited, Leave out | Put back */
+.seg{display:inline-flex; border:1px solid var(--line2); border-radius:var(--r); background:var(--ink2); padding:2px; gap:2px}
+.seg button{min-height:26px; padding:2px 12px; border-radius:4px; font-size:12px; color:var(--text2); white-space:nowrap}
+.seg button:hover:not([aria-pressed="true"]):not(:disabled){color:var(--text); background:var(--ink3)}
+.seg button[aria-pressed="true"]{background:var(--ink4); color:var(--text); font-weight:600; box-shadow:inset 0 0 0 1px var(--line2)}
+.seg button:disabled{opacity:.5}
+
+h2{font-size:13px; font-weight:600; color:var(--text); display:flex; align-items:baseline; gap:var(--s2); letter-spacing:.005em}
+h2 .count{margin-left:auto; font-weight:400; color:var(--text2); font-variant-numeric:tabular-nums}
+h2 .count .mine{color:var(--user)}
+
+/* ── frame ───────────────────────────────────────────────────── */
+#app{display:grid; grid-template-rows:auto minmax(0,1fr); height:100vh; min-height:620px}
+
+#top{
+  display:flex; align-items:center; gap:var(--s2) var(--s3); flex-wrap:wrap; min-height:var(--top-h);
+  padding:6px var(--s5); background:var(--ink2); border-bottom:1px solid var(--line); min-width:0;
+}
+#status{flex:0 1 auto; min-width:0; font-size:12px; color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-variant-numeric:tabular-nums}
+#status[data-state="error"] #savedText{color:var(--red-soft)}
+#undoBtn{flex:none; color:var(--user); text-decoration-color:rgba(55,185,196,.4)}
+#undoBtn:hover{color:var(--user); text-decoration-color:var(--user)}
+.topright{display:flex; align-items:center; justify-content:flex-end; gap:var(--s3); min-width:0; margin-left:auto}
+.helpbtn{
+  width:30px; height:30px; flex:none; border-radius:50%; border:1px solid var(--line2); color:var(--text2);
+  font-size:13px; font-weight:600; line-height:1;
+  transition:border-color .15s var(--ease), color .15s var(--ease);
+}
+.helpbtn:hover{color:var(--text); border-color:var(--gold-dim); background:var(--ink3)}
+.helpbtn:focus-visible{border-radius:50%}
+#exportBtn{min-height:32px; padding:4px 16px}
+#exportBtn[aria-disabled="true"]{opacity:1; background:var(--ink3); border-color:var(--line2); color:var(--text); font-weight:400; font-variant-numeric:tabular-nums; cursor:progress}
+#exportNote{display:inline-flex; align-items:center; gap:var(--s2); min-width:0; font-size:12px; color:var(--text2)}
+#exportText{min-width:0; max-width:min(340px, 38vw); line-height:1.3; overflow-wrap:anywhere; text-wrap:pretty}
+#exportNote[data-warn="true"] #exportText{color:var(--red-soft)}
+
+#errbar{
+  grid-column:1 / -1;   /* across both columns, so an error never pushes the video out of its place */
+  display:flex; align-items:center; gap:var(--s3); padding:8px var(--s5);
+  background:rgba(216,71,43,.12); border-bottom:1px solid var(--red-dim); color:var(--text); font-size:13px;
+}
+#errbar p{flex:1; min-width:0}
+#errbar b{color:var(--red-soft); font-weight:600}
+
+#main{display:grid; grid-template-columns:var(--aside-w) minmax(0,1fr); min-height:0}
+
+/* ── left: how the edit is made ──────────────────────────────── */
+#settings{
+  position:relative;
+  background:var(--ink2); border-right:1px solid var(--line);
+  overflow-y:auto; overscroll-behavior:contain; min-height:0;
+  display:flex; flex-direction:column;
+}
+#settings > section{padding:var(--s4) var(--s5) var(--s5); border-bottom:1px solid var(--line)}
+#settings > section:last-of-type{border-bottom:none}
+
+/* pace: the stops on one line, evenly spaced, however many there are.
+   The page sets the columns: half a step for the first and the last stop, a whole step for each between. */
+#dial{position:relative; display:grid; grid-template-columns:repeat(3,1fr); margin-top:var(--s3)}
+#dial::before{
+  content:''; position:absolute; left:9px; right:9px; top:11px; height:2px; background:var(--line2); border-radius:1px;
+}
+#dial button{position:relative; display:flex; flex-direction:column; align-items:center; gap:6px; min-width:0; padding:4px 0 2px; font-size:13px; color:var(--text2); min-height:44px}
+#dial button:first-child{align-items:flex-start}
+#dial button:last-child{align-items:flex-end}
+#dial .lab{white-space:nowrap}
+/* more than three stops: smaller names, each centered under its stop, and the ring goes on the stop */
+#dial.many button{font-size:12px}
+#dial.many button:first-child .lab{transform:translateX(calc(9px - 50%))}
+#dial.many button:last-child .lab{transform:translateX(calc(50% - 9px))}
+#dial.many button:focus-visible{outline:none}
+#dial.many button:focus-visible .stop{outline:2px solid var(--gold); outline-offset:4px}
+/* where the names don't all fit: the first, the last and the chosen one */
+#dial[data-labels="few"] button:not(:first-child):not(:last-child):not([aria-checked="true"]) .lab{visibility:hidden}
+#dial[data-labels="measure"] .lab{font-weight:600}
+#dial .stop{width:16px; height:16px; border-radius:50%; background:var(--ink2); border:2px solid var(--line2); margin:0 1px; transition:border-color .15s var(--ease), background-color .15s var(--ease)}
+#dial button:hover .stop{border-color:var(--gold-dim)}
+#dial button:hover{color:var(--text)}
+#dial button[aria-checked="true"]{color:var(--text); font-weight:600}
+#dial button[aria-checked="true"] .stop{background:var(--gold); border-color:var(--gold); box-shadow:0 0 0 3px rgba(233,180,76,.18)}
+#paceSaves{margin-top:var(--s3); font-size:13px; color:var(--text)}
+#paceSaves b{color:var(--gold); font-weight:600; font-variant-numeric:tabular-nums}
+#paceSummary{margin-top:2px; font-size:12px; color:var(--text2); text-wrap:pretty}
+#paceNote{margin-top:var(--s1); font-size:12px; color:var(--text3); text-wrap:pretty}
+#paceSaves .own{font-weight:600}
+/* fine tune: a line that opens two sliders, each cutting harder to the right like the stops */
+#fine{margin-top:var(--s2)}
+#fineBtn{grid-template-columns:14px 1fr; min-height:30px; font-size:12px; color:var(--text2)}
+#fineBtn:hover, #fineBtn[aria-expanded="true"]{color:var(--text)}
+#fineBox{padding:var(--s1) 0 0 22px}
+.fine + .fine{margin-top:var(--s2)}
+.fine .top{display:flex; align-items:baseline; justify-content:space-between; gap:var(--s3); font-size:12px}
+.fine label{color:var(--text2)}
+.fine output{color:var(--text); font-variant-numeric:tabular-nums; white-space:nowrap}
+.fine input{
+  -webkit-appearance:none; appearance:none; display:block; width:100%; height:24px; margin:0; padding:0;
+  background:none; cursor:pointer; touch-action:pan-y;
+}
+.fine input:focus-visible{outline-offset:-1px}
+.fine input::-webkit-slider-runnable-track{height:2px; border-radius:1px; background:var(--line2)}
+.fine input::-moz-range-track{height:2px; border-radius:1px; background:var(--line2)}
+/* the handle is hollow while the pace is one of the stops, and filled once the setting is her own */
+.fine input::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none; width:16px; height:16px; margin-top:-7px; border-radius:50%;
+  background:var(--ink2); border:2px solid var(--gold-dim);
+}
+.fine input::-moz-range-thumb{width:12px; height:12px; border-radius:50%; background:var(--ink2); border:2px solid var(--gold-dim)}
+.fine input:hover::-webkit-slider-thumb{border-color:var(--gold)}
+.fine input:hover::-moz-range-thumb{border-color:var(--gold)}
+#fine[data-own="true"] .fine input::-webkit-slider-thumb{background:var(--gold); border-color:var(--gold); box-shadow:0 0 0 3px rgba(233,180,76,.18)}
+#fine[data-own="true"] .fine input::-moz-range-thumb{background:var(--gold); border-color:var(--gold)}
+/* one line under both sliders says which way is harder, since the first one's numbers fall to the right */
+#fineBox .ends{display:flex; justify-content:space-between; margin-top:2px; font-size:11px; color:var(--text3)}
+[aria-busy="true"] #paceSaves, #paceSaves[aria-busy="true"]{opacity:.55}
+
+/* take out: one switch per kind */
+#takeList{margin-top:var(--s2)}
+#takeList li + li{margin-top:2px}
+#takeList li{position:relative}
+.switch{
+  display:grid; grid-template-columns:30px minmax(0,1fr) auto; align-items:center; gap:var(--s3);
+  width:100%; min-height:34px; padding:4px 6px; margin:0 -6px; width:calc(100% + 12px);
+  border-radius:var(--r); text-align:left; font-size:13px;
+}
+.switch:hover{background:var(--ink3)}
+.switch .track{position:relative; width:30px; height:18px; border-radius:9px; background:var(--ink4); border:1px solid var(--line2); transition:background-color .15s var(--ease)}
+.switch .track::after{
+  content:''; position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%;
+  background:var(--text3); transition:transform .15s var(--ease), background-color .15s var(--ease);
+}
+.switch[aria-checked="true"] .track{background:var(--red-dim); border-color:var(--red)}
+.switch[aria-checked="true"] .track::after{transform:translateX(12px); background:var(--text)}
+.switch .lab{color:var(--text)}
+.switch[aria-checked="false"] .lab{color:var(--text2)}
+.switch .n{font-variant-numeric:tabular-nums; color:var(--text2); font-size:13px}
+.switch[aria-checked="false"]:not([aria-disabled="true"]) .n::after{content:' off'; color:var(--text3)}
+.switch .hint{display:block; font-size:12px; color:var(--text2); text-wrap:pretty}
+.switch .few{display:block; font-size:12px; color:var(--text3); text-wrap:pretty}
+/* a switch that can't be pressed yet: Claude has not picked the likes */
+.switch[aria-disabled="true"]{cursor:default}
+.switch[aria-disabled="true"]:hover{background:none}
+.switch[aria-disabled="true"] .track{opacity:.5}
+/* every word the switch takes out, with its count: shows while the pointer or the keyboard is on the switch */
+.wordtip{
+  display:none; position:absolute; left:36px; right:-6px; top:calc(100% - 2px); z-index:4; pointer-events:none;
+  padding:8px 10px; border:1px solid var(--line2); border-radius:var(--r); background:var(--ink);
+  box-shadow:0 8px 24px rgba(0,0,0,.45); font-size:12px; line-height:1.6; color:var(--text2);
+}
+.wordtip b{display:block; font-weight:400; color:var(--text2); margin-bottom:2px}
+.wordtip p{color:var(--text3); text-wrap:pretty}
+.wordtip span{white-space:nowrap; color:var(--text)}
+.wordtip i{font-style:normal; color:var(--text2); font-variant-numeric:tabular-nums}
+.switch:hover + .wordtip, .switch:focus-visible + .wordtip{display:block}
+
+/* Claude's cuts: groups that open to their cuts */
+#groups{margin-top:var(--s2)}
+.group + .group{margin-top:2px}
+.ghead{
+  display:grid; grid-template-columns:14px 1fr auto auto; align-items:center; gap:var(--s2);
+  width:calc(100% + 12px); margin:0 -6px; min-height:34px; padding:4px 6px; border-radius:var(--r); text-align:left; font-size:13px;
+}
+.ghead:hover{background:var(--ink3)}
+.ghead .chev{width:10px; height:10px; color:var(--text2); transition:transform .15s var(--ease)}
+.ghead[aria-expanded="true"] .chev{transform:rotate(90deg)}
+.ghead .n{font-variant-numeric:tabular-nums; color:var(--text2); font-size:13px; min-width:1.5em; text-align:right}
+.look{
+  display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--flag); white-space:nowrap;
+}
+.look i{
+  font-style:normal; font-weight:700; width:15px; height:15px; line-height:13px; text-align:center; border-radius:50%;
+  border:1px solid var(--flag); font-size:11px;
+}
+#lookAll{margin-top:var(--s1); font-size:13px; min-height:24px; text-decoration:underline; text-decoration-color:rgba(182,146,246,.45); text-underline-offset:3px}
+#lookAll:hover{text-decoration-color:var(--flag)}
+.cuts{margin:var(--s2) 0 var(--s3)}
+.cut{padding:var(--s3) 0 var(--s3); border-top:1px solid var(--line)}
+.cut:first-child{border-top:none; padding-top:var(--s1)}
+.cuthead{display:flex; align-items:baseline; gap:var(--s2); flex-wrap:wrap}
+.timebtn{min-height:24px; color:var(--gold); font-variant-numeric:tabular-nums; font-size:13px; text-decoration:underline; text-decoration-color:rgba(233,180,76,.35); text-underline-offset:3px; padding:2px 0}
+.timebtn:hover{text-decoration-color:var(--gold)}
+.cuthead .len{font-size:12px; color:var(--text2); font-variant-numeric:tabular-nums}
+.cuthead .st{margin-left:auto; font-size:12px; color:var(--text2)}
+.cut[data-state="put_back"] .cuthead .st{color:var(--user)}
+.reason{margin-top:4px; font-size:13px; color:var(--text); text-wrap:pretty}
+/* scoped to the cut rows: a word already heard is also .said, and must keep the words' own size */
+.cut .said{margin-top:6px; font-family:var(--serif); font-size:14px; line-height:1.55; color:var(--text2); text-wrap:pretty; overflow-wrap:anywhere}
+.cut .said del{color:var(--red-soft); text-decoration:line-through; text-decoration-thickness:1px}
+.cut[data-state="put_back"] .said del{color:var(--text); text-decoration:underline dotted var(--user) 1px; text-underline-offset:3px}
+.cut[data-by="you"] .said del{color:var(--user); text-decoration-thickness:2px}
+.flagnote{margin-top:8px; padding:8px 10px; border-radius:var(--r); background:rgba(182,146,246,.08); border:1px solid rgba(182,146,246,.35); font-size:12px; color:var(--text); text-wrap:pretty}
+.flagnote b{color:var(--flag); font-weight:600}
+.cutacts{display:flex; align-items:center; gap:var(--s2); margin-top:var(--s2); flex-wrap:wrap}
+.cuterr{margin-top:6px; font-size:12px; color:var(--red-soft)}
+.cut .btn.hear[aria-pressed="true"]{border-color:var(--gold); color:var(--gold)}
+.cut[aria-busy="true"] .seg{opacity:.6; cursor:progress}
+.cut[aria-busy="true"] .cuthead .st{color:var(--text)}
+
+.usualrow{display:flex; align-items:center; gap:var(--s3); flex-wrap:wrap; margin-top:var(--s3)}
+#usualNote{font-size:12px; color:var(--text2)}
+.empty{font-size:12px; color:var(--text2); margin-top:var(--s2); text-wrap:pretty}
+
+/* ── right: the preview ──────────────────────────────────────────
+   One column as wide as the video: the video, the bar, the transport, then the
+   words to the foot of the window, with one quiet line of how-to above them. */
+#stage{
+  position:relative; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+  padding:var(--stage-pad-t) var(--s6) var(--stage-pad-b);
+  display:grid; grid-template-columns:minmax(0, var(--vid-w)); grid-template-rows:auto auto auto minmax(0,1fr);
+  row-gap:var(--stage-gap); justify-content:center;
+}
+#stage > *{grid-column:1; min-width:0}
+.vidwrap{
+  position:relative; background:#000; border:1px solid var(--line); border-radius:var(--r); overflow:hidden;
+  width:100%; max-width:var(--vid-w); min-width:min(100%, 320px); aspect-ratio:16/9;
+}
+#vid{display:block; width:100%; height:100%; background:#000}
+#vidmsg{
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); max-width:80%;
+  padding:8px 14px; border-radius:var(--r); background:rgba(21,17,13,.88); border:1px solid var(--line);
+  color:var(--text); font-size:13px; text-align:center; pointer-events:none;
+}
+.onvid{
+  position:absolute; max-width:70%; padding:3px 9px; border-radius:4px;
+  background:rgba(21,17,13,.86); border:1px solid var(--line2); color:var(--text); font-size:12px; line-height:1.4;
+  pointer-events:none; overflow:hidden; text-overflow:ellipsis;
+}
+#nameTag{right:10px; bottom:10px; white-space:nowrap}
+#nameTag[data-status="hidden"]{color:var(--text2); border-style:dashed}
+#pbStatus{left:10px; top:10px; text-wrap:pretty}
+#pbStatus.err{color:var(--red-lift); border-color:var(--red-dim)}
+#pbStatus:empty{display:none}
+
+/* one slim row under the bar: the clock, then Previous, Play, Next, then Original | Edited */
+#transport{display:flex; align-items:center; gap:var(--s3); min-height:var(--transport-h); container-type:inline-size}
+.tleft{flex:1 1 0; min-width:max-content; display:flex; align-items:baseline; gap:6px}
+.tmid{display:flex; align-items:center; gap:var(--s1)}
+.tright{flex:1 1 0; min-width:max-content; display:flex; justify-content:flex-end}
+#tnow{font-size:16px; color:var(--gold); font-weight:600; font-variant-numeric:tabular-nums}
+.tlen{font-size:12px; color:var(--text3); font-variant-numeric:tabular-nums}
+#playBtn{min-height:32px; min-width:88px; padding:0 16px 0 13px; border-radius:16px; font-size:13px; gap:6px}
+#playBtn svg{width:13px; height:13px}
+.hop{min-height:32px; padding:4px 10px}
+.hop:first-child{padding-left:6px}
+.hop:last-child{padding-right:6px}
+#transport .seg button{min-height:24px}
+/* A narrower video: the row gives up room in this order, and Previous and Next keep their names longest,
+   since she moves through the edit by them. Whatever leaves the eye is still said to a screen reader. */
+@container (max-width:500px){
+  .tlen{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0)}
+  #transport{gap:var(--s2)}
+}
+@container (max-width:440px){
+  .hop span{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0)}
+  .hop, .hop:first-child, .hop:last-child{padding:4px 8px}
+}
+
+#wordsSec{position:relative; min-width:0; min-height:0; display:flex; flex-direction:column}
+/* the fade on the words box hides a ring drawn on the box, so the section around it shows the ring */
+#wordsSec:has(#words:focus-visible){outline:2px solid var(--gold); outline-offset:4px; border-radius:var(--r)}
+/* every word of the take, free to scroll. It follows the video until she scrolls it herself. */
+#words{
+  position:relative; flex:1 1 auto; min-height:calc(1.75em * 4 + 20px);
+  font-family:var(--serif); font-size:16px; line-height:1.75; color:var(--text2);
+  overflow-y:auto; overscroll-behavior:contain; overflow-anchor:none;
+  padding:10px 14px; border:1px solid var(--line); border-radius:var(--r); background:var(--ink2);
+  user-select:none; -webkit-user-select:none; touch-action:pan-y;
+  -webkit-mask-image:linear-gradient(transparent, #000 10px, #000 calc(100% - 10px), transparent);
+  mask-image:linear-gradient(transparent, #000 10px, #000 calc(100% - 10px), transparent);
+}
+#words .w{border-radius:3px; padding:1px 0; cursor:pointer; transition:background-color .12s linear}
+#words .w.said{color:var(--text)}
+#words .w.x{color:var(--red-soft); text-decoration:line-through; text-decoration-thickness:1px}
+/* a word the pace took out: dim, with a thin line, so Claude's cuts and hers stand out from the many of these */
+#words .w.x.auto{text-decoration-thickness:.5px}
+#words .w.x.auto:not(.now){color:var(--text3)}
+#words .w.x.auto.sel:not(.now), #words .w.x.auto:not(.now):hover{color:var(--text2)}
+/* a word she cut herself: her color, and a heavier line so the color is not the only sign */
+#words .w.x.me{text-decoration-thickness:2px}
+#words .w.x.me:not(.now){color:var(--user)}
+#words .w.kept{text-decoration:underline solid var(--user) 2px; text-underline-offset:5px}
+/* the words she picked, which Cut would take out and Keep would keep */
+#words .w.sel{background:rgba(243,233,216,.13); box-shadow:.26em 0 0 rgba(243,233,216,.13); text-decoration-line:underline; text-decoration-color:var(--text2); text-underline-offset:5px}
+#words .w.x.sel{text-decoration-line:line-through underline}
+#words .w.x.sel:not(.now){color:var(--red-lift)}
+#words .w.x.me.sel:not(.now), #words .w.x.me:not(.now):hover{color:var(--user)}
+#words .w.now{background:var(--gold); color:var(--ink); text-decoration-color:var(--ink)}
+#words .w:hover{background:var(--ink4)}
+#words .w.x:not(.now):hover{color:var(--red-lift)}
+#words .w.now:hover{background:var(--gold-soft)}
+#words .w.snd{font-style:italic}
+/* Cut and Keep, beside the words she picked */
+#pickBar{
+  position:absolute; z-index:3; left:0; top:0; display:flex; gap:var(--s1); padding:3px;
+  border:1px solid var(--line2); border-radius:8px; background:var(--ink2); box-shadow:0 8px 24px rgba(0,0,0,.5);
+}
+#pickBar .btn{min-height:28px; padding:3px 12px}
+#pickBar.tight{padding:1px}
+#pickBar.tight .btn{min-height:24px; padding:1px 12px}
+#keepBtn{border-color:var(--user); color:var(--user); background:none}
+#keepBtn:hover:not(:disabled){background:rgba(55,185,196,.1); border-color:var(--user)}
+/* One quiet line right above the words: how to cut and pick, or the part she picked, and what she kept.
+   It takes the words less than one line of their height. */
+#wordsHead{display:flex; align-items:baseline; gap:2px var(--s4); flex-wrap:wrap; min-height:18px; margin-bottom:var(--s1); font-size:12px; line-height:18px; color:var(--text2)}
+#wordsHead p{flex:1 1 auto; min-width:0}
+#keptBtn{min-height:18px; padding:0; margin-left:auto}
+/* what the marks on the words mean: in the "?" list, beside the bar's own key */
+.wordkey{display:flex; align-items:baseline; gap:var(--s1) var(--s4); flex-wrap:wrap; margin-top:var(--s2); font-size:12px; color:var(--text2)}
+.wordkey li{display:inline-flex; align-items:baseline; gap:6px; white-space:nowrap}
+.wordkey .mark{font-family:var(--serif); font-size:13px; line-height:1.2; color:var(--text)}
+.wordkey .mark.x{color:var(--red-soft); text-decoration:line-through; text-decoration-thickness:1px}
+.wordkey .mark.x.auto{color:var(--text3); text-decoration-thickness:.5px}
+.wordkey .mark.x.me{color:var(--user); text-decoration-thickness:2px}
+.wordkey .mark.kept{text-decoration:underline solid var(--user) 2px; text-underline-offset:4px}
+#selInfo{font-size:12px; color:var(--text); font-variant-numeric:tabular-nums}
+#selInfo:empty{display:none}
+#pickHint{font-size:12px; color:var(--text3); text-wrap:pretty}
+#keptBtn{color:var(--user); text-decoration-color:rgba(55,185,196,.4)}
+#keptBtn:hover{color:var(--user); text-decoration-color:var(--user)}
+
+/* the keep list, opened from "Kept: N" */
+.pop{
+  position:fixed; inset:auto; margin:0; padding:var(--s4); border:1px solid var(--line2); border-radius:8px;
+  background:var(--ink2); color:var(--text); box-shadow:0 12px 32px rgba(0,0,0,.5);
+}
+#keptList{width:min(440px, calc(100vw - 32px)); max-height:min(360px, calc(100vh - 120px)); overflow-y:auto}
+#keptList h2{margin-bottom:var(--s1)}
+.keep{display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:2px var(--s3); align-items:baseline; padding:8px 0; border-top:1px solid var(--line)}
+.keep:first-child{border-top:none}
+.keep q{font-family:var(--serif); font-size:14px; color:var(--text); min-width:0; overflow-wrap:anywhere; text-wrap:pretty}
+.keep .knote{grid-column:2; font-size:12px; color:var(--text2)}
+.keep .timebtn{color:var(--user); text-decoration-color:rgba(55,185,196,.4)}
+
+/* ── under the video: the whole video as one bar, shaded where the most changed ── */
+#whole{position:relative; z-index:2; user-select:none; -webkit-user-select:none}
+#bar{position:relative; height:var(--bar-h); cursor:pointer; touch-action:none}
+#barTrack{position:absolute; inset:0; border-radius:4px; background:var(--ink); border:1px solid var(--line2)}
+.blk{
+  position:absolute; top:0; height:100%; min-width:6px; border-radius:3px;
+  transition:box-shadow .15s var(--ease);
+}
+.blk[data-level="1"]{background:var(--heat1)}
+.blk[data-level="2"]{background:var(--heat2)}
+.blk[data-level="3"]{background:var(--heat3)}
+/* under the pointer: a light ring drawn outside the block, on the dark track, so it reads the same on all three
+   shades (a ring inside the block was a 1.2 to 1 contrast on the strongest one), and the block lightens */
+.blk:hover:not(:focus-visible){outline:2px solid var(--text); outline-offset:1px}
+.blk[aria-current="true"]{box-shadow:inset 0 0 0 2px var(--text)}
+/* a play button over a block while the pointer or the keyboard is on it: pressing the block plays it.
+   While that block is playing the button is a pause. It never grows past the block that holds it, so
+   a block too narrow for the full circle still keeps a body of its own a still press can seek from. */
+.blk .go{
+  position:absolute; left:50%; top:50%; width:clamp(0px, calc(100% - 8px), 26px); aspect-ratio:1; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; pointer-events:none;
+  background:rgba(21,17,13,.86); color:var(--text); box-shadow:0 0 0 1px var(--line2), 0 2px 8px rgba(0,0,0,.4);
+  opacity:0; transform:translate(-50%,-50%) scale(.8); transition:opacity .12s var(--ease), transform .12s var(--ease);
+}
+.blk .go svg{width:min(11px, 60%); height:min(11px, 60%)}
+.blk .go .pause, .blk[data-playing="true"] .go .play{display:none}
+.blk[data-playing="true"] .go .pause{display:block}
+.blk:hover .go, .blk:focus-visible .go{opacity:1; transform:translate(-50%,-50%); pointer-events:auto; cursor:pointer}
+.blk:hover, .blk:focus-visible{z-index:2}      /* over the marker, so its button is never hidden behind it */
+.blk:hover::before{content:''; position:absolute; inset:0; border-radius:inherit; background:rgba(243,233,216,.1)}
+/* where you are: a light line with a dark edge and a cap, so it shows over any shade */
+#playhead{
+  position:absolute; z-index:1; top:-5px; bottom:-5px; left:0; width:3px; margin-left:-1.5px; border-radius:2px;
+  background:var(--text); box-shadow:0 0 0 2px var(--ink); pointer-events:none;
+}
+#playhead::before{
+  content:''; position:absolute; left:50%; top:-3px; width:11px; height:11px; margin-left:-5.5px; border-radius:50%;
+  background:var(--text); box-shadow:0 0 0 2px var(--ink);
+}
+#hovertip{
+  position:absolute; bottom:calc(100% + 8px); transform:translateX(-50%); padding:4px 8px; border-radius:4px; z-index:3;
+  background:var(--ink); border:1px solid var(--line2); font-size:12px; line-height:1.4; color:var(--text); text-align:left;
+  width:max-content; max-width:min(360px, calc(100vw - 24px)); pointer-events:none;
+  font-variant-numeric:tabular-nums;
+}
+/* a block's tip: what it is in bold, then how many edits it holds */
+#hovertip .tip-name{display:block; font-weight:600}
+#hovertip .tip-edits{display:block}
+
+/* the "?" list: what the bar shows, then the keys */
+#shortcuts{top:calc(var(--top-h) + 6px); right:var(--s5); left:auto; width:min(360px, calc(100vw - 32px)); max-height:calc(100vh - var(--top-h) - 16px); overflow-y:auto}
+#shortcuts h2{margin-bottom:var(--s2)}
+#shortcuts h2:not(:first-child){margin:var(--s4) 0 var(--s1); padding-top:var(--s3); border-top:1px solid var(--line)}
+#shortcuts h2 + p{font-size:13px; color:var(--text); text-wrap:pretty}
+.legend{display:flex; align-items:center; gap:var(--s1) var(--s4); flex-wrap:wrap; margin-top:var(--s2); font-size:12px; color:var(--text2)}
+.legend li{display:inline-flex; align-items:center; gap:6px}
+.legend .sw{display:inline-block; width:16px; height:10px; border-radius:2px; box-shadow:inset 0 0 0 1px var(--line2)}
+.sw.l1{background:var(--heat1)}
+.sw.l2{background:var(--heat2)}
+.sw.l3{background:var(--heat3)}
+.legend .sw.here{width:3px; height:12px; margin:0 5px; background:var(--text); box-shadow:0 0 0 2px var(--ink), 0 0 0 3px var(--line2)}
+#shortcuts table{border-collapse:collapse; width:100%}
+#shortcuts td{padding:4px 0; font-size:13px; vertical-align:baseline}
+#shortcuts td:first-child{width:112px; white-space:nowrap; color:var(--text2)}
+
+/* ── narrower screens ────────────────────────────────────────── */
+@media (max-width:1240px){
+  :root{--aside-w:300px}
+}
+@media (max-width:980px){
+  #stage{padding-left:var(--s5); padding-right:var(--s5)}
+}
+/* one column: the video, its bar and the words first, the settings under them */
+@media (max-width:820px){
+  #app{height:auto; min-height:100vh; grid-template-rows:auto auto}
+  #top{padding:8px var(--s4)}
+  #exportText{max-width:none}
+  #exportNote{flex:1 1 100%; order:3}
+  .topright{flex-wrap:wrap}
+  #main{grid-template-columns:minmax(0,1fr)}
+  #stage{order:1; overflow:visible; padding:var(--s4); grid-template-columns:minmax(0,1fr)}
+  #settings{order:2; border-right:none; border-top:1px solid var(--line); overflow:visible}
+  .vidwrap{max-width:none}
+  /* the page scrolls here, so the words get a height of their own */
+  #words{flex:none; height:clamp(calc(1.75em * 6 + 20px), 50vh, calc(1.75em * 14 + 20px))}
+  #transport{flex-wrap:wrap; justify-content:center; row-gap:var(--s1)}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{transition:none!important}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <h1 class="sr-only">Shape the edit</h1>
+    <p id="status" role="status" data-state="idle"><span id="savedText">Loading</span><span id="facts"></span></p>
+    <button id="undoBtn" class="link" type="button" hidden title="Take back your last cut or keep (Z)">Undo</button>
+    <div class="topright">
+      <span id="exportNote" hidden><span id="exportText"></span><button id="copyPath" class="link" type="button" hidden>Copy path</button></span>
+      <button id="shortcutsBtn" class="helpbtn" type="button" popovertarget="shortcuts" aria-controls="shortcuts" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+      <button id="exportBtn" class="btn primary" type="button" title="Make the finished video file">Export video</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <div id="errbar" role="alert" hidden><p id="errText"></p><button id="errRetry" class="btn" type="button">Try again</button><button id="errClose" class="btn quiet" type="button">Dismiss</button></div>
+
+    <aside id="settings" aria-label="How the edit is made">
+      <section aria-labelledby="h-pace">
+        <h2 id="h-pace">Pace</h2>
+        <div id="dial" role="radiogroup" aria-labelledby="h-pace"></div>
+        <p id="paceSaves" aria-live="polite"></p>
+        <p id="paceSummary"></p>
+        <p id="paceNote" hidden></p>
+        <div id="fine" hidden>
+          <button type="button" class="ghead" id="fineBtn" aria-expanded="false" aria-controls="fineBox"><svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5 7 5l-4 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Fine tune</span></button>
+          <div id="fineBox" role="group" aria-label="Fine tune" hidden></div>
+        </div>
+      </section>
+
+      <section aria-labelledby="h-take">
+        <h2 id="h-take">Take out</h2>
+        <ul id="takeList"></ul>
+        <div class="usualrow">
+          <button id="usualBtn" class="btn" type="button" hidden title="New videos start with this pace and these switches">Make this my usual</button>
+          <span id="usualNote" role="status"></span>
+        </div>
+      </section>
+
+      <section aria-labelledby="h-cuts">
+        <h2 id="h-cuts"><span id="cutsTitle">Claude's cuts</span> <span class="count" id="cutsCount"></span></h2>
+        <button type="button" class="look" id="lookAll" hidden title="Open the cuts that need a look (N)"></button>
+        <div id="groups"></div>
+      </section>
+    </aside>
+
+    <section id="stage" aria-label="Your video">
+      <div class="vidwrap">
+        <video id="vid" src="video" muted playsinline preload="auto" aria-label="Your video"></video>
+        <div id="vidmsg" hidden></div>
+        <p id="pbStatus" class="onvid" role="status"></p>
+        <p id="nameTag" class="onvid" hidden></p>
+      </div>
+      <div id="whole" role="group" aria-label="The whole video">
+        <div id="bar">
+          <div id="barTrack" role="slider" tabindex="0" aria-label="Where you are in the whole video" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00"></div>
+          <div id="blocks"></div>
+          <div id="playhead" aria-hidden="true"></div>
+          <div id="hovertip" aria-hidden="true" hidden></div>
+        </div>
+      </div>
+      <div id="transport">
+        <div class="tleft">
+          <span id="tnow" class="tnum" title="Where you are in your recording">0:00</span><span class="tlen"><span class="sr-only"> of </span><span aria-hidden="true">/ </span><span id="tlen">0:00</span><span class="sr-only"> in your recording</span></span>
+        </div>
+        <div class="tmid">
+          <button id="prevBtn" class="btn quiet hop" type="button" title="Go to the cut before this ([)">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Previous</span></button>
+          <button id="playBtn" class="btn primary" type="button" title="Play or pause (Space)">
+            <svg id="playIcon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z" fill="currentColor"/></svg>
+            <svg id="pauseIcon" viewBox="0 0 16 16" aria-hidden="true" hidden><rect x="3.5" y="2.5" width="3" height="11" rx=".6" fill="currentColor"/><rect x="9.5" y="2.5" width="3" height="11" rx=".6" fill="currentColor"/></svg>
+            <span id="playText">Play</span>
+          </button>
+          <button id="nextBtn" class="btn quiet hop" type="button" title="Go to the next cut (])"><span>Next</span>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </div>
+        <div class="tright">
+          <div class="seg" role="group" aria-label="What plays" id="modeSeg">
+            <button type="button" data-mode="original" aria-pressed="false" title="Play everything you recorded (E)">Original</button>
+            <button type="button" data-mode="edited" aria-pressed="true" title="Play it with everything taken out skipped (E)">Edited</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="wordsSec">
+        <div id="wordsHead">
+          <p id="selInfo"></p>
+          <p id="pickHint">Double-click a word to cut it. Drag to cut or keep a part.</p>
+          <button id="keptBtn" class="link" type="button" hidden popovertarget="keptList" aria-controls="keptList" title="The parts you flagged to keep"></button>
+        </div>
+        <div id="words" tabindex="0" role="group" aria-label="Every word of the take" aria-describedby="wordsHint"></div>
+        <div id="pickBar" role="group" aria-label="The words you picked" hidden>
+          <button id="cutBtn" class="btn" type="button" title="Take out these words, and only these (X)">Cut</button>
+          <button id="keepBtn" class="btn" type="button" title="Nothing is taken out of the sentences these words are in (K)">Keep</button>
+        </div>
+        <span id="wordsHint" class="sr-only">Click a word to go there. Double-click a word to cut it, or to bring a struck word back. To pick a part, drag across the words from anywhere in the box, click a word and Shift-click another, or hold Shift and press the arrow keys. Then press X to cut it or K to keep it.</span>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="keptList" class="pop" popover aria-labelledby="h-kept">
+  <h2 id="h-kept">Kept no matter what</h2>
+  <ul id="keeps"></ul>
+</div>
+
+<div id="shortcuts" class="pop" popover aria-labelledby="h-keys">
+  <h2 id="h-keys">Shortcuts</h2>
+  <table>
+    <tr><td><kbd>Space</kbd></td><td>play or pause, wherever you are</td></tr>
+    <tr><td><kbd>Enter</kbd></td><td>press the button you're on</td></tr>
+    <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>previous or next cut</td></tr>
+    <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd></td><td>back or forward 5 seconds</td></tr>
+    <tr><td><kbd>Home</kbd></td><td>play from the start</td></tr>
+    <tr><td><kbd>E</kbd></td><td>switch between original and edited</td></tr>
+    <tr><td><kbd>N</kbd></td><td>next cut that needs a look</td></tr>
+    <tr><td><kbd>X</kbd></td><td>cut the words you picked, or the word being said. On a struck word, bring it back.</td></tr>
+    <tr><td><kbd>K</kbd></td><td>keep the part you picked, or the sentence you're hearing</td></tr>
+    <tr><td><kbd>Z</kbd></td><td>undo. It covers your cuts and keeps, not the pace, the sliders or the switches.</td></tr>
+    <tr><td><kbd>Shift</kbd> + click</td><td>click a word, then Shift-click another: pick every word between</td></tr>
+    <tr><td><kbd>Shift</kbd> <kbd>&larr;</kbd> <kbd>&rarr;</kbd></td><td>with the words selected, pick one more word</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>stop a block or a cut you're hearing, or close a list</td></tr>
+  </table>
+  <h2 id="h-bar">The bar under the video</h2>
+  <p>Each block is a stretch where a lot changed. Press a block to play that stretch; it stops at the block's end. Press or drag anywhere else on the bar to move there.</p>
+  <ul class="legend" aria-labelledby="h-bar">
+    <li><span class="sw l1" aria-hidden="true"></span>a few edits</li>
+    <li><span class="sw l2" aria-hidden="true"></span>many</li>
+    <li><span class="sw l3" aria-hidden="true"></span>the most</li>
+    <li><span class="sw here" aria-hidden="true"></span>where you are</li>
+  </ul>
+  <h2 id="h-marks">The marks on the words</h2>
+  <ul class="wordkey" aria-labelledby="h-marks">
+    <li><span class="mark x auto" aria-hidden="true">word</span>taken out by the pace</li>
+    <li><span class="mark x" aria-hidden="true">word</span>cut by Claude</li>
+    <li><span class="mark x me" aria-hidden="true">word</span>cut by you</li>
+    <li><span class="mark kept" aria-hidden="true">word</span>kept by you</li>
+  </ul>
+</div>
+<div id="announce" class="sr-only" aria-live="polite"></div>
+
+<script id="core">
+/* The page's pure logic: no DOM, no video element, no network.
+   Everything playback decides lives here, and everything the page says about
+   clusters, the export and the last change, so node can test it
+   (tests/test_treatment_page.py).
+   Times are source seconds unless a name says "edited". */
+const Core = (function(){
+  'use strict';
+
+  /* Ranges closer than this play as one skip. One frame at 25 fps is 0.04 s;
+     a sliver that short can't be heard, and seeking into it would stall twice. */
+  const JOIN_GAP = 0.05;
+  /* The skip starts this early: the check runs once a frame, so it would
+     otherwise let up to a frame of removed sound through. */
+  const SKIP_LEAD = 0.02;
+  /* A time this close to an end counts as the end: currentTime after a seek
+     can read a hair short of where it was sent. */
+  const END_SLACK = 0.03;
+
+  /** Sorted, clipped, merged copy of [[start, end], ...]. Drops empty ranges.
+      Ranges that overlap, touch, or sit within `gap` become one: JOIN_GAP for
+      playback, 0 for what the edit really removes. */
+  function normalizeRanges(ranges, duration, gap){
+    const join = gap == null ? JOIN_GAP : gap;
+    const max = duration > 0 ? duration : Infinity;
+    const list = [];
+    for(const r of ranges || []){
+      const s = Math.max(0, +r[0]), e = Math.min(max, +r[1]);
+      if(isFinite(s) && isFinite(e) && e > s) list.push([s, e]);
+    }
+    list.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const out = [];
+    for(const r of list){
+      const last = out[out.length - 1];
+      if(last && r[0] <= last[1] + join) last[1] = Math.max(last[1], r[1]);
+      else out.push([r[0], r[1]]);
+    }
+    return out;
+  }
+
+  /** Index of the last range whose start is at or before t, or -1. Ranges sorted. */
+  function lastStartingBy(ranges, t){
+    let lo = 0, hi = ranges.length - 1, ans = -1;
+    while(lo <= hi){
+      const mid = (lo + hi) >> 1;
+      if(ranges[mid][0] <= t){ ans = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return ans;
+  }
+
+  /** Where playback should jump to when it is at t, or null to carry on.
+      Ranges must be normalized. A time just before a range (within SKIP_LEAD)
+      counts as inside it. */
+  function skipTarget(ranges, t){
+    const i = lastStartingBy(ranges, t + SKIP_LEAD);
+    if(i < 0) return null;
+    const r = ranges[i];
+    /* a range shorter than the slack still gets skipped: judge it by its middle */
+    return t < r[1] - Math.min(END_SLACK, (r[1] - r[0]) / 2) ? r[1] : null;
+  }
+
+  /** Start of the first range that begins after t, or null. */
+  function nextRangeStart(ranges, t){
+    const i = lastStartingBy(ranges, t + SKIP_LEAD);
+    const n = ranges[i + 1];
+    return n ? n[0] : null;
+  }
+
+  /** One playback decision. Given the mode ("edited" plays around the ranges,
+      "original" plays everything), where playback is, an optional stop time
+      (a join's end) and the video's length, returns
+      {action: "none"} | {action: "seek", to} | {action: "stop", at} | {action: "end"}. */
+  function playStep(o){
+    const t = o.t, dur = o.duration, stopAt = o.stopAt == null ? null : o.stopAt;
+    if(stopAt != null && t >= stopAt - END_SLACK) return { action: 'stop', at: stopAt };
+    if(o.mode === 'edited'){
+      const to = skipTarget(o.ranges, t);
+      if(to != null){
+        if(stopAt != null && to >= stopAt - END_SLACK) return { action: 'stop', at: stopAt };
+        if(dur > 0 && to >= dur - END_SLACK) return { action: 'end' };
+        return { action: 'seek', to };
+      }
+    }
+    if(dur > 0 && t >= dur - END_SLACK) return { action: 'end' };
+    return { action: 'none' };
+  }
+
+  /** Where play should begin from t: past a removed range in edited mode,
+      back to 0 when t is at the very end. */
+  function startPoint(o){
+    let t = Math.max(0, o.t);
+    if(o.duration > 0 && t >= o.duration - END_SLACK) t = 0;
+    if(o.mode === 'edited'){
+      const to = skipTarget(o.ranges, t);
+      if(to != null) t = to;
+    }
+    return t;
+  }
+
+  /** Seconds of edited video before source time t. Ranges normalized. */
+  function editedTime(ranges, t){
+    let cut = 0;
+    for(const r of ranges){
+      if(r[0] >= t) break;
+      cut += Math.min(r[1], t) - r[0];
+    }
+    return Math.max(0, t - cut);
+  }
+
+  /** The source time that plays at edited time te. Inverse of editedTime. */
+  function sourceTime(ranges, te){
+    let t = Math.max(0, te);
+    for(const r of ranges){
+      if(r[0] > t) break;
+      t += r[1] - r[0];
+    }
+    return t;
+  }
+
+  /** Length of the edited video. */
+  function editedLength(ranges, duration){
+    return Math.max(0, duration - ranges.reduce((a, r) => a + (Math.min(r[1], duration) - r[0]), 0));
+  }
+
+  /** How to hear one cut's join: from `lead` seconds before it, jump the cut
+      (and anything else removed nearby), stop `tail` seconds after it. */
+  function joinPlan(cut, ranges, duration, lead, tail){
+    return {
+      start: Math.max(0, cut.start - lead),
+      stop: Math.min(duration, cut.end + tail),
+      ranges: normalizeRanges((ranges || []).concat([[cut.start, cut.end]]), duration),
+    };
+  }
+
+  /* ── Previous and Next: from cut to cut ─────────────────────── */
+
+  /* A hop skips a cut whose landing is this close, either way: after a hop the
+     playhead can sit a hair before the place it was sent to, and pressing
+     Previous just after landing should go one back, not land again. */
+  const HOP_SLACK = 0.5;
+
+  /** Index of the cut Previous (dir -1) or Next (dir 1) goes to from t, or -1 when there is none.
+      Each cut is reached `lead` seconds before it starts, so Play hears the join. Cuts sorted. */
+  function cutHop(cuts, t, dir, lead){
+    const land = i => Math.max(0, cuts[i][0] - lead);
+    if(dir > 0){
+      const i = lastStartingBy(cuts, t + HOP_SLACK + lead) + 1;
+      return i < cuts.length && land(i) > t + HOP_SLACK ? i : -1;
+    }
+    let i = lastStartingBy(cuts, t - HOP_SLACK + lead);
+    while(i >= 0 && land(i) >= t - HOP_SLACK) i--;
+    return i;
+  }
+
+  /** Where Previous (dir -1) or Next (dir 1) goes from t: {i, at, of}, the cut's index, the time it lands
+      on and how many cuts there are, or null when there is none that way. */
+  function hopTo(cuts, t, dir, lead){
+    const i = cutHop(cuts, t, dir, lead);
+    return i < 0 ? null : { i, at: Math.max(0, cuts[i][0] - lead), of: cuts.length };
+  }
+
+  /** The cuts Previous and Next go through: the removed ranges that take a spoken word, or that hold a
+      cut of Claude's or hers. A range that takes only a pause, or only part of a laugh, is skipped: at a
+      standard pace most ranges are pauses a few seconds apart, and stopping at each is a nudge, not a
+      skip. With no such range, every range. `ranges` normalized; `words` as the page shows them
+      (struckWords), `rows` as the state sends them. */
+  function hopCuts(ranges, words, rows){
+    const hit = new Set();
+    const mark = (a, b) => { for(let i = lastStartingBy(ranges, b); i >= 0 && ranges[i][1] > a; i--) if(Math.min(b, ranges[i][1]) > Math.max(a, ranges[i][0])) hit.add(i); };
+    (words || []).forEach(w => { if(w[3] && !IS_SOUND.test(w[0])) mark(+w[1], +w[2]); });
+    (rows || []).forEach(r => { if(r.by === 'you' || r.state !== 'put_back') mark(+r.start, +r.end); });
+    return hit.size ? ranges.filter((r, i) => hit.has(i)) : ranges;
+  }
+
+  /** What a press on block i does. While that block's cluster is playing, it pauses. Otherwise it plays
+      the cluster from its start and stops at its end, as a job of its own so the block shows pause for
+      as long as it plays. `now` is the playback: {want, job, key}. Null for no such block. */
+  function blockPress(clusters, i, now){
+    const c = clusters[i];
+    if(!c) return null;
+    if(blockPlaying(i, now)) return { action: 'pause' };
+    return { action: 'play', job: 'cluster', key: i, from: c.start, stopAt: c.end };
+  }
+
+  /** True while block i's cluster is the one playing. */
+  function blockPlaying(i, now){ return !!(now && now.want && now.job === 'cluster' && now.key === i); }
+
+  /* ── the words box: following the video ─────────────────────── */
+
+  /* The words scroll so the one being heard sits this far down the box, */
+  const FOLLOW_AT = 0.3;
+  /* and while playing they scroll on once it gets this far down, so more of what is coming shows. */
+  const FOLLOW_LOW = 0.6;
+
+  /** Where the words box scrolls to, or null to stay. o: {following, jumped, playing, word (the top of the
+      word being heard in the box's content), line (its height), top (the box's scroll), height (the box's)}.
+      Once she has scrolled the words herself they stay put. After a jump the word goes near the top;
+      while playing the box moves on once the word gets low; while paused, only once it is out of sight. */
+  function followTo(o){
+    if(!o.following) return null;
+    const at = o.word - o.top, low = o.playing ? o.height * FOLLOW_LOW : o.height - o.line * 1.5;
+    if(!o.jumped && at >= o.line * 0.5 && at <= low) return null;
+    return o.word - o.height * FOLLOW_AT;
+  }
+
+  /** True when a scroll of the words box came from her, not the page: the box is not where the page put
+      it last (`expected`), and it did not change size, which moves the content by itself. */
+  function herScroll(top, expected, resized){ return !resized && Math.abs(top - expected) > 1; }
+
+  /* ── picking words with the pointer, from anywhere in the box ── */
+
+  /* Two word boxes on one line can sit this far apart in their tops. */
+  const SAME_LINE_PX = 3;
+  /* Near the top or bottom of the words a drag scrolls them: from this far inside the edge, */
+  const EDGE_PX = 32;
+  /* up to this many pixels a frame: slow at the edge, so she can stop where she means to, and faster
+     the farther past it she drags, fastest two edge-widths out. */
+  const EDGE_SPEED = 14;
+
+  /** Index of the word nearest a point, or -1 with no words. `box(i)` gives word i's box
+      ({left, right, top, bottom}, in the point's frame); the words are in reading order. A point on a
+      word is that word. Between two lines, past a line's end, in a margin or under the last line, it is
+      the nearest word on the nearest line. Reads about log2(count) boxes to find the line, then the
+      words on that line. */
+  function nearestWord(count, box, x, y){
+    if(!(count > 0)) return -1;
+    let lo = 0, hi = count - 1, i = count - 1;
+    while(lo <= hi){ const mid = (lo + hi) >> 1; if(box(mid).bottom > y){ i = mid; hi = mid - 1; } else lo = mid + 1; }
+    /* in the gap above word i's line, the line before may be the nearer one */
+    let line = i;
+    const top = box(i).top;
+    if(y < top && i > 0){
+      const before = box(i - 1);
+      if(before.top < top - SAME_LINE_PX && y - before.bottom < top - y) line = i - 1;
+    }
+    const t = box(line).top;
+    let a = line, b = line;
+    while(a > 0 && Math.abs(box(a - 1).top - t) <= SAME_LINE_PX) a--;
+    while(b < count - 1 && Math.abs(box(b + 1).top - t) <= SAME_LINE_PX) b++;
+    let best = a, gap = Infinity;
+    for(let k = a; k <= b; k++){
+      const r = box(k), d = x < r.left ? r.left - x : x > r.right ? x - r.right : 0;
+      if(d < gap){ gap = d; best = k; }
+    }
+    return best;
+  }
+
+  /** How far a drag at height y scrolls the words this frame: up (negative) near the top edge, down near
+      the bottom, 0 in between. `top` and `bottom` are the box's edges. */
+  function edgeScroll(y, top, bottom){
+    const by = y < top + EDGE_PX ? top + EDGE_PX - y : y > bottom - EDGE_PX ? y - bottom + EDGE_PX : 0;
+    if(!(by > 0)) return 0;
+    const step = Math.ceil(EDGE_SPEED * Math.pow(Math.min(1, by / (EDGE_PX * 3)), 2));
+    return y < top + EDGE_PX ? -step : step;
+  }
+
+  /** The word a Shift-click picks from: the end of her part she did not move last, else the word she
+      last clicked, else the word being heard. */
+  function pickAnchor(sel, clicked, cur){
+    if(sel) return sel.at === sel.a ? sel.b : sel.a;
+    return clicked != null && clicked >= 0 ? clicked : Math.max(0, cur);
+  }
+
+  /* ── clusters: the stretches where the most changed ─────────── */
+  /* The shade of a cluster that comes with no level: the middle one. Only a state
+     from before clusters had levels sends none; the rule itself lives on Claude's side. */
+  const LEVEL_NOT_SENT = 2;
+  /* Two blocks closer than this share of the bar are drawn with a gap between them,
+     so each reads as its own block. On a bar 1400 px wide this is about 2 px. */
+  const TOUCH_SHARE = 0.0015;
+
+  /** "1 edit", "11 edits". */
+  function editCount(n){ return n + (n === 1 ? ' edit' : ' edits'); }
+
+  /** Time taken out, in whole seconds: "0:14 out". */
+  function outText(seconds){ return clock(Math.round(Math.max(0, seconds || 0))) + ' out'; }
+
+  /** The state's clusters with every field the page shows filled in. Reads
+      `clusters`; a state from before that name falls back to `busy`, where the
+      count is `cuts` and there is no number, level, range or "out" text. */
+  function clustersOf(state){
+    const list = (state && (Array.isArray(state.clusters) ? state.clusters : state.busy)) || [];
+    const counts = list.map(c => c.edits != null ? c.edits : (c.cuts || 0));
+    return list.map((c, i) => ({
+      number: c.number || i + 1,
+      start: c.start, end: c.end,
+      clock: c.clock || clock(c.start),
+      clock_range: c.clock_range || clock(c.start) + ' to ' + clock(c.end),
+      edits: counts[i],
+      out: c.out || outText(c.seconds_removed),
+      level: c.level >= 1 && c.level <= 3 ? c.level : LEVEL_NOT_SENT,
+    }));
+  }
+
+  /** True when cluster i starts where the one before it ends, or so near that the two blocks would run together. */
+  function touchesBefore(clusters, i, duration){
+    const c = clusters[i], before = clusters[i - 1];
+    return !!(c && before && duration > 0 && (c.start - before.end) / duration < TOUCH_SHARE);
+  }
+
+  /** Index of the cluster holding t, or -1. */
+  function clusterAt(clusters, t){
+    for(let i = 0; i < clusters.length; i++) if(t >= clusters[i].start - END_SLACK && t < clusters[i].end) return i;
+    return -1;
+  }
+
+  /** What a block is called wherever the creator meets it, on the hover tip and to a screen reader. One name,
+      so the two never drift. The code calls these stretches clusters; she never reads that word. */
+  const BLOCK_NAME = 'More cuts here';
+
+  /** What hovering a block shows, in the two lines the page draws: its name, then how many edits it holds.
+      Nothing else: where it sits, how much comes out and what a press does are on the block and its button.
+      { name: 'More cuts here', edits: '11 edits' } */
+  function clusterTip(c){ return { name: BLOCK_NAME, edits: editCount(c.edits) }; }
+
+  /** A block's name for a screen reader, which leads with the same name and then says more than the tip:
+      "More cuts here, 7:30 to 8:15, 11 edits, 0:14 out. Play", or "… Pause" while it plays. */
+  function clusterName(c, playing){
+    return BLOCK_NAME + ', ' + c.clock_range + ', ' + editCount(c.edits) + ', ' + c.out + '. ' + (playing ? 'Pause' : 'Play');
+  }
+
+  /* ── photos and clips ────────────────────────────────────────── */
+
+  /** The photo or clip whose place holds t, or null. */
+  function overlayAt(overlays, t){
+    for(const o of overlays || []) if(t >= o.start && t < o.end) return o;
+    return null;
+  }
+
+  /** The name tag for a photo or clip: "Photo: berlin.jpg". One the edit
+      leaves no room for is not in the finished video, and the tag says so. */
+  function tagText(o){
+    const tag = o.tag || (o.kind === 'clip' ? 'Clip: ' : 'Photo: ') + o.name;
+    return tag + (o.status === 'hidden' ? ' · hidden by a cut' : '');
+  }
+
+  /** A line the server wrote, ready to show. The page never shows the word
+      "trim"; a line that still holds it is left out whole. */
+  function shown(text){
+    const line = text == null ? '' : String(text);
+    return /\btrim(s|med|ming)?\b/i.test(line) ? '' : line;
+  }
+
+  /* ── the top line ────────────────────────────────────────────── */
+
+  /** Cuts that need a look: the state's one count, or the groups summed. */
+  function needALook(state){
+    if(state && typeof state.need_a_look === 'number') return state.need_a_look;
+    return ((state && state.groups) || []).reduce((a, g) => a + (g.need_a_look || 0), 0);
+  }
+
+  /** What the last change did, as short plain parts: ["0:35 shorter", "1 photo now hidden"].
+      ``before`` is the photos and clips as they were before the change. With
+      it the line names the kind this change hid; without it, the kinds hidden now. */
+  function changedParts(changed, overlays, before){
+    if(!changed) return [];
+    const parts = [];
+    const sec = changed.seconds || 0;
+    if(Math.abs(sec) >= 0.5) parts.push(clock(Math.round(Math.abs(sec))) + (sec < 0 ? ' shorter' : ' longer'));
+    const n = changed.overlays_hidden || 0;
+    if(n > 0){
+      const hidden = (overlays || []).filter(o => o.status === 'hidden');
+      const was = (before || []).filter(o => o.status === 'hidden').map(o => o.id);
+      const fresh = before ? hidden.filter(o => was.indexOf(o.id) < 0) : [];
+      const kinds = new Set((fresh.length === n ? fresh : hidden).map(o => o.kind));
+      const noun = kinds.size > 1 ? (n === 1 ? 'photo or clip' : 'photos and clips')
+        : kinds.has('clip') ? (n === 1 ? 'clip' : 'clips') : (n === 1 ? 'photo' : 'photos');
+      parts.push(n + ' ' + noun + ' now hidden');
+    }
+    return parts;
+  }
+
+  /** The Export button and the note beside it, for one export object.
+      Returns {state, label, clickable, note, warn, hover, path, holdsEarlier}.
+      holdsEarlier is true or false when the server says, null when it does not. */
+  function exportView(exp){
+    const e = exp || {};
+    const view = { state: 'idle', label: 'Export video', clickable: true, note: '', warn: false, hover: '', path: '',
+                   holdsEarlier: typeof e.holds_earlier_edit === 'boolean' ? e.holds_earlier_edit : null };
+    if(e.state === 'running'){
+      view.state = 'running'; view.clickable = false;
+      view.label = typeof e.progress === 'number' ? 'Exporting ' + Math.round(Math.max(0, Math.min(1, e.progress)) * 100) + '%' : 'Exporting…';
+    } else if(e.state === 'done'){
+      view.state = 'done';
+      view.note = 'Exported: ' + (e.file || 'your video');
+      view.hover = e.folder || '';
+      if(e.folder && e.file) view.path = e.folder.replace(/[\\/]$/, '') + (e.folder.indexOf('\\') >= 0 && e.folder.indexOf('/') < 0 ? '\\' : '/') + e.file;
+    } else if(e.state === 'failed'){
+      view.state = 'failed'; view.warn = true;
+      view.note = e.message || 'The export did not finish. Press Export video to try again.';
+    }
+    return view;
+  }
+
+  /** Index of the word being spoken at t (or the last one started), -1 before the first.
+      words: [[text, start, end, removed, who took it out], ...] sorted by start. */
+  function wordIndexAt(words, t){
+    let lo = 0, hi = words.length - 1, ans = -1;
+    while(lo <= hi){
+      const mid = (lo + hi) >> 1;
+      if(words[mid][1] <= t){ ans = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return ans;
+  }
+
+  const ENDS_SENTENCE = /[.?!]["')\]]*$/;
+  /** [first, last] word indexes of the sentence holding word i. A sentence
+      ends at . ? or !, or at a gap of MAX_GAP seconds; capped at CAP words
+      each side so a transcript without punctuation still gives a short part. */
+  function sentenceBounds(words, i){
+    const CAP = 40, MAX_GAP = 2.0;
+    if(i < 0 || i >= words.length) return null;
+    let a = i;
+    while(a > 0 && i - a < CAP && !ENDS_SENTENCE.test(words[a - 1][0]) && words[a][1] - words[a - 1][2] < MAX_GAP) a--;
+    let b = i;
+    while(b < words.length - 1 && b - i < CAP && !ENDS_SENTENCE.test(words[b][0]) && words[b + 1][1] - words[b][2] < MAX_GAP) b++;
+    return [a, b];
+  }
+
+  /** m:ss, or h:mm:ss past an hour. Rounds down to the second. */
+  function clock(s){
+    s = Math.max(0, Math.floor(s + 1e-6));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    const ss = String(sec).padStart(2, '0');
+    return h ? h + ':' + String(m).padStart(2, '0') + ':' + ss : m + ':' + ss;
+  }
+
+  /** A length for people, in whole seconds: "1s", "6s", "40s", "1:02". Never less than "1s". */
+  function length(s){
+    const whole = Math.max(1, Math.round(Math.max(0, s)));
+    return whole < 60 ? whole + 's' : clock(whole);
+  }
+
+  /* ── cutting and keeping words by hand ───────────────────────── */
+
+  /* A word's fifth value: who took it out. `pick` is a filler like that Claude picked. */
+  const WHY = { plays: 0, automatic: 1, claude: 2, you: 3, pick: 4 };
+  /* A laugh or a sound, written among the words as "(laugh)". It is not counted as a word. */
+  const IS_SOUND = /^\(.*\)$/;
+  /* The top line leaves a time out when it is under this: "0:00 shorter" says nothing. */
+  const TIME_WORTH_SAYING = 1;
+  /* The note on a part she kept when she gave none, and on a word she brought back. */
+  const NO_NOTE = 'kept by you', BACK_NOTE = 'brought back by you';
+
+  function middle(w){ return (w[1] + w[2]) / 2; }
+
+  /** Who took a word out: 0 it plays, 1 automatic, 2 Claude, 3 you, 4 Claude's pick of a filler like. Words with
+      four values come from before that was sent: a removed one counts as automatic. */
+  function whyOut(w){ return w.length > 4 ? w[4] : (w[3] ? WHY.automatic : WHY.plays); }
+
+  /** True when the words say who took each one out. */
+  function tellsWho(words){ return !!(words && words.length && words[0].length > 4); }
+
+  /* Times come rounded to the millisecond, so an overlap this small is rounding and takes nothing of a word. */
+  const OVERLAP_SLACK = 0.002;
+
+  /** The part of [start, end] that the ranges take, as [from, to], or null when they take none of it
+      (a range that only touches an end takes none). Ranges normalized. */
+  function takenOf(ranges, start, end){
+    for(let i = lastStartingBy(ranges, end); i >= 0 && ranges[i][1] > start; i--){
+      const from = Math.max(start, ranges[i][0]), to = Math.min(end, ranges[i][1]);
+      if(to - from > OVERLAP_SLACK) return [from, to];
+    }
+    return null;
+  }
+
+  /** Whose removal takes the part [from, to] of a word, in the order a struck word shows them:
+      hers, Claude's cut, Claude's pick, the pace. A removal that is no row of the state and no
+      trim of it is one of Claude's picks; a state that lists no trims can't tell, and says the pace. */
+  function takenBy(part, rows, trims){
+    const hits = r => +r.start < part[1] && +r.end > part[0];
+    const list = rows || [];
+    if(list.some(r => r.by === 'you' && hits(r))) return WHY.you;
+    if(list.some(r => r.by !== 'you' && r.state !== 'put_back' && hits(r))) return WHY.claude;
+    if(!Array.isArray(trims) || trims.some(t => hits({ start: t[0], end: t[1] }))) return WHY.automatic;
+    return WHY.pick;
+  }
+
+  /** A state's words as the page shows them (struckWords), struck by what the edit really removes: the
+      ranges as sent, joined only where they overlap or touch. Playback joins ranges a sliver apart
+      (JOIN_GAP), but the export does not, so a short word between two pauses the pace takes stays in,
+      and shows so. */
+  function shownWords(state, duration){
+    return struckWords(state && state.words, normalizeRanges((state && state.removed) || [], duration, 0), state && state.rows, state && state.trims);
+  }
+
+  /** The words as the page shows them. Claude's side strikes a word when its middle is removed; a
+      removal that takes any other part of a word takes some of its sound too, so that word is struck
+      as well, in the style of whoever's removal it is, and a double-click brings it back like any other.
+      The words themselves are not changed; a word that gains a strike is a copy. */
+  function struckWords(words, ranges, rows, trims){
+    return (words || []).map(w => {
+      if(w[3] || !(w[2] > w[1])) return w;
+      const part = takenOf(ranges || [], +w[1], +w[2]);
+      if(!part) return w;
+      const x = w.slice();
+      x[3] = 1;
+      if(x.length > 4) x[4] = takenBy(part, rows, trims);
+      return x;
+    });
+  }
+
+  /** The times of words a to b, as the body of a change. */
+  function span(words, a, b){ return { start: +(+words[a][1]).toFixed(3), end: +(+words[b][2]).toFixed(3) }; }
+
+  /** The creator's own cut that holds this word's middle, or null. */
+  function herCutAt(rows, w){
+    const m = middle(w);
+    return (rows || []).find(r => r.by === 'you' && m >= r.start && m <= r.end) || null;
+  }
+
+  /** The indexes of the words whose middle falls between two times. The ends count. */
+  function wordsBetween(words, start, end){
+    const list = [];
+    for(let i = Math.max(0, wordIndexAt(words, start) - 1); i < words.length && words[i][1] <= end; i++){
+      const m = middle(words[i]);
+      if(m >= start && m <= end) list.push(i);
+    }
+    return list;
+  }
+
+  /** What a double-click on word i asks for: {kind, path, body}, or null with no such word.
+      A word that plays is cut ('cut'). A struck word comes back ('back'): one Claude
+      or the pace took out is kept, exactly that word; one she cut herself comes
+      out of her cut, which is taken back whole when that was its only word. */
+  function wordChange(state, i){
+    const W = (state && state.words) || [], w = W[i];
+    if(!w) return null;
+    const why = whyOut(w);
+    if(why === WHY.plays) return cutChange(state, i, i);
+    const row = why === WHY.you ? herCutAt(state.rows, w) : null;
+    if(row) return { kind: 'back', path: 'api/cut/remove', body: Object.assign({ id: row.id }, span(W, i, i)) };
+    return { kind: 'back', path: 'api/keep', body: Object.assign(span(W, i, i), { exact: true }) };
+  }
+
+  /** Cutting words a to b, and only those. */
+  function cutChange(state, a, b){
+    return { kind: 'cut', path: 'api/cut/add', body: span(state.words, Math.min(a, b), Math.max(a, b)) };
+  }
+
+  /** What one thing she did to the words did, for the top line, as short plain parts:
+      ["You cut 1 word."], ["You cut 12 words", "0:03 shorter"], ["Undone."].
+      kind is 'cut', 'back', 'keep', 'unkeep' or 'undo'. `state` is the answer to it; `was`
+      holds the photos and clips and the kept parts from before it. The time is
+      left out under a second. */
+  function actionParts(kind, state, was){
+    const changed = (state && state.changed) || {};
+    const n = kind === 'cut' ? changed.words_cut || 0 : kind === 'back' ? changed.words_back || 0 : 0;
+    const count = n + (n === 1 ? ' word' : ' words');
+    const parts = [kind === 'undo' ? 'Undone' : kind === 'keep' ? 'You kept a part' : kind === 'unkeep' ? 'You stopped keeping a part'
+      : kind === 'cut' ? (n ? 'You cut ' + count : 'Those words were cut already')
+      : (n ? 'You brought back ' + count : 'You took back a cut')];
+    const sec = changed.seconds || 0;
+    if(Math.abs(sec) >= TIME_WORTH_SAYING) parts.push(clock(Math.round(Math.abs(sec))) + (sec < 0 ? ' shorter' : ' longer'));
+    /* a cut inside a part she kept: the newer one wins, and she is told */
+    if(kind === 'cut' && changed.keeps_changed > 0){
+      const fewer = was && was.keeps && state.keeps && state.keeps.length < was.keeps.length;
+      parts.push(fewer ? 'a part you kept is no longer kept' : 'a part you kept is shorter now');
+    }
+    changedParts({ overlays_hidden: changed.overlays_hidden }, state && state.overlays, was && was.overlays).forEach(p => parts.push(p));
+    if(parts.length === 1) parts[0] += '.';
+    return parts;
+  }
+
+  /** The facts of the top line as one line: " · 18:58 after edits · You cut 1 word."
+      A sentence keeps its full stop only when it comes last. */
+  function factsLine(facts){
+    return (facts || []).map((f, i, all) => ' · ' + (i < all.length - 1 ? String(f).replace(/\.$/, '') : f)).join('');
+  }
+
+  /** A filler as it is written in a sentence: "i mean" reads "I mean". */
+  function written(text){ return String(text).replace(/\bi\b/g, 'I'); }
+
+  /** The words a switch takes out, for the quiet line under it: the first few, then how many more.
+      words: [["you know", 12], ["like", 8], ...], most first. */
+  function fewWords(words, few){
+    const list = (words || []).filter(w => w && w[0]);
+    if(!list.length) return '';
+    const more = list.length - few;
+    return list.slice(0, few).map(w => written(w[0])).join(', ') + (more > 0 ? ', and ' + more + ' more' : '');
+  }
+
+  /* ── fine tune: her own setting, between the stops ───────────── */
+
+  /* The pace's name when the setting is her own and not one of the stops. */
+  const CUSTOM = 'custom';
+  /* The sliders, in the order they are drawn. */
+  const SLIDERS = ['gap_length', 'rhythm'];
+
+  /** The sliders of Fine tune, ready to draw: [{key, label, values, texts, says, at}].
+      Every slider cuts harder to the right, like the stops, so one whose smallest
+      value cuts hardest is turned round. `at` is where her value sits. The text for
+      each place comes from the state; the page holds no rule of its own for it.
+      Empty when the state carries no fine values, as one from before Fine tune does. */
+  function fineSliders(state){
+    const fine = state && state.settings && state.settings.fine, ranges = state && state.fine_ranges;
+    if(!fine || !ranges) return [];
+    return SLIDERS.filter(key => ranges[key] && (ranges[key].positions || []).length > 1 && typeof fine[key] === 'number').map(key => {
+      const r = ranges[key], places = r.positions.slice();
+      if(r.harder === 'min') places.reverse();
+      let at = 0;
+      places.forEach((p, i) => { if(Math.abs(p.value - fine[key]) < Math.abs(places[at].value - fine[key])) at = i; });
+      return { key, label: r.label || key, values: places.map(p => p.value), texts: places.map(p => String(p.shown == null ? p.value : p.shown)),
+               says: places.map(p => String(p.said || p.shown || p.value)), at };
+    });
+  }
+
+  /** The line under the track: what the pace saves, with the name first when the setting is her own.
+      Returns {name, saves, summary}; `saves` is "" until the state knows it. */
+  function paceLine(state, pace){
+    const own = pace === CUSTOM, c = own ? state.custom : (state.paces || []).find(x => x.pace === pace) || (state.paces || [])[0];
+    return { name: own ? (c && c.label) || 'Custom' : '', saves: c && typeof c.seconds_saved === 'number' ? clock(c.seconds_saved) : '',
+             summary: c ? shown(c.summary) : '' };
+  }
+
+  /* ── filler likes: the ones Claude picked by reading ─────────── */
+
+  /** What the Filler likes switch says: {ready, line, more}. `line` sits under its
+      name, `more` is added for the pointer and the keyboard. */
+  function likesView(k){
+    if(k.ready === false) return { ready: false, line: 'Ask Claude to find them.', more: '' };
+    /* every time the word is said and stays in: the ones Claude did not pick, and the picked ones that are not out */
+    const kept = typeof k.said === 'number' ? Math.max(0, k.said - (k.count || 0)) : null;
+    const n = k.left_in || 0;
+    return { ready: true, line: 'picked by Claude' + (kept == null ? '' : ' · ' + kept + ' kept'),
+             /* the word it would clip can be the one before or the one after, so the sentence names neither */
+             more: !n ? '' : n === 1 ? '1 stays in because cutting it would clip the word beside it.'
+               : n + ' stay in because cutting them would clip the word beside them.' };
+  }
+
+  /** The two counts beside the cuts heading once she has cut something: hers, then Claude's.
+      The state's own counts, or the rows counted when it sends none. */
+  function cutCounts(state){
+    const sent = state && state.cut_counts;
+    if(sent && typeof sent.yours === 'number' && typeof sent.claude === 'number') return { mine: sent.yours, claude: sent.claude };
+    const rows = (state && state.rows) || [];
+    const total = ((state && state.groups) || []).reduce((a, g) => a + (g.count || 0), 0);
+    const mine = rows.filter(r => r.by === 'you').length;
+    return { mine, claude: Math.max(0, (total || rows.length) - mine) };
+  }
+
+  /* ── the built-in example (?example=1) ───────────────────────────
+     An invented talk, so the page can run with no server and no footage.
+     Every number on screen is worked out from the made-up words, so the
+     example still adds up after a switch, a pace, a cut or a keep changes. */
+  const EXAMPLE = {
+    length: 1307,   /* 21:47, the length in the approved mockup */
+    sentences: [
+      'So, this is the part nobody tells you about starting out.',
+      'You do not need, like, a better camera to begin.',
+      'Um, you need a window and a quiet room.',
+      'I filmed my first ten videos on a phone propped against a mug.',
+      'You know, most of what I worried about never showed up on screen.',
+      'Light from the side looks like late afternoon, kinder than light from above.',
+      'And and if the room echoes, hang a blanket behind the phone.',
+      'Say the line once, then say it again slower.',
+      'Um, the second take is nearly always the one you keep.',
+      'Well, nobody watching knows what you meant to say.',
+      'They only hear, like, what stayed in.',
+      'Write three points on a card and put the card away.',
+      'I mean, when you lose your place, stop, breathe, and start the sentence again.',
+      'That pause comes out later, so let it be long.',
+      'I I still get nervous before every recording.',
+      'Then the light goes on and I start talking.',
+    ],
+    joke: 'The mug fell over twice, and I kept both takes.',
+    jokeAt: 462,
+    wordGap: 0.07, commaGap: 0.24,   /* the quiet after a word, and after a word with a comma */
+    /* filler words, each with the gentlest pace that takes it out (0 is the first pace) */
+    fillers: [['um', 1], ['you know', 1], ['i mean', 1], ['so', 2], ['well', 3]],
+    /* the word Claude reads for: said with a comma it is filler and Claude picks it; one pick in five would clip the next word, and stays in */
+    pickWord: 'like', pickLeftIn: 5,
+    /* a pause between sentences goes at the gentlest pace whose number it reaches; the last is the pause at a comma */
+    pauseGoesAt: [1.5, 1, 0.7, 0.5, 0.35, 0.2],
+    /* where the talk gets messy: [from, to, how messy from 1 to 3] */
+    messy: [[3, 48, 2], [92, 158, 3], [450, 495, 2], [630, 670, 1], [785, 860, 3], [985, 1015, 1], [1040, 1100, 2], [1215, 1262, 1]],
+    /* Claude's cuts: [about when, kind, which `whys` line the check raised (0 is none), sentences] */
+    cuts: [[8, 'other', 0, 1], [24, 'repeat', 1, 3], [100, 'repeat', 0, 1], [118, 'false_start', 2, 1], [140, 'repeat', 3, 1],
+           [243, 'repeat', 0, 1], [452, 'repeat', 1, 1], [486, 'off_topic', 3, 1], [640, 'repeat', 0, 1], [790, 'off_topic', 1, 2],
+           [812, 'repeat', 2, 1], [840, 'repeat', 0, 1], [1000, 'other', 0, 1], [1048, 'false_start', 0, 1], [1075, 'off_topic', 3, 1],
+           [1160, 'repeat', 1, 1]],
+    /* the creator's own cuts: the first time these words are said at or after this time */
+    yours: [[0, 'So,'], [60, 'like,'], [170, 'stop, breathe,']],
+    photoOverCut: 14,   /* the photo that sits on this one of Claude's cuts is hidden while the cut is left out */
+    whys: ['', 'The sentence before this cut never finishes.', 'This takes out a restart, and a few words before it too.',
+           'The next line points back at words this cut removes.'],
+    flagLabels: ['', 'sentence left unfinished', 'more than the restart goes', 'next line points back'],
+    reasons: { repeat: 'You say this again a moment later.', false_start: 'A restart. The next try lands clean.',
+               off_topic: 'A side note that leaves the point.', other: 'Dead air around a line that adds nothing.' },
+    yourReason: 'Cut by you',
+    groups: [['yours', 'Your cuts'], ['repeat', 'Said twice'], ['false_start', 'False starts'], ['off_topic', 'Off topic'], ['other', 'Other cuts']],
+    /* each stop's own fine values: the shortest pause it cuts, and its rhythm */
+    fine: { natural: [1.0, 2], standard: [0.6, 3], fast: [0.4, 4], tight: [0.3, 4.5], hard: [0.2, 5], max: [0.15, 5] },
+    /* the sliders: [key, label, least, most, step, the end that cuts harder, how the slider is named when a value is refused] */
+    ranges: [['gap_length', 'Cut pauses longer than', 0.15, 1.5, 0.05, 'min', 'That pause length is not on the slider. It goes from 0.15 to 1.5 seconds in steps of 0.05.'],
+             ['rhythm', 'Speech kept between cuts', 1, 5, 0.5, 'max', 'That rhythm is not on the slider. It goes from 1 to 5 in steps of 0.5.']],
+    /* seconds of speech kept between two cuts, by rhythm */
+    speechKept: [[1, 3], [1.5, 2.5], [2, 2], [2.5, 1.6], [3, 1.2], [3.5, 0.85], [4, 0.5], [4.5, 0.25], [5, 0]],
+    custom: 'Custom',
+    paces: [['natural', 'Natural', 'Only long pauses go. Reads as one unbroken take.'],
+            ['standard', 'Standard', 'The usual for talking to camera: tight, with room to breathe between sentences.'],
+            ['fast', 'Fast', 'Quick and punchy. Short breaks between sentences, and more of the small pauses go.'],
+            ['tight', 'Tight', 'Small pauses inside sentences go too. A breath is all that is left between sentences.'],
+            ['hard', 'Hard', 'Almost no pause is left between sentences, and cuts can land a few words apart.'],
+            ['max', 'Max', 'Every pause that can go does, with only a very short one left at each join, so some joins will sound choppy.']],
+    kinds: [['pauses', 'Long pauses'], ['fillers', 'Filler words'], ['repeats', 'Stutters']],
+    likes: ['likes', 'Filler likes'],
+  };
+  const r1 = n => Math.round(n * 10) / 10, r2 = n => Math.round(n * 100) / 100;
+  const range = (a, b) => clock(a) + ' to ' + clock(b);
+
+  /** The filler that starts at word i of a sentence, or null: {text, words, level}. */
+  function exampleFiller(said, i){
+    const one = said[i].toLowerCase(), two = i + 1 < said.length ? one + ' ' + said[i + 1].toLowerCase() : '';
+    for(const f of EXAMPLE.fillers){
+      if(two === f[0] + ',') return { text: f[0], words: 2, level: f[1] };
+      if(one === f[0] + ',') return { text: f[0], words: 1, level: f[1] };
+    }
+    return null;
+  }
+
+  /** The made-up talk: its words, where each sentence sits, every pause, filler and
+      stutter a pace could take out ([start, end, kind, gentlest pace that takes it, the filler]),
+      every place the picked word is said (`likes`) and the ones Claude picked (`picks`). Made once. */
+  function exampleTalk(){
+    if(exampleTalk.made) return exampleTalk.made;
+    const X = EXAMPLE, words = [], sentences = [], trims = [], likes = [], picks = [];
+    const atComma = X.pauseGoesAt.length - 1;
+    let t = 3.84, k = 0, joke = null;
+    while(t < X.length - 8){
+      const messy = X.messy.find(m => t >= m[0] && t < m[1]);
+      const isJoke = !joke && t >= X.jokeAt;
+      const said = (isJoke ? X.joke : X.sentences[k % X.sentences.length]).split(' ');
+      const first = words.length;
+      let inFiller = 0;
+      said.forEach((w, i) => {
+        const len = 0.2 + 0.035 * w.length, comma = /,$/.test(w);
+        const filler = isJoke || inFiller ? null : exampleFiller(said, i);
+        if(filler){
+          inFiller = filler.words;
+          const last = said[i + filler.words - 1];
+          const end = filler.words === 1 ? t + len : t + len + X.wordGap + 0.2 + 0.035 * last.length;
+          trims.push([r2(t), r2(end + 0.05), 'fillers', filler.level, filler.text]);
+        }
+        if(i === 0 && w === said[1]) trims.push([r2(t), r2(t + len + 0.05), 'repeats', 2]);
+        if(w.toLowerCase().replace(/[.,]/g, '') === X.pickWord) said.like = (said.like || []).concat(words.length);
+        words.push([w, r2(t), r2(t + len), 0, 0]);
+        t += len;
+        /* the short pause at a comma goes only at the hardest pace */
+        if(comma && !inFiller && !isJoke) trims.push([r2(t + 0.04), r2(t + X.commaGap - 0.04), 'pauses', atComma]);
+        t += comma ? X.commaGap : X.wordGap;
+        if(inFiller) inFiller--;
+      });
+      sentences.push([first, words.length - 1]);
+      (said.like || []).forEach(i => { likes.push(i); if(/,$/.test(words[i][0])) picks.push({ i, clean: picks.length % X.pickLeftIn !== X.pickLeftIn - 1 }); });
+      if(isJoke){
+        words.push(['(laugh)', r2(t + 0.2), r2(t + 2.6), 0, 0]);
+        joke = { start: words[first][1], end: r2(t + 2.6), text: X.joke };
+        t += 2.8;
+      }
+      /* the pause after the sentence: long more often, the messier the stretch */
+      const long = messy ? k % (4 - messy[2]) === 0 : k % 9 === 4;
+      const gap = long ? (k % 2 ? 1.7 : 1.2) : [0.75, 0.5, 0.36][k % 3];
+      const gentlest = X.pauseGoesAt.findIndex(least => gap >= least);
+      /* a gentle pace leaves more air either side of what it takes out */
+      const air = gentlest < 3 ? [0.15, 0.22] : [0.08, 0.12];
+      if(gentlest >= 0 && !isJoke) trims.push([r2(t + air[0]), r2(t + gap - air[1]), 'pauses', gentlest]);
+      t += gap; k++;
+    }
+    /* a messy stretch runs sentence to sentence */
+    const messy = X.messy.map(m => {
+      const inside = sentences.filter(s => words[s[0]][1] >= m[0] && words[s[1]][2] <= m[1]);
+      return [words[inside[0][0]][1], words[inside[inside.length - 1][1]][2]];
+    });
+    return (exampleTalk.made = { words, sentences, trims, joke, messy, likes, picks });
+  }
+
+  /** About eight words either side of words a to b, and the words themselves, as a row shows them. */
+  function exampleSaid(a, b){
+    const W = exampleTalk().words;
+    const text = (x, y) => W.slice(Math.max(0, x), Math.max(0, y + 1)).map(w => w[0]).join(' ');
+    return { before: text(a - 8, a - 1), removed: text(a, b), after: text(b + 1, b + 8) };
+  }
+
+  /** One cut of the creator's own over words a to b, as a row. It ends a
+      sentence early when it takes the sentence's last word and not its first,
+      and the check says so. */
+  function exampleYours(a, b){
+    const X = EXAMPLE, talk = exampleTalk(), W = talk.words;
+    const start = W[a][1], end = W[b][2];
+    const s = talk.sentences.find(x => b >= x[0] && b <= x[1]);
+    const flagged = !!s && b === s[1] && a > s[0];
+    return Object.assign({ id: 'y' + start.toFixed(2) + '-' + end.toFixed(2), start, end, clock: clock(start) + '-' + clock(end), seconds: r1(end - start),
+                           group: 'yours', by: 'you', reason: X.yourReason, flags: flagged ? ['check'] : [], flag_labels: flagged ? [X.flagLabels[1]] : [],
+                           note: '', why: flagged ? X.whys[1] : '', state: 'kept_out' }, exampleSaid(a, b));
+  }
+
+  /** One kept part over words a to b. `exact` is true for words brought back one by one. */
+  function exampleKeep(a, b, note, exact){
+    const W = exampleTalk().words, start = W[a][1], end = W[b][2];
+    return { id: 'k' + start.toFixed(2) + '-' + end.toFixed(2), start, end, clock: clock(start) + '-' + clock(end),
+             text: W.slice(a, b + 1).map(w => w[0]).join(' ').slice(0, 80), note: note || (exact ? BACK_NOTE : NO_NOTE), exact: !!exact };
+  }
+
+  /** The runs of neighbouring indexes in a sorted list: [[first, last], ...]. */
+  function runs(list){
+    const out = [];
+    list.forEach(i => { const last = out[out.length - 1]; if(last && last[1] === i - 1) last[1] = i; else out.push([i, i]); });
+    return out;
+  }
+
+  /** The cuts in the example as the rows of a state: Claude's, each over whole sentences, and the creator's own. */
+  function exampleRows(){
+    const X = EXAMPLE, talk = exampleTalk(), W = talk.words;
+    const claude = X.cuts.map(c => {
+      const n = talk.sentences.findIndex(s => W[s[0]][1] >= c[0] && W[s[0]][0] !== X.joke.split(' ')[0]);
+      const a = talk.sentences[n][0], b = talk.sentences[n + c[3] - 1][1];
+      const start = W[a][1], end = r2(W[b][2] + 0.05);
+      return Object.assign({ id: 'c' + start.toFixed(2) + '-' + end.toFixed(2), start, end, clock: clock(start) + '-' + clock(end), seconds: r1(end - start),
+                             group: c[1], by: 'claude', reason: X.reasons[c[1]], flags: c[2] ? ['check'] : [], flag_labels: c[2] ? [X.flagLabels[c[2]]] : [],
+                             note: '', why: X.whys[c[2]], state: 'kept_out' }, exampleSaid(a, b));
+    });
+    const clear = (a, b) => !claude.some(r => W[a][1] < r.end && W[b][2] > r.start);
+    const yours = X.yours.map(y => {
+      const said = y[1].split(' ');
+      const a = W.findIndex((w, i) => w[1] >= y[0] && said.every((x, k) => W[i + k] && W[i + k][0] === x) && clear(i, i + said.length - 1));
+      return exampleYours(a, a + said.length - 1);
+    });
+    return claude.concat(yours).sort((a, b) => a.start - b.start);
+  }
+
+  /** Seconds of [a, b] that the ranges cover. */
+  function covered(ranges, a, b){
+    return ranges.reduce((sum, r) => sum + Math.max(0, Math.min(r[1], b) - Math.max(r[0], a)), 0);
+  }
+
+  /** The ranges with every hole taken out of them. */
+  function without(ranges, holes){
+    let out = ranges.map(r => [r[0], r[1]]);
+    holes.forEach(h => {
+      out = out.flatMap(r => h[1] <= r[0] || h[0] >= r[1] ? [r]
+        : [[r[0], Math.min(r[1], h[0])], [Math.max(r[0], h[1]), r[1]]].filter(x => x[1] - x[0] > 0.001));
+    });
+    return out;
+  }
+
+  /** How often each text is in the list, most first: [["like", 8], ["um", 4]]. */
+  function tally(texts){
+    const n = {};
+    texts.forEach(t => { n[t] = (n[t] || 0) + 1; });
+    return Object.keys(n).sort((a, b) => n[b] - n[a] || (a < b ? -1 : 1)).map(t => [t, n[t]]);
+  }
+
+  /** Where a value sits among the stops' own values, in stops: 0 is the first stop, 1 the
+      second, halves and the like between two stops, under 0 for a value gentler than any stop. */
+  function amongStops(values, value){
+    const harder = values[values.length - 1] > values[0] ? 1 : -1;
+    const v = values.map(x => x * harder), at = value * harder;
+    if(at <= v[0]) return (at - v[0]) / Math.abs(v[1] - v[0] || 1);
+    for(let i = 1; i < v.length; i++) if(at <= v[i]) return v[i] === v[i - 1] ? i - 1 : i - 1 + (at - v[i - 1]) / (v[i] - v[i - 1]);
+    return v.length - 1;
+  }
+
+  /** How hard a setting cuts, as the number of the hardest kind of removal it makes
+      (the stops are 0 to 5). Both sliders count the same, so a stop's own values
+      give that stop's number and her own land on the nearest stop's. */
+  function exampleHardness(fine){
+    const X = EXAMPLE, stops = X.paces.map(p => X.fine[p[0]]);
+    const gap = amongStops(stops.map(f => f[0]), fine.gap_length);
+    /* the last two stops share a rhythm, so the rhythm alone can't tell them apart: it counts as half way */
+    const rhythms = stops.map(f => f[1]), last = rhythms.length - 1;
+    const rhythm = fine.rhythm >= rhythms[last] ? last - 0.5 : amongStops(rhythms.slice(0, last), fine.rhythm);
+    return Math.max(-1, Math.floor((gap + rhythm) / 2 + 0.25));
+  }
+
+  /** One place on a slider in the example: its value, the text beside the slider, and the same in words. */
+  function examplePlace(key, value){
+    const seconds = +(key === 'rhythm' ? EXAMPLE.speechKept.find(x => x[0] === value)[1] : value).toFixed(2);
+    return { value, shown: seconds + ' s', said: seconds + (seconds === 1 ? ' second' : ' seconds') };
+  }
+
+  /** A sentence that names the stops a setting of her own sits between. No numbers, so nothing in it can disagree with the sliders. */
+  function exampleBetween(fine){
+    const X = EXAMPLE, labels = X.paces.map(p => p[1]), gaps = X.paces.map(p => X.fine[p[0]][0]);
+    const at = amongStops(gaps, fine.gap_length), i = Math.floor(at);
+    if(at <= 0) return 'Your own setting, gentler than ' + labels[0] + '.';
+    if(at >= gaps.length - 1) return 'Your own setting, as hard as ' + labels[gaps.length - 1] + '.';
+    return at === i ? 'Your own setting, close to ' + labels[i] + '.' : 'Your own setting, between ' + labels[i] + ' and ' + labels[i + 1] + '.';
+  }
+
+  /** Work out everything that follows from the example's settings, cuts and keeps. Changes `s` in place. */
+  function exampleDerive(s){
+    const X = EXAMPLE, talk = exampleTalk(), dur = X.length, W = talk.words;
+    const own = s.settings.pace === CUSTOM;
+    if(!own) s.settings.fine = { gap_length: X.fine[s.settings.pace][0], rhythm: X.fine[s.settings.pace][1] };
+    const pace = own ? exampleHardness(s.settings.fine) : Math.max(0, X.paces.findIndex(p => p[0] === s.settings.pace));
+    const kept = (a, b) => s.keeps.some(k => a < k.end && b > k.start);
+    const found = (level, kind) => talk.trims.filter(t => t[3] <= level && (!kind || t[2] === kind) && !kept(t[0], t[1]));
+    const on = t => !!s.settings.take_out[t[2]];
+    const seconds = list => r1(list.reduce((a, t) => a + t[1] - t[0], 0));
+    s.rows.sort((a, b) => a.start - b.start);
+    s.keeps.sort((a, b) => a.start - b.start);
+    s.trims = found(pace).filter(on).map(t => [t[0], t[1], t[2]]);
+    const yours = s.rows.filter(r => r.by === 'you'), claudes = s.rows.filter(r => r.by !== 'you' && r.state === 'kept_out');
+    const inside = (rows, m) => rows.some(r => m > r.start && m < r.end);
+    /* Claude's picks that are out: the ones that cut clean and that she has not brought back or kept */
+    const out = talk.picks.filter(p => p.clean && !kept(W[p.i][1], W[p.i][2]));
+    const picks = s.settings.take_out.likes ? out.map(p => ({ start: W[p.i][1], end: W[p.i][2] })) : [];
+    const taken = s.trims.map(t => [t[0], t[1]]).concat(claudes.concat(yours, picks).map(r => [r.start, r.end]));
+    s.removed = without(normalizeRanges(taken, dur), s.keeps.map(k => [k.start, k.end]));
+    s.words.forEach(w => {
+      const m = middle(w);
+      w[3] = skipTarget(s.removed, m) != null ? 1 : 0;
+      w[4] = !w[3] ? WHY.plays : inside(yours, m) ? WHY.you : inside(claudes, m) ? WHY.claude : inside(picks, m) ? WHY.pick : WHY.automatic;
+    });
+    const edited = editedLength(s.removed, dur);
+    s.durations = { full: dur, edited: r1(edited), saved: r1(dur - edited) };
+    s.paces = X.paces.map((p, i) => {
+      const list = found(i).filter(on);
+      return { pace: p[0], label: p[1], summary: p[2], trims: list.length, seconds_saved: seconds(list) };
+    });
+    s.take_out = X.kinds.map(k => {
+      const by = {}; X.paces.forEach((p, i) => { by[p[0]] = found(i, k[0]).length; });
+      const list = found(pace, k[0]);
+      const kind = { key: k[0], label: k[1], count: list.length, seconds: seconds(list), by_pace: by };
+      if(k[0] === 'fillers') kind.words = tally(list.map(t => t[4]));
+      return kind;
+    });
+    /* the filler likes: the count is the same at every pace, since Claude picked them and no pace did */
+    const clean = talk.picks.filter(p => p.clean), byPace = {};
+    X.paces.forEach(p => { byPace[p[0]] = out.length; });
+    s.take_out.push({ key: X.likes[0], label: X.likes[1], count: out.length, seconds: r1(out.reduce((a, p) => a + W[p.i][2] - W[p.i][1], 0)),
+                      by_pace: byPace, words: out.length ? [[X.pickWord, out.length]] : [],
+                      picked: talk.picks.length, said: talk.likes.length, left_in: talk.picks.length - clean.length,
+                      kept_by_you: clean.length - out.length, ready: true, word: X.pickWord });
+    s.custom = own ? { label: X.custom, summary: exampleBetween(s.settings.fine), trims: s.trims.length, seconds_saved: seconds(found(pace).filter(on)) } : null;
+    s.fine_ranges = {};
+    X.ranges.forEach(r => {
+      const positions = [];
+      for(let i = 0; i <= Math.round((r[3] - r[2]) / r[4]); i++) positions.push(examplePlace(r[0], +(r[2] + i * r[4]).toFixed(4)));
+      s.fine_ranges[r[0]] = { min: r[2], max: r[3], step: r[4], label: r[1], harder: r[5], positions };
+    });
+    s.groups = X.groups.map(g => {
+      const rows = s.rows.filter(r => r.group === g[0]);
+      return { key: g[0], label: g[1], count: rows.length, seconds: r1(rows.filter(r => r.state === 'kept_out').reduce((a, r) => a + r.seconds, 0)),
+               need_a_look: rows.filter(r => r.flags.length).length, rows: rows.map(r => r.id) };
+    });
+    s.need_a_look = s.groups.reduce((a, g) => a + g.need_a_look, 0);
+    s.cut_counts = { yours: yours.length, claude: s.rows.length - yours.length };
+    s.can_undo = !!s.undo;
+    /* a cluster's shade is how messy the example says that stretch is */
+    const within = talk.messy.map(m => taken.filter(x => x[0] >= m[0] - 0.01 && x[1] <= m[1] + 0.06));
+    s.clusters = talk.messy.map((m, i) => ({
+      number: i + 1, start: m[0], end: m[1], clock: clock(m[0]), clock_range: range(m[0], m[1]), edits: within[i].length,
+      seconds_removed: seconds(within[i]), out: outText(seconds(within[i])), level: X.messy[i][2],
+    }));
+    /* a photo or clip left with under a second is not in the video; with a cut under it, it is shorter */
+    s.overlays.forEach(o => {
+      const gone = covered(s.removed, o.start, o.end);
+      o.status = o.end - o.start - gone < 1 ? 'hidden' : gone > 0 ? 'shortened' : 'shown';
+    });
+    return s;
+  }
+
+  /** The example's first state: standard pace, every switch on, one keep, three cuts of her own, no usual saved. */
+  function exampleState(){
+    const X = EXAMPLE, talk = exampleTalk(), W = talk.words, rows = exampleRows(), over = rows.filter(r => r.by === 'claude')[X.photoOverCut];
+    const overlay = (name, kind, start, end) => ({ id: 'o-' + name, name, kind, start: r2(start), end: r2(end), clock: clock(start),
+                                                   status: 'shown', tag: (kind === 'clip' ? 'Clip: ' : 'Photo: ') + name });
+    const joke = wordsBetween(W, talk.joke.start - 0.01, talk.joke.end + 0.01);
+    return exampleDerive({
+      video: { duration: X.length },
+      word_times: 'measured', word_times_note: '',
+      undo: null,   /* the example's own: what Undo puts back, which Claude's side keeps with the edit */
+      settings: { pace: 'standard', take_out: { pauses: true, fillers: true, repeats: true, likes: true }, gap_length: null },
+      usual: null,
+      rows,
+      keeps: [exampleKeep(joke[0], joke[joke.length - 1], 'the mug joke')],
+      overlays: [overlay('berlin.jpg', 'photo', talk.joke.start + 0.3, talk.joke.start + 4.5), overlay('walk.mp4', 'clip', 905, 913),
+                 overlay('desk.jpg', 'photo', over.start + 0.3, over.end - 0.3)],
+      export: { state: 'idle', progress: null, file: null, folder: null, message: 'Nothing exported yet.', holds_earlier_edit: false },
+      changed: null,
+      words: W.map(w => w.slice()),
+      sounds: [{ start: r2(talk.joke.end - 2.4), end: talk.joke.end, kind: 'laugh', confidence: 'likely' }],
+      updated_at: null,
+    });
+  }
+
+  /** What the example answers to one change: the whole new state, as the server would.
+      Throws an Error with a sentence for the creator when the example can't do it. */
+  function exampleChange(state, path, body){
+    const talk = exampleTalk(), W = talk.words;
+    const s = JSON.parse(JSON.stringify(state));
+    const before = s.durations.edited, hidden = s.overlays.filter(o => o.status === 'hidden').map(o => o.id), had = s.rows.filter(r => r.by === 'you').length;
+    const likesOut = x => (x.settings.take_out.likes ? x.take_out.find(k => k.key === EXAMPLE.likes[0]).count : 0), likesBefore = likesOut(s);
+    const did = { words_cut: 0, words_back: 0, keeps_changed: 0 };
+    const flagsOf = id => exampleRows().find(r => r.id === id);
+    const setRow = (r, st) => { const f = flagsOf(r.id); r.state = st; r.flags = st === 'put_back' ? [] : f.flags; r.flag_labels = st === 'put_back' ? [] : f.flag_labels; r.why = st === 'put_back' ? '' : f.why; };
+    const picked = () => {
+      const list = wordsBetween(W, body.start, body.end);
+      if(!list.length) throw new Error('No word sits between those times. Pick at least one word.');
+      return list;
+    };
+    const hers = () => {
+      const set = new Set();
+      s.rows.filter(r => r.by === 'you').forEach(r => wordsBetween(W, r.start, r.end).forEach(i => set.add(i)));
+      return set;
+    };
+    /* her own cuts with these words added to them or taken out of them; answers how many words that moved */
+    const recut = (list, add) => {
+      const set = hers(), was = set.size;
+      list.forEach(i => { if(add) set.add(i); else set.delete(i); });
+      s.rows = s.rows.filter(r => r.by !== 'you').concat(runs([...set].sort((x, y) => x - y)).map(r => exampleYours(r[0], r[1])));
+      return Math.abs(set.size - was);
+    };
+    /* what Undo puts back: her cuts, her kept parts, and which of Claude's cuts are put back, as they are now */
+    const remember = () => { s.undo = { rows: s.rows.filter(r => r.by === 'you'), keeps: s.keeps.slice(), back: s.rows.filter(r => r.state === 'put_back').map(r => r.id) }; };
+    if(path === 'api/treatment'){
+      /* a stop sets the fine values back to its own; a fine value of her own makes the pace custom */
+      if(body.pace && body.fine) throw new Error('Pick a stop or set your own values, not both at once.');
+      if(body.pace) s.settings.pace = body.pace;
+      if(body.fine){
+        EXAMPLE.ranges.forEach(r => {
+          const v = body.fine[r[0]];
+          if(v == null) return;
+          const steps = (v - r[2]) / r[4];
+          if(typeof v !== 'number' || v < r[2] - 1e-6 || v > r[3] + 1e-6 || Math.abs(steps - Math.round(steps)) > 1e-6) throw new Error(r[6]);
+          s.settings.fine[r[0]] = v;
+        });
+        s.settings.pace = CUSTOM;
+      }
+      Object.assign(s.settings.take_out, body.take_out || {});
+    } else if(path === 'api/cut'){
+      const r = s.rows.find(x => x.id === body.id);
+      if(r && r.by === 'you') throw new Error('That cut is one of yours. Take it back instead.');
+      if(!r) throw new Error('That cut is not in this edit any more. Reload the page.');
+      const keep = body.state === 'kept_out' && s.keeps.find(k => r.start < k.end && r.end > k.start);
+      if(keep) throw new Error('This cut sits inside a part you flagged to keep (' + keep.clock + '). Remove that keep first.');
+      setRow(r, body.state);
+      s.undo = null;
+    } else if(path === 'api/cut/add'){
+      /* exactly the words picked. One that touches a cut of hers joins it. The newer wins over a kept part, which gets shorter or splits. */
+      const list = picked(), a = list[0], b = list[list.length - 1];
+      remember();
+      did.words_cut = recut(list, true);
+      s.keeps = s.keeps.flatMap(k => {
+        if(!(W[a][1] < k.end && W[b][2] > k.start)) return [k];
+        did.keeps_changed++;
+        const left = wordsBetween(W, k.start - 0.01, k.end + 0.01).filter(i => i < a || i > b);
+        return runs(left).map(r => exampleKeep(r[0], r[1], k.note, k.exact));
+      });
+    } else if(path === 'api/cut/remove'){
+      /* one cut of hers, or the words of it between two times */
+      const r = s.rows.find(x => x.id === body.id && x.by === 'you');
+      if(!r) throw new Error('That cut is not in this video any more. Reload the page to see your cuts.');
+      const whole = wordsBetween(W, r.start, r.end), gone = 'start' in body || 'end' in body ? picked().filter(i => whole.indexOf(i) >= 0) : whole;
+      if(!gone.length) throw new Error('Those words are not part of that cut. Reload the page to see your cuts.');
+      remember();
+      did.words_back = recut(gone, false);
+    } else if(path === 'api/keep'){
+      /* with `exact`, the words picked and no more: a cut of Claude's around them stays, split in two.
+         Without it, the whole sentences they are in, and Claude's cuts there are put back. */
+      const list = body.exact ? picked() : null;
+      const a = list ? list[0] : sentenceBounds(W, Math.max(0, wordIndexAt(W, body.start + 0.01)))[0];
+      const b = list ? list[list.length - 1] : sentenceBounds(W, Math.max(0, wordIndexAt(W, body.end - 0.01)))[1];
+      const keep = exampleKeep(a, b, body.note, !!body.exact);
+      remember();
+      if(body.exact) did.words_back = wordsBetween(W, keep.start - 0.01, keep.end + 0.01).filter(i => s.words[i][3]).length;
+      recut(wordsBetween(W, keep.start - 0.01, keep.end + 0.01), false);
+      if(!s.keeps.some(k => k.start <= keep.start && k.end >= keep.end)){
+        s.keeps = s.keeps.filter(k => body.exact ? !(k.start >= keep.start && k.end <= keep.end) : !(keep.start < k.end && keep.end > k.start));
+        s.keeps.push(keep);
+      }
+      if(!body.exact) s.rows.forEach(r => { if(r.by !== 'you' && r.start < keep.end && r.end > keep.start) setRow(r, 'put_back'); });
+    } else if(path === 'api/keep/remove'){
+      if(!s.keeps.some(k => k.id === body.id)) throw new Error('That kept part is not in this video any more. Reload the page to see the current list.');
+      remember();
+      s.keeps = s.keeps.filter(k => k.id !== body.id);
+    } else if(path === 'api/undo'){
+      /* one step: her cuts and her kept parts go back to how they were before the last thing she did to the words */
+      const saved = s.undo;
+      if(!saved) throw new Error('There is nothing to undo.');
+      s.rows = s.rows.filter(r => r.by !== 'you').concat(saved.rows);
+      s.rows.forEach(r => { if(r.by !== 'you') setRow(r, saved.back.indexOf(r.id) >= 0 ? 'put_back' : 'kept_out'); });
+      s.keeps = saved.keeps;
+      s.undo = null;
+    } else if(path === 'api/usual'){
+      s.usual = { pace: s.settings.pace, take_out: Object.assign({}, s.settings.take_out), fine: Object.assign({}, s.settings.fine) };
+    }
+    exampleDerive(s);
+    s.changed = Object.assign({ seconds: r1(s.durations.edited - before), need_a_look: s.need_a_look,
+                                overlays_hidden: s.overlays.filter(o => o.status === 'hidden' && hidden.indexOf(o.id) < 0).length,
+                                your_cuts: s.rows.filter(r => r.by === 'you').length - had, likes: likesOut(s) - likesBefore }, did);
+    return s;
+  }
+
+  return {
+    JOIN_GAP, SKIP_LEAD, END_SLACK,
+    normalizeRanges, skipTarget, nextRangeStart, playStep, startPoint,
+    editedTime, sourceTime, editedLength, joinPlan,
+    cutHop, hopTo, hopCuts, blockPress, blockPlaying, followTo, herScroll, nearestWord, edgeScroll, pickAnchor,
+    clustersOf, touchesBefore, clusterAt, clusterTip, clusterName, BLOCK_NAME,
+    overlayAt, tagText, shown, needALook, changedParts, exportView,
+    wordIndexAt, sentenceBounds, clock, length, outText,
+    WHY, whyOut, tellsWho, struckWords, shownWords, herCutAt, wordsBetween, wordChange, cutChange, actionParts, factsLine,
+    written, fewWords, cutCounts, CUSTOM, fineSliders, paceLine, likesView,
+    exampleState, exampleChange,
+  };
+})();
+if(typeof module !== 'undefined' && module.exports) module.exports = Core;
+</script>
+<script>
+(function(){
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const C = Core;
+
+/* ══ address options ═══════════════════════════════════════════
+   ?muted=1   every media element is muted at volume 0, always (agents and tests use this)
+   ?example=1 run from the example built into the page, with no server; changes stay on the page */
+const QS = new URLSearchParams(location.search);
+const FORCE_MUTED = QS.get('muted') === '1';
+const EXAMPLE = QS.get('example') === '1';
+
+const JOIN_LEAD = 2, JOIN_TAIL = 2;    /* hear a join: 2 s before, skip the cut, 2 s after */
+const HOP = 5;                         /* the arrow keys move this many seconds */
+const STALL_NOTICE_MS = 1500;          /* say "loading" once playback has not moved for this long */
+const STALL_KICK_MS = 8000;            /* then ask the video for its data again */
+const SEEK_RETRY_MS = 5000;            /* a seek with no "seeked" after this long is sent again */
+const PAUSE_SETTLE_MS = 400;           /* a pause from outside waits this long to see whether the page is being hidden */
+const BRIEF_NOTE_MS = 6000;            /* "That's the end of the video." leaves the video after this long */
+const EXPORT_ASK_MS = 1000;            /* while an export runs, ask how far it is about once a second */
+const EXPORT_MISSES = 5;               /* this many unanswered asks in a row and the page stops asking */
+const BLOCK_GAP_PX = 2;                /* the bar shows this much between two blocks that touch */
+const DRAG_START_PX = 4;               /* on a block's play button, a press that moves this far is a drag; less is a click */
+const PICK_START_PX = 8;               /* between the words, a press that moves this far is a pick: a trackpad tap drifts a few px */
+const COPIED_MS = 2000;                /* "Copied" shows this long */
+const CLICK_HOLD_MS = 250;             /* a click on a word waits this long before it moves the video: it may be the first half of a double-click */
+const DOUBLE_CLICK_MS = 500;           /* two clicks on one word this close together are a double-click */
+const UNDO_SHOWS_MS = 10000;           /* Undo stays in the top line this long after she cuts, keeps or brings back words */
+const FILLERS_SHOWN = 4;               /* words named under the filler switch; the rest show on hover or focus */
+const WORDS_UNDER = 'fillers';         /* the one switch that names the words it takes out */
+const LIKES = 'likes';                 /* the switch for the filler likes Claude picked */
+const FINE_ASK_MS = 200;               /* while she drags a slider the page asks for a new state this often at most: five times a second */
+const FINE_OPEN_KEY = 'lumr-studio.fine-tune-open';   /* where the browser keeps whether Fine tune was left open */
+const LABEL_GAP_PX = 6;                /* the names under the pace stops need this much room between them to all show */
+const PICK_BAR_GAP_PX = 6;             /* Cut and Keep sit this far from the words she picked */
+/* the changes that alter the edit, so an export already running holds the edit from before them */
+const EDIT_ROUTES = ['api/treatment', 'api/cut', 'api/cut/add', 'api/cut/remove', 'api/keep', 'api/keep/remove', 'api/undo'];
+const WORD_TIMES_ESTIMATED = 'The word times are estimates, so the harder paces find less to cut. Ask Claude to measure them.';
+const CANT_CUT = 'This page can’t cut words yet.';
+const CANT_BRING_BACK = 'This page can’t bring words back yet.';
+
+/* ══ state ═════════════════════════════════════════════════════ */
+let S = null;          /* the server's state */
+let R = [];            /* removed ranges, normalized: what edited playback skips */
+let W = [];            /* words: [text, start, end, removed, who], struck wherever the edit takes any of them (C.shownWords) */
+let CUTS = [];         /* the ranges Previous and Next go through: the ones that take words (C.hopCuts) */
+let CL = [];           /* clusters, every field filled in */
+let DUR = 0;
+let rowsById = {};
+const openGroups = new Set();
+
+/* ══ small helpers ═════════════════════════════════════════════ */
+function announce(msg){ const a = $('announce'); a.textContent = ''; setTimeout(() => { a.textContent = msg; }, 30); }
+function nowClock(){ const d = new Date(); return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'); }
+function plural(n, one, many){ return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+/** Write text only when it differs, so a line that is read aloud is not read again for nothing. */
+function setText(id, text){ const el = $(id); if(el.textContent !== text) el.textContent = text; }
+const LOST_TOUCH = 'Could not reach Claude’s side. It stops when Claude’s session ends; ask Claude to open this page again.';
+
+/* ══ talking to Claude's side ══════════════════════════════════
+   Every change is one POST that answers the whole new state. Changes go one
+   at a time, in order; the newest answer is what shows. */
+const net = { busy: false, queue: [], lastFailed: null };
+
+async function getState(){
+  if(EXAMPLE) return C.exampleState();
+  const r = await fetch('api/treatment', { cache: 'no-store' });
+  const j = await r.json().catch(() => ({}));
+  if(!r.ok) throw new Error(j.error || 'The page could not load the edit. Ask Claude to open this page again.');
+  return j;
+}
+/** Send one change and return the state it answers. A refusal throws an Error with a
+    sentence for the creator, and the answer's status as `status`. */
+async function postJSON(path, body){
+  if(EXAMPLE) return C.exampleChange(S, path, body);
+  let r;
+  try{
+    r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  }catch(err){
+    throw new Error(LOST_TOUCH);
+  }
+  const j = await r.json().catch(() => ({}));
+  if(!r.ok){
+    const err = new Error(j.error || 'That change was not saved. Try again. If it fails again, ask Claude to open this page again.');
+    err.status = r.status;
+    throw err;
+  }
+  return j;
+}
+/** Send one change. onError(msg, err) lets the caller show the error where it happened;
+    without it the error shows in the bar under the top. opts.action ('cut', 'back',
+    'keep', 'unkeep', 'undo') makes the top line say what she did to the words. */
+function send(path, body, opts){
+  return new Promise(resolve => {
+    net.queue.push({ path, body, opts: opts || {}, resolve });
+    pump();
+  });
+}
+async function pump(){
+  if(net.busy || !net.queue.length) return;
+  net.busy = true;
+  const job = net.queue.shift();
+  setSaved('saving');
+  try{
+    const state = await postJSON(job.path, job.body);
+    applyState(state, { changedBy: job.path, action: job.opts.action });
+    net.lastFailed = null;
+    hideError();
+    setSaved('saved');
+    job.resolve(true);
+  }catch(err){
+    net.lastFailed = job;
+    if(job.opts.onError){ setSaved('saved'); job.opts.onError(err.message, err); }
+    else { setSaved('error'); showError(err.message); }
+    if(job.opts.revert) job.opts.revert();
+    job.resolve(false);
+  }
+  net.busy = false;
+  pump();
+}
+
+/* ── the top line: saved, the finished length, what the last change did ── */
+const topline = { saved: 'loading', changed: [], holdsEarlier: false };
+function setSaved(st){ topline.saved = st; renderStatus(); }
+/** Say one sentence in the top line, in place of what the last change did. */
+function say(text){ topline.changed = [text]; renderStatus(); }
+function renderStatus(){
+  const el = $('status'), st = topline.saved;
+  el.dataset.state = st;
+  setText('savedText', st === 'loading' ? 'Loading' : st === 'saving' ? 'Saving…' : st === 'error' ? 'Not saved' : EXAMPLE ? 'Example' : 'Saved');
+  const facts = [];
+  if(S){
+    facts.push(C.clock(Math.round(S.durations ? S.durations.edited : C.editedLength(R, DUR))) + ' after edits');
+    topline.changed.forEach(part => facts.push(part));
+    if(topline.holdsEarlier) facts.push('the export holds the earlier edit');
+  }
+  setText('facts', C.factsLine(facts));
+  const when = S && S.updated_at ? new Date(S.updated_at) : new Date();
+  el.title = EXAMPLE ? 'Changes stay on this page' : st === 'saved' ? 'Saved at ' + (isNaN(when) ? nowClock() : when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })) : '';
+}
+function showError(msg){ $('errText').innerHTML = '<b>Not saved.</b> ' + esc(msg); $('errbar').hidden = false; $('errRetry').hidden = !net.lastFailed; }
+function hideError(){ $('errbar').hidden = true; }
+$('errClose').addEventListener('click', () => { hideError(); if(topline.saved === 'error') setSaved('saved'); });
+$('errRetry').addEventListener('click', () => {
+  const job = net.lastFailed; if(!job) return;
+  net.lastFailed = null; hideError();
+  send(job.path, job.body, job.opts);
+});
+
+/* ══ applying a state ══════════════════════════════════════════ */
+function applyState(state, how){
+  const t0 = performance.now();
+  const focusId = document.activeElement && document.activeElement.id;
+  const overlaysBefore = S ? S.overlays || [] : null, was = S;
+  S = state;
+  DUR = (S.video && S.video.duration) || (S.durations && S.durations.full) || 0;
+  R = C.normalizeRanges(S.removed || [], DUR);
+  W = C.shownWords(S, DUR);
+  CUTS = C.hopCuts(R, W, S.rows);
+  CL = C.clustersOf(S);
+  rowsById = {};
+  (S.rows || []).forEach(r => { rowsById[r.id] = r; });
+  if(!net.queue.length){
+    pending.pace = null; pending.take = {};
+    /* her slider values are confirmed once the answer carries them; one she moved on from stays hers */
+    const got = (S.settings && S.settings.fine) || {};
+    Object.keys(fine.want).forEach(k => { if(fine.held !== k && Math.abs(fine.want[k] - got[k]) < 1e-6) delete fine.want[k]; });
+    if(!fine.held && !fine.timer) fine.want = {};
+    fine.sent = Object.assign({}, got);
+  }
+  const did = how && how.action;
+  topline.changed = did ? C.actionParts(did, S, was) : C.changedParts(S.changed, S.overlays, overlaysBefore);
+  /* Undo shows for a while after she cuts, keeps or brings back words, when Claude's side can take it back */
+  if(did && did !== 'undo' && S.can_undo) showUndo(); else hideUndo();
+  /* the server says whether an export holds an earlier edit; one that does not say leaves the page to work it out */
+  if(how && EDIT_ROUTES.indexOf(how.changedBy) >= 0 && exporter.now.state === 'running' && C.exportView(exporter.now).holdsEarlier == null) topline.holdsEarlier = true;
+  if(S.export && JSON.stringify(S.export) !== JSON.stringify(exporter.now)) showExport(S.export);
+  renderPace();
+  renderFine();
+  renderTakeOut();
+  renderUsual();
+  renderGroups();
+  renderKeeps();
+  renderBar();
+  renderStatus();
+  words.dirty = true;
+  paint(true);
+  if(PB.want) check();       /* the ranges moved under a playing video: act on them now */
+  if(focusId && document.activeElement !== $(focusId) && $(focusId) && !$(focusId).hidden) $(focusId).focus({ preventScroll: true });
+  perf.lastApply = performance.now() - t0;
+}
+const perf = { fetch: 0, firstRender: 0, lastApply: 0 };
+
+/* ── pace ───────────────────────────────────────────────────── */
+const pending = { pace: null, take: {} };
+function currentPace(){ return pending.pace || (Object.keys(fine.want).length ? C.CUSTOM : S.settings.pace); }
+function renderPace(){
+  const dial = $('dial'), cur = currentPace(), n = S.paces.length;
+  const names = S.paces.map(p => p.pace).join(' ');
+  if(dial.dataset.paces !== names){
+    /* the stops sit evenly on the line: half a step of room for the first and the last, a whole step for each between */
+    const step = 'calc((100% - 18px) / ' + Math.max(1, n - 1) + ')', end = 'calc(9px + ' + step + ' / 2)';
+    dial.style.gridTemplateColumns = n <= 3 ? 'repeat(' + Math.max(1, n) + ', 1fr)' : end + ' repeat(' + (n - 2) + ', ' + step + ') ' + end;
+    dial.classList.toggle('many', n > 3);
+    dial.dataset.paces = names;
+    dial.innerHTML = S.paces.map(p =>
+      '<button type="button" role="radio" id="pace-' + esc(p.pace) + '" data-pace="' + esc(p.pace) + '"><span class="stop" aria-hidden="true"></span><span class="lab">' + esc(p.label) + '</span></button>').join('');
+  }
+  /* with a setting of her own no stop is filled; the keyboard then comes in at the first stop */
+  const own = cur === C.CUSTOM;
+  dial.querySelectorAll('button').forEach((b, i) => {
+    const on = b.dataset.pace === cur;
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+    b.tabIndex = on || (own && !i) ? 0 : -1;
+    const p = S.paces.find(x => x.pace === b.dataset.pace);
+    b.title = p ? p.label + ': saves ' + C.clock(p.seconds_saved) : '';
+  });
+  fitDial();
+  /* the numbers under the track wait for the answer while a slider move is on its way */
+  const line = C.paceLine(S, cur), waits = !!pending.pace || (own && S.settings.pace !== C.CUSTOM);
+  $('paceSaves').setAttribute('aria-busy', waits ? 'true' : 'false');
+  $('paceSaves').innerHTML = !own ? 'Saves <b>' + line.saves + '</b>'
+    : '<span class="own">' + esc(line.name) + '</span>' + (line.saves ? ' · saves <b>' + line.saves + '</b>' : '');
+  setText('paceSummary', line.summary);
+  /* with word times that were not measured, a pause can't be told from a slow word, so the harder paces find less */
+  const loose = S.word_times === 'estimated';
+  $('paceNote').hidden = !loose;
+  setText('paceNote', loose ? C.shown(S.word_times_note) || WORD_TIMES_ESTIMATED : '');
+}
+/** Show every stop's name when they all fit under the line with room between them.
+    When they don't, show the first, the last and the chosen one, which moves
+    aside as far as it must to clear the other two. */
+function fitDial(){
+  const dial = $('dial'), labs = Array.from(dial.querySelectorAll('.lab'));
+  labs.forEach(l => { l.style.transform = ''; });
+  if(labs.length <= 3){ dial.dataset.labels = 'all'; return; }
+  dial.dataset.labels = 'measure';          /* every name at its widest: shown, and in the weight of the chosen one */
+  const at = labs.map(l => l.getBoundingClientRect());
+  const fits = at.every((r, i) => !i || r.left - at[i - 1].right >= LABEL_GAP_PX);
+  dial.dataset.labels = fits ? 'all' : 'few';
+  const on = labs.findIndex(l => l.parentElement.getAttribute('aria-checked') === 'true');
+  if(fits || on <= 0 || on >= labs.length - 1) return;
+  const first = labs[0].getBoundingClientRect(), last = labs[labs.length - 1].getBoundingClientRect(), mine = labs[on].getBoundingClientRect();
+  const left = Math.max(first.right + LABEL_GAP_PX, Math.min(last.left - LABEL_GAP_PX - mine.width, mine.left));
+  if(Math.abs(left - mine.left) > 0.5) labs[on].style.transform = 'translateX(' + (left - mine.left).toFixed(1) + 'px)';
+}
+$('dial').addEventListener('click', e => { const b = e.target.closest('[data-pace]'); if(b) choosePace(b.dataset.pace); });
+$('dial').addEventListener('keydown', e => {
+  if(!S) return;
+  const order = S.paces.map(p => p.pace), on = e.target.closest('[data-pace]');
+  /* with a setting of her own no stop is chosen, so the arrows move from the stop the keyboard is on */
+  let i = order.indexOf(currentPace());
+  if(i < 0) i = on ? order.indexOf(on.dataset.pace) : 0;
+  if(e.key === 'ArrowRight' || e.key === 'ArrowDown') i = Math.min(order.length - 1, i + 1);
+  else if(e.key === 'ArrowLeft' || e.key === 'ArrowUp') i = Math.max(0, i - 1);
+  else if(e.key === 'Home') i = 0;
+  else if(e.key === 'End') i = order.length - 1;
+  else return;
+  e.preventDefault(); e.stopPropagation();
+  choosePace(order[i]);
+  $('dial').querySelector('[data-pace="' + order[i] + '"]').focus();
+});
+if(typeof ResizeObserver === 'function') new ResizeObserver(() => { if(S) fitDial(); }).observe($('dial'));
+function choosePace(pace){
+  if(!S || pace === currentPace()) return;
+  pending.pace = pace;
+  fine.want = {};
+  renderPace();
+  send('api/treatment', { pace }, { revert: () => { pending.pace = null; renderPace(); } });
+}
+
+/* ── fine tune ──────────────────────────────────────────────── */
+const fine = {
+  open: false,
+  drawn: '',          /* the sliders now in the page, by name and number of places */
+  held: null,         /* the slider under her pointer, which an answer must not move */
+  want: {},           /* values she set that no answer has confirmed yet */
+  sent: {},           /* the values Claude's side has, or has been asked for */
+  askedAt: 0,         /* when the last ask went out */
+  timer: 0,
+};
+function fineOpenBefore(){ try{ return window.localStorage.getItem(FINE_OPEN_KEY) === '1'; }catch(err){ return false; } }
+function fineOpenKeep(open){ try{ window.localStorage.setItem(FINE_OPEN_KEY, open ? '1' : '0'); }catch(err){ /* storage refused: it opens closed next time */ } }
+function showFine(open){
+  fine.open = open;
+  $('fineBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+  $('fineBox').hidden = !open;
+}
+fine.open = fineOpenBefore();
+$('fineBtn').addEventListener('click', () => { showFine(!fine.open); fineOpenKeep(fine.open); });
+
+function renderFine(){
+  const sliders = C.fineSliders(S), wrap = $('fine'), box = $('fineBox');
+  wrap.hidden = !sliders.length;
+  if(!sliders.length) return;
+  wrap.dataset.own = currentPace() === C.CUSTOM ? 'true' : 'false';
+  showFine(fine.open);
+  const drawn = sliders.map(s => s.key + ':' + s.values.length + ':' + s.label).join(' ');
+  if(fine.drawn !== drawn){
+    fine.drawn = drawn;
+    box.innerHTML = sliders.map(s => {
+      const id = 'fine-' + esc(s.key);
+      return '<div class="fine" data-key="' + esc(s.key) + '"><div class="top"><label for="' + id + '">' + esc(s.label) + '</label>' +
+        '<output id="' + id + '-now" for="' + id + '"></output></div>' +
+        '<input type="range" id="' + id + '" data-key="' + esc(s.key) + '" min="0" max="' + (s.values.length - 1) + '" step="1"></div>';
+    }).join('') + '<div class="ends" aria-hidden="true"><span>cuts less</span><span>cuts more</span></div>';
+  }
+  sliders.forEach(s => {
+    const input = $('fine-' + s.key);
+    /* a slider she is holding, or one whose move is still on its way, stays where she put it */
+    const busy = fine.held === s.key || s.key in fine.want;
+    const at = busy ? +input.value : s.at;
+    if(!busy && +input.value !== at) input.value = at;
+    input.setAttribute('aria-valuetext', s.says[at]);
+    setText('fine-' + s.key + '-now', s.texts[at]);
+  });
+}
+/** A slider moved. The value beside it changes at once; the ask goes out now, or
+    when the last one is FINE_ASK_MS old. `last` is her letting go, or a key press. */
+function fineMoved(input, last){
+  const s = C.fineSliders(S).find(x => x.key === input.dataset.key); if(!s) return;
+  const at = Math.max(0, Math.min(s.values.length - 1, +input.value));
+  input.setAttribute('aria-valuetext', s.says[at]);
+  setText('fine-' + s.key + '-now', s.texts[at]);
+  fine.want[s.key] = s.values[at];
+  $('fine').dataset.own = 'true';
+  renderPace();
+  if(last){ clearTimeout(fine.timer); fine.timer = 0; askFine(); return; }
+  if(fine.timer) return;
+  const wait = fine.askedAt + FINE_ASK_MS - performance.now();
+  if(wait <= 0) askFine();
+  else fine.timer = setTimeout(() => { fine.timer = 0; askFine(); }, wait);
+}
+/** Ask for the state with her values, unless the last ask already carried them.
+    An ask still waiting its turn takes the newer values, so they never queue up. */
+function askFine(){
+  const keys = Object.keys(fine.want).filter(k => fine.want[k] !== fine.sent[k]);
+  if(!keys.length) return;
+  const values = {};
+  keys.forEach(k => { values[k] = fine.sent[k] = fine.want[k]; });
+  fine.askedAt = performance.now();
+  const waiting = net.queue.find(job => job.path === 'api/treatment' && job.body.fine);
+  if(waiting){ Object.assign(waiting.body.fine, values); return; }
+  send('api/treatment', { fine: values }, { revert: () => { fine.want = {}; fine.sent = {}; renderPace(); renderFine(); } });
+}
+$('fineBox').addEventListener('pointerdown', e => {
+  const input = e.target.closest('input'); if(!input) return;
+  fine.held = input.dataset.key;
+  const up = () => { fine.held = null; window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); };
+  window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+});
+$('fineBox').addEventListener('input', e => { if(e.target.closest('input')) fineMoved(e.target, false); });
+$('fineBox').addEventListener('change', e => { if(e.target.closest('input')) fineMoved(e.target, true); });
+
+/* ── take out ───────────────────────────────────────────────── */
+function takeOn(key){ return key in pending.take ? pending.take[key] : !!S.settings.take_out[key]; }
+/** For a switch with nothing to take out at this pace: which pace would find some, in plain words. */
+function noneHint(k){
+  if(k.count) return '';
+  const other = S.paces.find(p => p.pace !== currentPace() && k.by_pace && k.by_pace[p.pace] > 0);
+  return other ? other.label + ' pace would take out ' + k.by_pace[other.pace] + '.' : 'None in this video.';
+}
+function renderTakeOut(){
+  $('takeList').innerHTML = S.take_out.map(k => {
+    /* the filler likes are Claude's picks: until Claude has picked, the switch is off and can't be pressed */
+    const likes = k.key === LIKES ? C.likesView(k) : null, ready = !likes || likes.ready;
+    const on = ready && takeOn(k.key);
+    const hint = likes ? '' : noneHint(k);
+    /* the words this switch takes out: the first few under its name, all of them while the pointer or the keyboard is on it */
+    const all = k.count && k.key === WORDS_UNDER ? (k.words || []).filter(w => w && w[0]) : [];
+    const few = likes ? likes.line : C.fewWords(all, FILLERS_SHOWN);
+    const about = (k.count ? k.count + ' in this video, ' + C.length(k.seconds) + ' in all' : likes && !ready ? 'Claude has not picked any yet' : 'None at this pace') +
+      (on || !ready ? '' : '. Switched off, so they stay in.');
+    const more = likes ? (likes.more ? esc(likes.more) : '')
+      : all.map(w => '<span>' + esc(C.written(w[0])) + ' <i>' + (+w[1] || 0) + '</i></span>').join(' · ');
+    const tip = 'tip-' + esc(k.key);
+    return '<li><button type="button" class="switch" role="switch" id="take-' + esc(k.key) + '" aria-checked="' + on + '" data-key="' + esc(k.key) + '"' +
+      (ready ? '' : ' aria-disabled="true"') + (more ? ' aria-describedby="' + tip + '"' : ' title="' + esc(about) + '"') + '>' +
+      '<span class="track" aria-hidden="true"></span><span class="lab">' + esc(k.label) +
+      (hint ? '<span class="hint">' + esc(hint) + '</span>' : '') +
+      (few ? '<span class="few">' + esc(few) + '</span>' : '') + '</span>' +
+      '<span class="n"><span class="sr-only">, </span>' + (k.count ? k.count : ready ? 'none' : '') + '</span></button>' +
+      (more ? '<div class="wordtip" role="tooltip" id="' + tip + '"><b>' + esc(about) + '</b><p>' + more + '</p></div>' : '') + '</li>';
+  }).join('');
+}
+$('takeList').addEventListener('click', e => {
+  const b = e.target.closest('.switch'); if(!b || !S || b.getAttribute('aria-disabled') === 'true') return;
+  const key = b.dataset.key, next = !takeOn(key);
+  pending.take[key] = next;
+  b.setAttribute('aria-checked', next);
+  send('api/treatment', { take_out: { [key]: next } }, { revert: () => { delete pending.take[key]; renderTakeOut(); } });
+});
+
+/* ── Claude's cuts ─────────────────────────────────────────── */
+const CHEV = '<svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5 7 5l-4 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+function lookMark(n){
+  return n ? '<span class="look" title="' + esc(plural(n, 'cut') + ' here ' + (n === 1 ? 'needs' : 'need') + ' a look') + '"><i aria-hidden="true">!</i><span class="sr-only">' +
+    esc(n + (n === 1 ? ' needs' : ' need') + ' a look') + '</span></span>' : '';
+}
+function renderGroups(){
+  const groups = S.groups.filter(g => g.count > 0);
+  /* once she has cut something herself the heading covers both, with her count and Claude's */
+  const n = C.cutCounts(S);
+  setText('cutsTitle', n.mine ? 'Cuts' : "Claude's cuts");
+  $('cutsCount').innerHTML = n.mine ? '<span class="mine">' + n.mine + ' yours</span> · ' + n.claude + ' Claude’s' : String(n.claude);
+  const looks = C.needALook(S);
+  $('lookAll').hidden = !looks;
+  $('lookAll').innerHTML = '<i aria-hidden="true">!</i>' + esc(looks + (looks === 1 ? ' needs' : ' need') + ' a look');
+  if(!groups.length){
+    $('groups').innerHTML = '<p class="empty">Claude hasn’t cut anything yet. Ask Claude to edit the video, then reload this page.</p>';
+    return;
+  }
+  $('groups').innerHTML = groups.map(g => {
+    const open = openGroups.has(g.key);
+    return '<div class="group" data-key="' + esc(g.key) + '">' +
+      '<button type="button" class="ghead" id="gh-' + esc(g.key) + '" aria-label="' + esc(g.label + ', ' + plural(g.count, 'cut') + (g.need_a_look ? ', ' + g.need_a_look + (g.need_a_look === 1 ? ' needs' : ' need') + ' a look' : '')) + '" aria-expanded="' + open + '" aria-controls="g-' + esc(g.key) + '" title="' + esc(C.length(g.seconds) + ' taken out') + '">' +
+        CHEV + '<span>' + esc(g.label) + '</span>' + lookMark(g.need_a_look) + '<span class="n">' + g.count + '</span></button>' +
+      '<ol class="cuts" id="g-' + esc(g.key) + '"' + (open ? '' : ' hidden') + '>' +
+        (open ? g.rows.map(id => rowsById[id] ? cutHTML(rowsById[id]) : '').join('') : '') +
+      '</ol></div>';
+  }).join('');
+  markHearing();
+}
+function cutHTML(r){
+  const out = r.state === 'put_back', mine = r.by === 'you';
+  const said = (r.before ? '…' + esc(r.before) + ' ' : '') +
+    '<del>' + (r.removed ? esc(r.removed) : 'a ' + C.length(r.seconds) + ' pause') + '</del>' +
+    (r.after ? ' ' + esc(r.after) + '…' : '');
+  const flags = (r.flag_labels || []).filter(Boolean);
+  /* `why` is written for the creator by the server; `note` is Claude's fix, with times to move an edge, so it never shows here */
+  const plain = r.why || (flags.length ? flags.join('; ').replace(/^./, c => c.toUpperCase()) + '.' : '');
+  const flag = flags.length ? '<p class="flagnote"><b>Needs a look:</b> ' + esc(plain) + '</p>' : '';
+  const startClock = C.clock(r.start);
+  /* a cut of her own shows its clock and its words, and is taken back whole; one of Claude's gives its reason, and is left out or put back */
+  const choice = mine
+    ? '<button type="button" class="btn" id="cut-' + esc(r.id) + '-back" data-back="' + esc(r.id) + '" title="These words play again">Take back</button>'
+    : '<div class="seg" role="group" aria-label="' + esc('Cut at ' + startClock) + '">' +
+        '<button type="button" id="cut-' + esc(r.id) + '-kept_out" data-set="kept_out" aria-pressed="' + !out + '">Leave out</button>' +
+        '<button type="button" id="cut-' + esc(r.id) + '-put_back" data-set="put_back" aria-pressed="' + out + '">Put back</button></div>';
+  return '<li class="cut" id="cut-' + esc(r.id) + '" data-id="' + esc(r.id) + '" data-state="' + esc(r.state) + '" data-by="' + (mine ? 'you' : 'claude') + '" aria-label="' + esc((mine ? 'Your cut at ' : 'Cut at ') + startClock) + '">' +
+    '<div class="cuthead"><button type="button" class="timebtn" id="cut-' + esc(r.id) + '-go" data-go="' + r.start + '" title="Go to ' + startClock + '">' + esc(r.clock || startClock) + '</button>' +
+      (mine ? '' : '<span class="len">' + C.length(r.seconds) + '</span>') + (flags.length ? lookMark(1) : '') +
+      '<span class="st">' + (out ? 'Put back by you' : '') + '</span></div>' +
+    (mine ? '' : '<p class="reason">' + esc(r.reason || 'Claude gave no reason.') + '</p>') +
+    '<p class="said">' + said + '</p>' + flag +
+    '<div class="cutacts">' +
+      '<button type="button" class="btn hear" id="cut-' + esc(r.id) + '-hear" data-id="' + esc(r.id) + '" aria-pressed="false" title="Plays 2 seconds before and 2 after, skipping the cut">' +
+        '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z" fill="currentColor"/></svg>Hear it cut</button>' + choice +
+    '</div><p class="cuterr" role="alert" hidden></p></li>';
+}
+$('groups').addEventListener('click', e => {
+  const head = e.target.closest('.ghead');
+  if(head){ toggleGroup(head.parentElement.dataset.key); return; }
+  const li = e.target.closest('.cut'); if(!li) return;
+  const id = li.dataset.id, r = rowsById[id];
+  const go = e.target.closest('[data-go]');
+  if(go){ seekUser(+go.dataset.go - JOIN_LEAD); return; }
+  if(e.target.closest('.hear')){ hearJoin(r); return; }
+  const back = e.target.closest('[data-back]');
+  if(back && r){ takeBack(r, back); return; }
+  const set = e.target.closest('[data-set]');
+  if(set && r && set.dataset.set !== r.state){
+    const err = li.querySelector('.cuterr'); err.hidden = true;
+    li.querySelectorAll('[data-set]').forEach(b => b.setAttribute('aria-pressed', b === set));
+    li.setAttribute('aria-busy', 'true');
+    li.querySelector('.st').textContent = set.dataset.set === 'put_back' ? 'Putting back\u2026' : 'Leaving out\u2026';
+    send('api/cut', { id, state: set.dataset.set }, {
+      onError: msg => { const el = $('cut-' + id); if(el){ const x = el.querySelector('.cuterr'); x.textContent = msg; x.hidden = false; } },
+      revert: () => { const el = $('cut-' + id); if(!el) return; el.removeAttribute('aria-busy'); el.querySelector('.st').textContent = r.state === 'put_back' ? 'Put back by you' : ''; el.querySelectorAll('[data-set]').forEach(b => b.setAttribute('aria-pressed', b.dataset.set === r.state)); },
+    }).then(ok => { if(ok) announce(set.dataset.set === 'put_back' ? 'Put back. Those words play now.' : 'Left out again.'); });
+  }
+});
+/** Take back one cut of her own, from its row. The keyboard goes to the next of her cuts, or to the words. */
+function takeBack(r, btn){
+  if(btn.getAttribute('aria-busy') === 'true') return;
+  btn.setAttribute('aria-busy', 'true');
+  doToWords({ kind: 'back', path: 'api/cut/remove', body: { id: r.id } }).then(ok => {
+    if(!ok){ btn.removeAttribute('aria-busy'); return; }
+    if(document.activeElement && document.activeElement !== document.body) return;
+    (document.querySelector('#groups [data-back]') || document.querySelector('#groups .ghead') || words.box).focus({ preventScroll: true });
+  });
+}
+function toggleGroup(key, forceOpen){
+  const open = forceOpen === true ? true : !openGroups.has(key);
+  if(open) openGroups.add(key); else openGroups.delete(key);
+  renderGroups();
+  const head = document.querySelector('.group[data-key="' + key + '"] .ghead');
+  if(head && forceOpen !== true) head.focus();
+}
+$('lookAll').addEventListener('click', () => openFlagged());
+let lookAt = -1;
+/** Open the groups with cuts that need a look and move to the next such cut. */
+function openFlagged(){
+  S.groups.filter(g => g.need_a_look > 0).forEach(g => openGroups.add(g.key));
+  renderGroups();
+  const flagged = (S.rows || []).filter(r => (r.flags || []).length);
+  if(!flagged.length) return;
+  lookAt = (lookAt + 1) % flagged.length;
+  const el = $('cut-' + flagged[lookAt].id);
+  if(el){ el.scrollIntoView({ block: 'nearest' }); const b = el.querySelector('.hear'); if(b) b.focus({ preventScroll: true }); }
+}
+
+/* ── make this my usual: shows only while the settings differ from it ── */
+function renderUsual(){
+  const u = S.usual, now = S.settings;
+  const fineSame = now.pace !== C.CUSTOM || (!!u && !!u.fine && !!now.fine && Object.keys(now.fine).every(k => u.fine[k] === now.fine[k]));
+  const same = !!u && u.pace === now.pace && fineSame && Object.keys(now.take_out).every(k => !!(u.take_out || {})[k] === !!now.take_out[k]);
+  $('usualBtn').hidden = same;
+}
+$('usualBtn').addEventListener('click', () => {
+  const b = $('usualBtn'); b.setAttribute('aria-busy', 'true');
+  send('api/usual', {}).then(ok => {
+    b.removeAttribute('aria-busy');
+    if(!ok) return;
+    /* the button leaves once this is her usual; the keyboard stays where it was, on the switch above */
+    const switches = $('takeList').querySelectorAll('.switch');
+    if(b.hidden && document.activeElement === document.body && switches.length) switches[switches.length - 1].focus();
+    setText('usualNote', 'Saved. New videos start this way.');
+    setTimeout(() => setText('usualNote', ''), BRIEF_NOTE_MS);
+  });
+});
+
+/* ── kept no matter what: a link under the words that opens the list ── */
+function renderKeeps(){
+  const keeps = S.keeps || [], link = $('keptBtn'), list = $('keptList');
+  link.hidden = !keeps.length;
+  setText('keptBtn', 'Kept: ' + keeps.length);
+  if(!keeps.length && list.hidePopover && list.matches(':popover-open')) list.hidePopover();
+  $('keeps').innerHTML = keeps.map(k => {
+    const when = C.clock(k.start) + ' to ' + C.clock(k.end);
+    return '<li class="keep"><button type="button" class="timebtn" id="keep-' + esc(k.id) + '-go" data-go="' + k.start + '" title="Go to ' + esc(C.clock(k.start)) + '">' + esc(when) + '</button>' +
+      '<q>' + esc(k.text) + '</q>' +
+      '<button type="button" class="btn quiet" id="keep-' + esc(k.id) + '-rm" data-remove="' + esc(k.id) + '" aria-label="' + esc('Stop keeping ' + when) + '">Remove</button>' +
+      (k.note ? '<span class="knote">' + esc(k.note) + '</span>' : '') + '</li>';
+  }).join('');
+}
+$('keeps').addEventListener('click', e => {
+  const go = e.target.closest('[data-go]'); if(go){ seekUser(+go.dataset.go); return; }
+  const rm = e.target.closest('[data-remove]'); if(!rm) return;
+  rm.setAttribute('aria-busy', 'true');
+  send('api/keep/remove', { id: rm.dataset.remove }, { action: 'unkeep' }).then(ok => {
+    if(!ok){ rm.removeAttribute('aria-busy'); return; }
+    announce('No longer kept. It can be taken out again.');
+    const next = $('keeps').querySelector('[data-remove]');
+    (next || words.box).focus();
+  });
+});
+/* the list opens beside its link: above it when there is room, under it when there is not */
+$('keptList').addEventListener('toggle', e => {
+  if(e.newState !== 'open') return;
+  const r = $('keptBtn').getBoundingClientRect(), p = $('keptList');
+  const above = r.top > p.offsetHeight + 16;
+  p.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+  p.style.bottom = above ? (window.innerHeight - r.top + 6) + 'px' : 'auto';
+  p.style.top = above ? 'auto' : Math.min(r.bottom + 6, Math.max(8, window.innerHeight - p.offsetHeight - 8)) + 'px';
+});
+
+/* ══ playback ══════════════════════════════════════════════════
+   One video element on the source file. Edited playback skips each removed
+   range by seeking; nothing is rendered. A seek into data the browser hasn't
+   loaded stalls for a moment, so: never assume a seek finished (wait for
+   "seeked"), start play again after it when the creator wanted play, and
+   watch for playback that stops moving. */
+const vid = $('vid');
+const PB = {
+  want: false,        /* the creator asked for play */
+  mode: 'edited',     /* what the Original / Edited switch says */
+  job: 'free',        /* 'free' | 'join' (Hear it cut) | 'cluster' (a block pressed) */
+  jobKey: null,       /* the id of the cut whose join plays, or the index of the block */
+  jobStart: 0,
+  stopAt: null,       /* source seconds where a join or a cluster ends */
+  ranges: null,       /* a join's own ranges; null means R */
+  seekTo: null, seekAt: 0,
+  lastT: -1, lastMove: 0,
+  loading: false,
+  timer: 0, raf: 0,
+  lastError: null,
+  errors: [],         /* every play() refusal, kept for checking */
+  stats: { seeks: 0, skips: 0, stalls: 0, kicks: 0, playErrors: 0 },
+};
+function playMode(){ return PB.job === 'join' ? 'edited' : PB.mode; }
+function activeRanges(){ return PB.ranges || R; }
+
+function forceMuted(){
+  if(!FORCE_MUTED) return;
+  document.querySelectorAll('video,audio').forEach(m => { m.muted = true; m.volume = 0; m.defaultMuted = true; });
+}
+if(FORCE_MUTED){
+  forceMuted();
+  document.addEventListener('volumechange', e => { const m = e.target; if(m && (!m.muted || m.volume !== 0)){ m.muted = true; m.volume = 0; } }, true);
+  document.addEventListener('play', forceMuted, true);
+} else {
+  vid.muted = false;   /* the markup starts it muted so nothing can sound before this line */
+}
+
+/** Say something about playback, on the video. A brief note leaves by itself. */
+let statusTimer = 0;
+function status(text, isErr, brief){
+  const el = $('pbStatus');
+  clearTimeout(statusTimer);
+  el.textContent = text || ''; el.classList.toggle('err', !!isErr);
+  if(brief) statusTimer = setTimeout(() => { el.textContent = ''; }, BRIEF_NOTE_MS);
+}
+function playErrorText(err){
+  const name = err && err.name;
+  if(name === 'NotAllowedError') return 'The browser would not start the video on its own. Press Play again.';
+  if(name === 'NotSupportedError') return 'This browser can’t play the video file. Try another browser.';
+  return 'The video would not play. Press Play to try again.';
+}
+function resume(){
+  if(!PB.want) return;
+  forceMuted();
+  let p;
+  try{ p = vid.play(); }catch(err){ onPlayError(err); return; }
+  if(p && typeof p.then === 'function'){
+    p.then(() => { if(PB.lastError){ PB.lastError = null; status(''); } }).catch(onPlayError);
+  }
+}
+function onPlayError(err){
+  PB.lastError = err; PB.stats.playErrors++;
+  PB.errors.push((err && err.name) + ': ' + (err && err.message));
+  if(err && err.name === 'AbortError'){
+    /* a newer play, pause or load cut this one short; if play is still wanted, ask again once it has settled */
+    if(PB.want){ status('Starting the video again…'); setTimeout(() => { if(PB.want && vid.paused) resume(); }, 250); }
+    return;
+  }
+  PB.want = false;
+  status(playErrorText(err), true);
+  renderPlayState();
+}
+/** True while a seek is still on its way. The element's own flag is the truth;
+    before the video's size is known a seek waits, and no "seeked" comes. */
+function seekPending(){
+  if(vid.seeking) return true;
+  if(PB.seekTo != null && vid.readyState === 0) return true;
+  PB.seekTo = null;
+  return false;
+}
+function seekTo(t){
+  t = Math.max(0, Math.min(DUR || t, t));
+  PB.seekTo = t; PB.seekAt = performance.now(); PB.stats.seeks++;
+  try{ vid.currentTime = t; }catch(e){ PB.seekTo = null; }
+}
+
+/** Start playing. opts: from (source seconds), stopAt, ranges, job, key. */
+function startPlayback(opts){
+  opts = opts || {};
+  endJobMarks();
+  PB.job = opts.job || 'free'; PB.jobKey = opts.key == null ? null : opts.key;
+  PB.stopAt = opts.stopAt == null ? null : opts.stopAt;
+  PB.ranges = opts.ranges || null;
+  const from = opts.from != null ? opts.from : vid.currentTime;
+  const t0 = C.startPoint({ mode: playMode(), ranges: activeRanges(), t: from, duration: DUR });
+  PB.jobStart = t0;
+  PB.want = true; PB.lastMove = performance.now(); PB.lastT = -1;
+  status('');
+  words.rejoin(true);                 /* pressing play brings the words back to where the video is */
+  if(Math.abs((vid.currentTime || 0) - t0) > 0.02) seekTo(t0);
+  resume();
+  renderPlayState();
+  loop();
+}
+function stopPlayback(){
+  PB.want = false;
+  clearTimeout(PB.timer);
+  if(!vid.paused) vid.pause();
+  endJob();
+  renderPlayState();
+}
+function endJob(){ PB.job = 'free'; PB.jobKey = null; PB.stopAt = null; PB.ranges = null; endJobMarks(); }
+function endJobMarks(){ markHearing(null); markBlocks(); }
+function finish(kind){
+  const job = PB.job;
+  PB.want = false;
+  clearTimeout(PB.timer);
+  if(!vid.paused) vid.pause();
+  if(kind === 'stop' && PB.stopAt != null && vid.currentTime > PB.stopAt + 0.05) seekTo(PB.stopAt);
+  endJob();
+  renderPlayState();
+  if(kind === 'end') status('That’s the end of the video.', false, true);
+  else if(job === 'join') status('');
+  paint(true);
+}
+
+/** The one decision point, run every frame while playing and on every media event. */
+function check(){
+  clearTimeout(PB.timer);
+  if(!PB.want || !DUR) return;
+  if(seekPending()) return;                         /* never assume a seek finished */
+  const t = vid.currentTime;
+  const step = C.playStep({ mode: playMode(), ranges: activeRanges(), t, stopAt: PB.stopAt, duration: DUR });
+  if(step.action === 'seek'){ PB.stats.skips++; seekTo(step.to); return; }
+  if(step.action === 'stop'){ finish('stop'); return; }
+  if(step.action === 'end'){ finish('end'); return; }
+  /* a timer lands the next skip on time even when frames come late */
+  let next = playMode() === 'edited' ? C.nextRangeStart(activeRanges(), t) : null;
+  if(PB.stopAt != null && (next == null || PB.stopAt < next)) next = PB.stopAt;
+  if(next != null){
+    const ms = (next - C.SKIP_LEAD - t) / (vid.playbackRate || 1) * 1000;
+    if(ms < 400) PB.timer = setTimeout(check, Math.max(0, ms));
+  }
+}
+function loop(){
+  cancelAnimationFrame(PB.raf);
+  const tick = () => {
+    check();
+    paint(false);
+    if(PB.want) PB.raf = requestAnimationFrame(tick);
+  };
+  PB.raf = requestAnimationFrame(tick);
+}
+
+vid.addEventListener('seeking', () => { if(PB.seekTo == null){ PB.seekTo = vid.currentTime; PB.seekAt = performance.now(); } });
+vid.addEventListener('seeked', () => {
+  PB.seekTo = null;
+  if(PB.want){
+    if(vid.paused) resume();
+    check();          /* the seek may have landed in another range, or past a stop */
+  }
+  paint(true);
+});
+vid.addEventListener('waiting', () => { PB.loading = true; if(PB.want) PB.stats.stalls++; });
+vid.addEventListener('stalled', () => { if(PB.want) PB.loading = true; });
+vid.addEventListener('playing', () => { PB.loading = false; PB.lastMove = performance.now(); if(!PB.lastError) status(''); $('vidmsg').hidden = true; });
+vid.addEventListener('timeupdate', () => { check(); if(!PB.want) paint(true); });
+vid.addEventListener('pause', () => {
+  if(!PB.want || vid.ended) return;
+  /* Paused from outside the page. A browser pauses video in a hidden page to
+     save power: then play on when the page shows again. Otherwise (a media key,
+     the system) follow it, so the button tells the truth. */
+  setTimeout(() => {
+    if(!PB.want || !vid.paused || vid.ended) return;
+    if(document.hidden){ status('Paused while this page is hidden. It plays on when you come back.'); return; }
+    PB.want = false; endJob(); renderPlayState(); status('Paused.', false, true);
+  }, PAUSE_SETTLE_MS);
+});
+vid.addEventListener('ended', () => { if(PB.want || PB.job !== 'free') finish('end'); });
+vid.addEventListener('error', () => {
+  const e = vid.error;
+  PB.want = false; renderPlayState();
+  const msg = EXAMPLE ? 'This example has no video beside it, so nothing can play.' : !e ? 'The video could not load.' : e.code === 4 ? 'The video file could not be found or played. Ask Claude to open this page again.'
+    : e.code === 2 ? 'The video stopped loading. Check that Claude’s session is still running, then press Play.'
+    : 'The video could not be read. Ask Claude to open this page again.';
+  status('');
+  $('vidmsg').textContent = msg; $('vidmsg').hidden = false;
+  announce(msg);
+});
+vid.addEventListener('loadedmetadata', () => { if(!DUR) DUR = vid.duration; paint(true); });
+document.addEventListener('visibilitychange', () => { if(!document.hidden && PB.want && vid.paused) resume(); });
+
+/* the watchdog: playback that stops moving gets noticed, said, and nudged */
+setInterval(() => {
+  const now = performance.now();
+  if(!PB.want){ PB.lastMove = now; return; }
+  const t = vid.currentTime;
+  if(Math.abs(t - PB.lastT) > 0.001){ PB.lastT = t; PB.lastMove = now; if(PB.loading){ PB.loading = false; } if($('pbStatus').textContent.startsWith('Loading')) status(''); }
+  check();                                   /* covers a background tab, where frames stop */
+  const still = now - PB.lastMove;
+  if(vid.seeking && now - PB.seekAt > SEEK_RETRY_MS){ PB.stats.kicks++; seekTo(PB.seekTo != null ? PB.seekTo : vid.currentTime); return; }
+  if(document.hidden) return;                /* the browser holds hidden pages still; don't fight it */
+  if(still > STALL_NOTICE_MS){
+    status('Loading the video…');
+    if(vid.paused && !vid.seeking) resume();
+  }
+  if(still > STALL_KICK_MS && !vid.seeking){ PB.stats.kicks++; PB.lastMove = now; seekTo(vid.currentTime); }
+}, 500);
+
+/* ── the controls that start and stop it ── */
+function togglePlay(){
+  if(!DUR) return;
+  if(PB.want){ stopPlayback(); return; }
+  startPlayback({ job: 'free' });
+}
+function setMode(mode){
+  if(mode === PB.mode) return;
+  PB.mode = mode;
+  $('modeSeg').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === mode));
+  renderPlayState();
+  if(PB.want) check();
+  paint(true);
+  announce(mode === 'edited' ? 'Edited: what was taken out is skipped.' : 'Original: everything plays.');
+}
+/** Move the video to t because she asked. It is a jump, so the words follow again and come to the
+    new place, unless `fromWords`: a click on a word, which is on screen already, leaves them where they are. */
+function seekUser(t, fromWords){
+  t = Math.max(0, Math.min(DUR, t));
+  if(PB.job !== 'free') endJob();
+  words.rejoin(!fromWords);
+  if(PB.want){ seekTo(t); }
+  else { seekTo(t); paint(true); }
+}
+function hop(delta){
+  const t = vid.currentTime || 0;
+  let to;
+  if(PB.mode === 'edited'){ to = C.sourceTime(R, Math.max(0, C.editedTime(R, t) + delta)); }
+  else to = t + delta;
+  seekUser(to);
+}
+function hearJoin(r){
+  if(!r) return;
+  if(PB.want && PB.job === 'join' && PB.jobKey === r.id){ stopPlayback(); return; }
+  const plan = C.joinPlan(r, R, DUR, JOIN_LEAD, JOIN_TAIL);
+  startPlayback({ job: 'join', key: r.id, from: plan.start, stopAt: plan.stop, ranges: plan.ranges });
+}
+/** Previous (dir -1) or Next (dir 1): the video and the words go to the cut before or after, together.
+    Each cut is reached JOIN_LEAD seconds early, where Hear it cut starts, so Play hears the join.
+    Keeps playing if it was playing, stays paused if it was paused. */
+function hopCut(dir){
+  const hop = C.hopTo(CUTS, vid.currentTime || 0, dir, JOIN_LEAD);
+  if(!hop){ announce(dir > 0 ? 'No cut after this.' : 'No cut before this.'); return; }
+  seekUser(hop.at);
+  announce('Cut ' + (hop.i + 1) + ' of ' + hop.of + ', at ' + C.clock(CUTS[hop.i][0]) + '.');
+}
+
+$('playBtn').addEventListener('click', togglePlay);
+vid.addEventListener('click', togglePlay);
+$('modeSeg').addEventListener('click', e => { const b = e.target.closest('[data-mode]'); if(b) setMode(b.dataset.mode); });
+$('prevBtn').addEventListener('click', () => hopCut(-1));
+$('nextBtn').addEventListener('click', () => hopCut(1));
+
+function renderPlayState(){
+  const playing = PB.want;
+  /* SVG elements have no .hidden property, so set the attribute itself */
+  $('playIcon').toggleAttribute('hidden', playing); $('pauseIcon').toggleAttribute('hidden', !playing);
+  const what = PB.job === 'join' ? 'the join' : PB.job === 'cluster' ? 'this stretch' : PB.mode === 'edited' ? 'the edit' : 'the original';
+  setText('playText', playing ? 'Pause' : 'Play');
+  $('playBtn').setAttribute('aria-label', playing ? 'Pause ' + what : PB.mode === 'edited' ? 'Play the edit' : 'Play the original');
+  markHearing(); markBlocks();
+}
+function markHearing(){
+  document.querySelectorAll('#groups .hear').forEach(b => {
+    const on = PB.want && PB.job === 'join' && PB.jobKey === b.dataset.id;
+    b.setAttribute('aria-pressed', on);
+    b.lastChild.textContent = on ? 'Stop' : 'Hear it cut';
+  });
+}
+
+/* ══ painting where you are: the clock, the bar, the name tag, the words ══
+   Every time here is recording time. The finished length shows once, in the top line. */
+let lastPaint = { t: -1, mode: '' };
+function paint(force){
+  const t = vid.currentTime || 0;
+  if(!force && Math.abs(t - lastPaint.t) < 0.03 && lastPaint.mode === PB.mode) return;
+  lastPaint = { t, mode: PB.mode };
+  setText('tnow', C.clock(t));
+  setText('tlen', C.clock(DUR));
+  if(DUR){
+    $('playhead').style.left = (Math.min(1, t / DUR) * 100) + '%';
+    const here = C.clusterAt(CL, t);
+    const tr = bar.track;
+    tr.setAttribute('aria-valuemax', Math.round(DUR));
+    tr.setAttribute('aria-valuenow', Math.round(t));
+    tr.setAttribute('aria-valuetext', C.clock(t) + ' of ' + C.clock(DUR) + (here >= 0 ? ', ' + C.BLOCK_NAME.toLowerCase() : ''));
+    if(here !== bar.here){
+      bar.here = here;
+      document.querySelectorAll('#blocks .blk').forEach(b => { if(+b.dataset.i === here) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current'); });
+    }
+  }
+  dim($('prevBtn'), !C.hopTo(CUTS, t, -1, JOIN_LEAD));
+  dim($('nextBtn'), !C.hopTo(CUTS, t, 1, JOIN_LEAD));
+  paintTag(t);
+  words.follow(t);
+}
+/** A hop button with nowhere to go is dimmed. It stays in reach of the keyboard, and says why when pressed. */
+function dim(btn, off){ if((btn.getAttribute('aria-disabled') === 'true') !== off) btn.setAttribute('aria-disabled', off ? 'true' : 'false'); }
+/** The name tag on the video while a photo or clip has its place there. The page only shows it; changes go through Claude. */
+function paintTag(t){
+  const o = S ? C.overlayAt(S.overlays, t) : null, tag = $('nameTag');
+  if(tag.hidden !== !o) tag.hidden = !o;
+  if(!o) return;
+  setText('nameTag', C.tagText(o));
+  if(tag.dataset.status !== o.status) tag.dataset.status = o.status;
+}
+
+/* ══ every word of the take ════════════════════════════════════
+   All of the words are on the page, and the box scrolls freely: wheel, trackpad,
+   scrollbar or keys. It follows the video, keeping the word being heard near its
+   top. Once she scrolls it herself it stops following, until she presses play or
+   jumps (Previous, Next, the bar, a time in a list), so it never fights her. */
+const words = {
+  box: $('words'),
+  els: null,              /* one span per word, in order */
+  cur: -1,                /* the word being heard */
+  sel: null,              /* {a, b, at}: the words the creator picked and the end she last moved, or null */
+  drag: null,
+  click: null,            /* {i, at, timer}: the last click on a word, held back in case a second one makes it a double-click */
+  dirty: true,
+  following: true,        /* false once she has scrolled the words away herself */
+  jumped: true,           /* the next follow brings the word being heard into place, wherever it is */
+  expectTop: -1,          /* where the page itself last scrolled the box, so her scrolling can be told from its own */
+  boxH: 0,                /* the box's height at the last scroll */
+  shown: null,            /* {cur, sel}: the marks now on the words, so a move repaints only the words that change */
+  follow(t){
+    if(!W.length){ if(this.dirty){ this.box.innerHTML = '<p class="empty">No words to show yet.</p>'; this.els = null; this.dirty = false; } return; }
+    let i = C.wordIndexAt(W, t + 0.01);
+    if(i < 0) i = 0;
+    const moved = i !== this.cur, stale = this.dirty;
+    this.cur = i;
+    if(stale) this.render();
+    this.dirty = false;
+    if(moved || stale) this.mark();
+    if(moved || stale || this.jumped) this.scroll();
+  },
+  /** Follow the video again. With `jump` the word being heard comes into place at the next paint. */
+  rejoin(jump){ this.following = true; if(jump) this.jumped = true; },
+  /** What Keep keeps: the words she picked, or with none picked (the K key) the sentence being heard. */
+  part(){
+    if(this.sel) return this.sel;
+    const b = C.sentenceBounds(W, this.cur < 0 ? 0 : this.cur);
+    return b ? { a: b[0], b: b[1] } : null;
+  },
+  /** Every word, struck the way whoever took it out strikes. The same words as before only change
+      their marks, so the box keeps its place; new words are drawn afresh. */
+  render(){
+    const keeps = (S && S.keeps) || [];
+    const kept = w => keeps.some(k => (w[1] + w[2]) / 2 > k.start && (w[1] + w[2]) / 2 < k.end);
+    /* words that don't say who took them out are all struck the one way, as before */
+    const who = C.tellsWho(W);
+    const cls = W.map(w => {
+      const why = C.whyOut(w);
+      return 'w' + (why ? ' x' : '') + (why === C.WHY.you ? ' me' : why === C.WHY.automatic && who ? ' auto' : '') + (kept(w) ? ' kept' : '') + (/^\(.*\)$/.test(w[0]) ? ' snd' : '');
+    });
+    if(this.els && this.els.length === W.length && this.els[0].textContent === W[0][0]){
+      for(let j = 0; j < W.length; j++) if(this.els[j].className !== cls[j]) this.els[j].className = cls[j];
+    } else {
+      const top = this.box.scrollTop;
+      this.box.innerHTML = W.map((w, j) => '<span class="' + cls[j] + '" data-i="' + j + '">' + esc(w[0]) + '</span>').join(' ');
+      this.els = this.box.children;
+      this.scrollTo(top);
+    }
+    this.shown = null;      /* the classes were written afresh: every word gets its marks again */
+  },
+  el(j){ return this.els && j >= 0 && j < this.els.length ? this.els[j] : null; },
+  mark(){
+    const p = this.sel, cur = this.cur, was = this.shown;
+    /* the words whose marks can change: all of them after a render, else those between the old and new place and in either pick */
+    const spans = !was ? [[0, W.length - 1]] : [[Math.min(was.cur, cur), Math.max(was.cur, cur)]].concat(was.sel ? [[was.sel.a, was.sel.b]] : [], p ? [[p.a, p.b]] : []);
+    spans.forEach(([a, b]) => {
+      for(let j = Math.max(0, a); j <= Math.min(W.length - 1, b); j++){
+        const e = this.els[j];
+        e.classList.toggle('now', j === cur);
+        e.classList.toggle('sel', !!p && j >= p.a && j <= p.b);
+        if(!e.classList.contains('x')) e.classList.toggle('said', j <= cur);
+      }
+    });
+    this.shown = { cur, sel: p ? { a: p.a, b: p.b } : null };
+    /* Cut and Keep show beside the words once she has picked some; until then a quiet line says how */
+    const bar = $('pickBar'), held = bar.contains(document.activeElement), show = !!p && !this.drag;
+    if(bar.hidden === show) bar.hidden = !show;
+    $('pickHint').hidden = !!p;
+    if(held && !show) this.box.focus({ preventScroll: true });
+    setText('selInfo', p ? 'Your part: ' + C.clock(W[p.a][1]) + ' to ' + C.clock(W[p.b][2]) + ' · ' + plural(p.b - p.a + 1, 'word') : '');
+    this.placeBar();
+  },
+  /** Put Cut and Keep beside the part she picked, never over it: under its last line when she picked
+      forward, over its first line when she picked backward, and the other way when there is no room in
+      the box. When the part fills the box, the bar sits on the how-to line above the words, at its right end.
+      It stays beside the words that show when the rest scroll away. */
+  placeBar(){
+    const bar = $('pickBar'), p = this.sel;
+    if(bar.hidden || !p || !this.els) return;
+    const first = this.el(p.a), last = this.el(p.b), end = this.el(p.at); if(!first || !last || !end) return;
+    const sec = $('wordsSec').getBoundingClientRect(), box = this.box.getBoundingClientRect(), r = end.getBoundingClientRect();
+    const clamp = v => Math.max(box.top, Math.min(box.bottom, v));
+    const top = clamp(first.getBoundingClientRect().top), bottom = clamp(last.getBoundingClientRect().bottom);
+    bar.classList.remove('tight');
+    let h = bar.offsetHeight, w = bar.offsetWidth;
+    const over = top - PICK_BAR_GAP_PX - h, under = bottom + PICK_BAR_GAP_PX;
+    const fitsOver = over >= box.top, fitsUnder = under + h <= box.bottom;
+    const backward = p.at === p.a && p.a !== p.b;
+    let y = backward ? (fitsOver ? over : fitsUnder ? under : null) : (fitsUnder ? under : fitsOver ? over : null);
+    let x = r.left + r.width / 2 - w / 2 - sec.left;
+    if(y == null){
+      /* a slimmer bar fits between the transport and the words */
+      bar.classList.add('tight'); h = bar.offsetHeight; w = bar.offsetWidth;
+      const head = $('wordsHead').getBoundingClientRect();
+      y = Math.min(head.top + head.height / 2 - h / 2, box.top - h); x = sec.width - w;
+    }
+    x = Math.max(0, Math.min(sec.width - w, x));
+    bar.style.transform = 'translate(' + Math.round(x) + 'px,' + Math.round(y - sec.top) + 'px)';
+  },
+  /** Keep the word being heard in view, unless she has scrolled away. After a jump it goes near the
+      top; while playing the box moves on once the word gets low; while paused only when it is out of sight. */
+  scroll(){
+    const jumped = this.jumped, e = this.el(this.cur);
+    this.jumped = false;
+    if(!e) return;
+    const to = C.followTo({ following: this.following, jumped, playing: PB.want, word: e.offsetTop, line: e.offsetHeight || 28,
+                            top: this.box.scrollTop, height: this.box.clientHeight });
+    if(to != null) this.scrollTo(to);
+  },
+  scrollTo(top){
+    const box = this.box, most = Math.max(0, box.scrollHeight - box.clientHeight);
+    const to = Math.round(Math.max(0, Math.min(most, top)));
+    this.expectTop = to;
+    if(box.scrollTop !== to) box.scrollTop = to;
+  },
+  /** She moved the words herself: they stop following until she plays or jumps. */
+  leave(){ this.following = false; },
+  /** The word under the point, or null when the point is not on a word. */
+  indexAt(x, y){
+    const el = document.elementFromPoint(x, y);
+    return el && el.classList && el.classList.contains('w') && this.box.contains(el) ? +el.dataset.i : null;
+  },
+  /** The word nearest the point, wherever it is in or around the box, or -1 with no words. */
+  nearestAt(x, y){
+    const els = this.els;
+    return els && els.length && els[0].classList ? C.nearestWord(els.length, i => els[i].getBoundingClientRect(), x, y) : -1;
+  },
+  /** Pick words a to b, and only those. `at` is the end she moved last. */
+  setSel(a, b, at){
+    this.sel = { a: Math.min(a, b), b: Math.max(a, b), at: at == null ? Math.max(a, b) : at };
+    this.mark();
+  },
+  clear(){ this.sel = null; this.mark(); },
+  clicked: -1,            /* the word she last clicked, where a Shift-click picks from when nothing is picked */
+  /** Carry the drag to the word nearest the pointer. A press becomes a drag once the pointer reaches
+      another word, or, from the space between words, once it has moved PICK_START_PX. A drag is her own
+      hand on the words, so they stop following the video. */
+  dragTo(){
+    const d = this.drag; if(!d) return;
+    const i = this.nearestAt(d.x, d.y); if(i < 0) return;
+    if(!d.moved){
+      const far = Math.abs(d.x - d.px) + Math.abs(d.y - d.py) > PICK_START_PX;
+      /* from a word, reaching another word is enough; from empty space the words sit close enough
+         together that the nearest one changes well under PICK_START_PX, so only real distance counts */
+      if(d.onWord ? i === d.from : !far) return;
+      d.moved = true;
+      this.leave();
+    }
+    if(i === d.to && this.sel) return;
+    d.to = i;
+    this.setSel(d.from, i, i);            /* exactly the words from where the drag began to where it is */
+  },
+  /** While a drag sits near the top or bottom edge, the words scroll a little each frame and the part
+      grows with them, so a drag can cross more than one box of words. */
+  edge(){
+    const d = this.drag;
+    if(!d || !d.moved || d.raf) return;
+    const step = () => {
+      d.raf = 0;
+      if(this.drag !== d) return;
+      const r = this.box.getBoundingClientRect(), dy = C.edgeScroll(d.y, r.top, r.bottom);
+      if(!dy) return;
+      const before = this.box.scrollTop;
+      this.box.scrollTop = before + dy;
+      if(this.box.scrollTop === before) return;
+      this.dragTo();
+      d.raf = requestAnimationFrame(step);
+    };
+    d.raf = requestAnimationFrame(step);
+  },
+  endDrag(){ const d = this.drag; if(d && d.raf) cancelAnimationFrame(d.raf); this.drag = null; return d; },
+};
+/* A press anywhere in the words starts a pick at the nearest word: on a word, between words, past the end
+   of a line, in the margin, under the last line. A finger still scrolls the words, and picks only by
+   starting on a word, as before. Shift with a press picks from the end she did not move last. */
+words.box.addEventListener('pointerdown', e => {
+  if(e.button !== 0 || !words.els) return;
+  const box = words.box, r = box.getBoundingClientRect();
+  /* the strip right of the words is the scrollbar's, drawn over it or beside it: a press there scrolls */
+  if(e.clientX >= r.left + box.clientLeft + box.clientWidth - parseFloat(getComputedStyle(box).paddingRight)) return;
+  const touch = e.pointerType === 'touch', onWord = words.indexAt(e.clientX, e.clientY);
+  if(onWord == null && touch) return;
+  const i = onWord != null ? onWord : words.nearestAt(e.clientX, e.clientY);
+  if(i < 0) return;
+  e.preventDefault();
+  const d = { from: i, to: i, onWord: onWord != null, moved: false, x: e.clientX, y: e.clientY, px: e.clientX, py: e.clientY, raf: 0, id: e.pointerId };
+  if(e.shiftKey && !touch){
+    d.from = C.pickAnchor(words.sel, words.clicked, words.cur);
+    d.moved = true;
+    words.leave();
+  }
+  words.drag = d;
+  if(d.moved) words.setSel(d.from, i, i);
+  try{ box.setPointerCapture(e.pointerId); }catch(x){}
+});
+words.box.addEventListener('pointermove', e => {
+  const d = words.drag; if(!d) return;
+  d.x = e.clientX; d.y = e.clientY;
+  words.dragTo();
+  words.edge();
+});
+words.box.addEventListener('pointerup', () => {
+  const d = words.endDrag(); if(!d) return;
+  if(d.moved){ words.mark(); announce($('selInfo').textContent + '. Press Cut or Keep.'); return; }
+  if(!d.onWord) return;                   /* a click between the words does what it always did: nothing */
+  words.sel = null; words.mark(); words.clicked = d.from; clickWord(d.from);
+});
+/** One click on a word goes there; two on the same word cut it or bring it back.
+    The first click is held back for a moment, so a double-click never moves
+    the video once for each of its halves. */
+function clickWord(i){
+  const now = performance.now(), was = words.click;
+  if(was) clearTimeout(was.timer);
+  if(was && was.i === i && now - was.at < DOUBLE_CLICK_MS){ words.click = null; toggleWord(i); return; }
+  words.click = { i, at: now, timer: setTimeout(() => { seekUser(W[i][1], true); }, CLICK_HOLD_MS) };
+}
+words.box.addEventListener('pointercancel', () => { words.endDrag(); words.mark(); });
+/* her wheel or finger on the words is her own scrolling; so is any move of the box the page did not make, such as the scrollbar or a key */
+words.box.addEventListener('wheel', () => words.leave(), { passive: true });
+words.box.addEventListener('touchmove', () => words.leave(), { passive: true });
+words.box.addEventListener('scroll', () => {
+  /* a box that changed size moves its own content; that is not her either */
+  const h = words.box.clientHeight, resized = h !== words.boxH;
+  words.boxH = h;
+  if(C.herScroll(words.box.scrollTop, words.expectTop, resized)) words.leave();
+  words.dragTo();                         /* a wheel or the edge moved the words under a drag: it picks on */
+  words.placeBar();
+}, { passive: true });
+words.box.addEventListener('keydown', e => {
+  if(!W.length) return;
+  if(e.shiftKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')){
+    e.preventDefault(); e.stopPropagation();
+    /* the first press picks the word being said; each press after that takes one more word on that side */
+    const cur = Math.max(0, words.cur), p = words.sel;
+    if(!p) words.setSel(cur, cur, cur);
+    else if(e.key === 'ArrowRight' && p.b < W.length - 1) words.setSel(p.a, p.b + 1, p.b + 1);
+    else if(e.key === 'ArrowLeft' && p.a > 0) words.setSel(p.a - 1, p.b, p.a - 1);
+    announce($('selInfo').textContent);
+  } else if(e.key === 'Enter'){ e.preventDefault(); keepPart(); }
+});
+
+/* ── cutting and keeping by hand, and taking the last one back ── */
+/** Send one thing she did to the words. A server from before it could cut words
+    answers 404: the page says so in the top line and changes nothing. */
+function doToWords(change){
+  return send(change.path, change.body, { action: change.kind, onError: (msg, err) => {
+    if(err && err.status === 404){ say(change.kind === 'back' ? CANT_BRING_BACK : CANT_CUT); return; }
+    setSaved('error'); showError(msg);
+  } });
+}
+/** The state with its words as the page shows them, struck wherever a removal takes any of a word, so a
+    word the page shows struck is brought back by a double-click, and never cut again. */
+function shownState(){ return Object.assign({}, S, { words: W }); }
+/** A double-click on word i, or X with no words picked: a word that plays is cut, a struck word comes back. */
+function toggleWord(i){
+  const change = S && C.wordChange(shownState(), i);
+  if(!change) return;
+  /* words that don't say who took them out come from a server that can't bring one back */
+  if(change.kind === 'back' && !C.tellsWho(W)){ say(CANT_BRING_BACK); return; }
+  if(words.sel){ words.sel = null; words.mark(); }
+  doToWords(change);
+}
+/** Cut: exactly the words she picked. */
+function cutPart(){
+  const p = words.sel, b = $('cutBtn'); if(!p || !S) return;
+  if(b.getAttribute('aria-busy') === 'true') return;
+  b.setAttribute('aria-busy', 'true');
+  doToWords(C.cutChange(shownState(), p.a, p.b)).then(ok => {
+    b.removeAttribute('aria-busy');
+    if(!ok) return;
+    words.sel = null; words.dirty = true; paint(true);
+    if(document.activeElement === document.body) words.box.focus({ preventScroll: true });
+  });
+}
+$('cutBtn').addEventListener('click', cutPart);
+
+/* One step back. Claude's side keeps what the last cut, keep or bring-back changed,
+   and says in the state whether there is something to take back. */
+const undo = { timer: 0 };
+function showUndo(){
+  $('undoBtn').hidden = false;
+  clearTimeout(undo.timer);
+  undo.timer = setTimeout(hideUndo, UNDO_SHOWS_MS);
+}
+function hideUndo(){
+  const b = $('undoBtn'), held = document.activeElement === b;
+  clearTimeout(undo.timer);
+  b.hidden = true;
+  if(held) words.box.focus({ preventScroll: true });
+}
+function undoLast(){
+  if(!S || !S.can_undo){ say('Nothing to undo.'); return; }
+  hideUndo();
+  send('api/undo', {}, { action: 'undo', onError: (msg, err) => {
+    if(err && err.status === 404){ say('This page can’t undo yet.'); return; }
+    setSaved('error'); showError(msg);
+  } }).then(ok => {
+    if(ok){ words.sel = null; words.dirty = true; paint(true); }
+  });
+}
+$('undoBtn').addEventListener('click', undoLast);
+
+function keepPart(){
+  const p = words.part(); if(!p || !S) return;
+  const start = W[p.a][1], end = W[p.b][2];
+  if(!(end > start)) return;
+  const b = $('keepBtn');
+  if(b.getAttribute('aria-busy') === 'true') return;
+  b.setAttribute('aria-busy', 'true'); b.textContent = 'Keeping…';
+  send('api/keep', { start: +start.toFixed(3), end: +end.toFixed(3) }, { action: 'keep' }).then(ok => {
+    b.removeAttribute('aria-busy'); b.textContent = 'Keep';
+    if(ok){
+      words.sel = null; words.dirty = true; paint(true);
+      announce('Kept. Nothing is taken out of the sentences those words are in.');
+      if(document.activeElement === document.body) (($('keptBtn').hidden ? null : $('keptBtn')) || words.box).focus({ preventScroll: true });
+    }
+  });
+}
+$('keepBtn').addEventListener('click', keepPart);
+
+/* ══ the whole video, as one bar under it ══════════════════════
+   The bar is as wide as the video and holds the whole recording. One block per
+   cluster, as wide as the cluster is long, shaded by how many edits it holds.
+   A press anywhere on it, a block too, moves the video there at once, and a drag
+   moves it on with the pointer, off the bar as well, until she lets go. A block
+   shows a play button under the pointer or the keyboard; that button alone, pressed
+   and let go without a drag, plays the cluster from its start. */
+const bar = { box: $('bar'), track: $('barTrack'), here: -1, press: null };
+const BLOCK_ICONS = '<span class="go" aria-hidden="true"><svg class="play" viewBox="0 0 16 16"><path d="M4.5 2.5v11l9-5.5z" fill="currentColor"/></svg>' +
+  '<svg class="pause" viewBox="0 0 16 16"><rect x="3.5" y="2.5" width="3" height="11" rx=".6" fill="currentColor"/><rect x="9.5" y="2.5" width="3" height="11" rx=".6" fill="currentColor"/></svg></span>';
+function renderBar(){
+  $('blocks').innerHTML = !DUR ? '' : CL.map((c, i) => {
+    /* a block that touches the one before it starts a little later, so the bar shows between the two */
+    const gap = C.touchesBefore(CL, i, DUR) ? BLOCK_GAP_PX : 0;
+    const left = (c.start / DUR * 100).toFixed(3) + '%', width = (Math.max(0, c.end - c.start) / DUR * 100).toFixed(3) + '%';
+    return '<button type="button" class="blk" id="blk-' + i + '" data-i="' + i + '" data-level="' + c.level + '" data-playing="false"' +
+      ' style="left:' + (gap ? 'calc(' + left + ' + ' + gap + 'px)' : left) + ';width:' + (gap ? 'calc(' + width + ' - ' + gap + 'px)' : width) + '"' +
+      ' aria-label="' + esc(C.clusterName(c, false)) + '">' + BLOCK_ICONS + '</button>';
+  }).join('');
+  bar.here = -1;
+}
+/** The playback, as the Core rules for the blocks read it. */
+function playingNow(){ return { want: PB.want, job: PB.job, key: PB.jobKey }; }
+/** The block whose cluster is playing shows a pause button, and says so; every other block offers play. */
+function markBlocks(){
+  const now = playingNow();
+  document.querySelectorAll('#blocks .blk').forEach(b => {
+    const i = +b.dataset.i, playing = C.blockPlaying(i, now);
+    if(b.dataset.playing === String(playing)) return;
+    b.dataset.playing = String(playing);
+    if(CL[i]) b.setAttribute('aria-label', C.clusterName(CL[i], playing));
+  });
+}
+/** A press on block i: play its cluster to its end, or pause it while it is the one playing. */
+function playCluster(i){
+  const press = C.blockPress(CL, i, playingNow());
+  if(!press) return;
+  if(press.action === 'pause'){ stopPlayback(); return; }
+  startPlayback({ job: press.job, key: press.key, from: press.from, stopAt: press.stopAt });
+}
+function barTime(clientX){ const r = bar.box.getBoundingClientRect(); return Math.max(0, Math.min(DUR, (clientX - r.left) / r.width * DUR)); }
+/* The tip over the bar is one line of plain text (a time), or a block's two lines: a bold name and its edit
+   count. Each line is a span set with textContent, never markup. */
+function tipLine(cls, text){ const el = document.createElement('span'); el.className = cls; el.textContent = text; return el; }
+function showTip(what, x){
+  const tip = $('hovertip'), w = bar.box.clientWidth;
+  if(typeof what === 'string') tip.textContent = what;
+  else tip.replaceChildren(tipLine('tip-name', what.name), tipLine('tip-edits', what.edits));
+  tip.hidden = false;
+  const half = tip.offsetWidth / 2;
+  tip.style.left = Math.max(half, Math.min(w - half, x)) + 'px';
+}
+function showBlockTip(i, x){ showTip(C.clusterTip(CL[i]), x); }
+function hideTip(){ $('hovertip').hidden = true; }
+/* The press is captured, so the drag keeps going wherever the pointer goes until she lets go, and its
+   default is stopped: a press that could start a text selection or a drag of the page's own lets the
+   browser take the pointer away mid-drag (pointercancel), which is how a scrub used to die on a block. */
+bar.box.addEventListener('pointerdown', e => {
+  if(!DUR || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  e.preventDefault();
+  const play = e.target.closest('.go'), blk = play && play.closest('.blk');
+  bar.press = { id: e.pointerId, x: e.clientX, block: blk ? +blk.dataset.i : -1, moving: !blk };
+  try{ bar.box.setPointerCapture(e.pointerId); }catch(x){}
+  bar.track.focus({ preventScroll: true });
+  if(!blk) seekUser(barTime(e.clientX));
+});
+bar.box.addEventListener('pointermove', e => {
+  if(!DUR || !S) return;
+  const p = bar.press;
+  if(p && e.pointerId === p.id && (p.moving || Math.abs(e.clientX - p.x) >= DRAG_START_PX)){
+    p.moving = true;
+    seekUser(barTime(e.clientX));
+  }
+  const b = !p && e.target.closest('.blk');
+  const x = e.clientX - bar.box.getBoundingClientRect().left;
+  if(b) showBlockTip(+b.dataset.i, x);
+  else showTip(C.clock(barTime(e.clientX)), x);
+});
+/** The press ends. Only the play button, let go without a drag, plays its cluster. */
+function endPress(e){
+  const p = bar.press;
+  if(!p || e.pointerId !== p.id) return;
+  bar.press = null;
+  if(e.type === 'pointerup' && !p.moving && p.block >= 0) playCluster(p.block);
+}
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => bar.box.addEventListener(t, endPress));
+/* Enter or Space on a block the keyboard is on presses it: the click such a press sends has no pointer (detail 0) */
+$('blocks').addEventListener('click', e => {
+  const b = e.target.closest('.blk');
+  if(b && e.detail === 0) playCluster(+b.dataset.i);
+});
+bar.box.addEventListener('pointerleave', hideTip);
+$('blocks').addEventListener('focusin', e => {
+  const b = e.target.closest('.blk'); if(!b) return;
+  showBlockTip(+b.dataset.i, b.offsetLeft + b.offsetWidth / 2);
+});
+$('blocks').addEventListener('focusout', hideTip);
+/* One handler for the whole bar, so the track and a focused block move the same way: arrows, Home and
+   End hop the video whichever of the two has the keyboard. Space or Enter on a block plays its cluster
+   instead of reaching the document handler, where Space always means the video's own play or pause. */
+bar.box.addEventListener('keydown', e => {
+  if(e.metaKey || e.ctrlKey || e.altKey) return;
+  const blk = e.target.closest('.blk');
+  if(blk && (e.key === ' ' || e.key === 'Enter')){ e.preventDefault(); e.stopPropagation(); playCluster(+blk.dataset.i); return; }
+  const t = vid.currentTime || 0;
+  const map = { ArrowLeft: -HOP, ArrowRight: HOP, ArrowDown: -HOP, ArrowUp: HOP, PageDown: -60, PageUp: 60 };
+  if(e.key in map){ e.preventDefault(); e.stopPropagation(); seekUser(t + map[e.key]); }
+  else if(e.key === 'Home'){ e.preventDefault(); e.stopPropagation(); seekUser(0); }
+  else if(e.key === 'End'){ e.preventDefault(); e.stopPropagation(); seekUser(Math.max(0, DUR - 1)); }
+});
+let resizeT = 0;
+window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { words.scroll(); words.placeBar(); }, 80); });
+
+
+/* ══ export: the one main button ═══════════════════════════════
+   POST api/export starts the full render, the same job Claude's render tool
+   starts. While it runs the page asks how far it is; a render Claude started
+   shows here too. */
+const NO_EXPORT_HERE = 'This page can’t export yet. Tell Claude to render the video.';
+const IDLE_EXPORT = { state: 'idle', progress: null, file: null, folder: null, message: '', holds_earlier_edit: false };
+const exporter = { now: IDLE_EXPORT, missing: false, asking: false, timer: 0, misses: 0 };
+function showExport(exp){
+  const was = exporter.now.state;
+  exporter.now = exp && exp.state ? exp : IDLE_EXPORT;
+  const v = C.exportView(exporter.now), b = $('exportBtn');
+  setText('exportBtn', v.label);
+  b.setAttribute('aria-disabled', v.clickable ? 'false' : 'true');
+  exportSay(v.note, v.warn, v.hover);
+  $('copyPath').hidden = !v.path;
+  if(v.holdsEarlier != null) topline.holdsEarlier = v.holdsEarlier;
+  else if(v.state === 'idle') topline.holdsEarlier = false;
+  renderStatus();
+  clearTimeout(exporter.timer);
+  if(v.state === 'running') exporter.timer = setTimeout(askExport, EXPORT_ASK_MS);
+  else if(was === 'running') announce(v.note || exporter.now.message || 'The export stopped.');
+}
+/** Put one sentence beside the Export button, or clear it with no text. */
+function exportSay(text, warn, hover){
+  const note = $('exportNote');
+  note.hidden = !text;
+  note.dataset.warn = warn ? 'true' : 'false';
+  setText('exportText', text || '');
+  $('exportText').title = hover || '';
+  $('copyPath').hidden = true;
+}
+async function askExport(){
+  try{
+    const r = await fetch('api/export', { cache: 'no-store' });
+    if(r.status === 404){ exporter.missing = true; showExport(IDLE_EXPORT); return; }
+    const j = await r.json();
+    if(!r.ok || !j.export) throw new Error(j.error || 'no export in the answer');
+    exporter.misses = 0;
+    showExport(j.export);
+  }catch(err){
+    if(++exporter.misses < EXPORT_MISSES){ exporter.timer = setTimeout(askExport, EXPORT_ASK_MS); return; }
+    exporter.misses = 0;
+    showExport(IDLE_EXPORT);
+    exportSay('The page lost touch with the export. Ask Claude whether it finished.', true);
+  }
+}
+async function pressExport(){
+  if(exporter.asking || exporter.now.state === 'running') return;
+  if(EXAMPLE){ exportSay('This is the example, so there is no video to export.'); return; }
+  if(exporter.missing){ exportSay(NO_EXPORT_HERE); return; }
+  const b = $('exportBtn');
+  exporter.asking = true; b.setAttribute('aria-busy', 'true');
+  try{
+    const r = await fetch('api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const j = await r.json().catch(() => ({}));
+    if(r.status === 404){ exporter.missing = true; exportSay(NO_EXPORT_HERE); }
+    else if(!r.ok || !j.export) exportSay(j.error || 'The export did not start. Ask Claude to render the video.', true);
+    else { topline.holdsEarlier = false; showExport(j.export); }
+  }catch(err){
+    exportSay(LOST_TOUCH, true);
+  }
+  exporter.asking = false; b.removeAttribute('aria-busy');
+}
+/** Learn where the export stands when the state did not say: a 404 means this server has no export yet. */
+async function findExport(){
+  if(EXAMPLE || (S && S.export)) return;
+  try{
+    const r = await fetch('api/export', { cache: 'no-store' });
+    if(r.status === 404){ exporter.missing = true; return; }
+    const j = await r.json();
+    if(r.ok && j.export) showExport(j.export);
+  }catch(err){ /* pressing the button will say what is wrong */ }
+}
+$('exportBtn').addEventListener('click', pressExport);
+$('copyPath').addEventListener('click', async () => {
+  const path = C.exportView(exporter.now).path, b = $('copyPath'); if(!path) return;
+  let ok = true;
+  try{ await navigator.clipboard.writeText(path); }catch(err){ ok = false; }
+  if(!ok){ setText('exportText', path); announce('Could not copy. The path is on the page.'); return; }
+  setText('copyPath', 'Copied'); announce('Path copied.');
+  setTimeout(() => setText('copyPath', 'Copy path'), COPIED_MS);
+});
+
+/* ══ keyboard ═════════════════════════════════════════════════ */
+document.addEventListener('keydown', e => {
+  const tgt = e.target;
+  if(tgt.closest && tgt.closest('input, textarea, select, [contenteditable="true"]')) return;
+  /* the undo every app has: Command or Control with Z. It is left alone when there is nothing of hers to undo. */
+  if((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && S && S.can_undo){ e.preventDefault(); undoLast(); return; }
+  if(e.metaKey || e.ctrlKey || e.altKey) return;
+  const onButton = tgt.closest && tgt.closest('button, [role="slider"], [role="radio"]');
+  if(e.key === 'Escape'){
+    if(PB.job !== 'free' && PB.want){ stopPlayback(); e.preventDefault(); return; }
+    if(words.sel){ words.clear(); e.preventDefault(); }
+    return;
+  }
+  if(onButton && e.key === 'Enter') return;                       /* Enter presses the focused button; Space always plays */
+  if(!S) return;
+  switch(e.key){
+    case ' ': e.preventDefault(); togglePlay(); break;
+    case 'e': case 'E': setMode(PB.mode === 'edited' ? 'original' : 'edited'); break;
+    case 'ArrowLeft': if(!onButton){ e.preventDefault(); hop(-HOP); } break;
+    case 'ArrowRight': if(!onButton){ e.preventDefault(); hop(HOP); } break;
+    case 'Home': if(!onButton){ e.preventDefault(); startPlayback({ job: 'free', from: 0 }); } break;
+    case '[': hopCut(-1); break;
+    case ']': hopCut(1); break;
+    case 'x': case 'X': if(words.sel) cutPart(); else toggleWord(words.cur); break;
+    case 'k': case 'K': keepPart(); break;
+    case 'z': case 'Z': undoLast(); break;
+    case 'n': case 'N': openFlagged(); break;
+    case '?': { const p = $('shortcuts'); if(p.showPopover) p.togglePopover(); } break;
+  }
+});
+
+/* a focused button would also take Space as a press on key-up; Space belongs to play */
+document.addEventListener('keyup', e => {
+  if(e.key !== ' ' || e.metaKey || e.ctrlKey || e.altKey) return;
+  if(e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  e.preventDefault();
+}, true);
+
+/* ══ boot ═════════════════════════════════════════════════════ */
+async function boot(){
+  const t0 = performance.now();
+  try{
+    const state = await getState();
+    perf.fetch = performance.now() - t0;
+    applyState(state);
+    perf.firstRender = performance.now() - t0;
+    setSaved('saved');
+    renderPlayState();
+    findExport();
+  }catch(err){
+    setSaved('error');
+    $('groups').innerHTML = '';
+    showError(err.message);
+    $('errText').innerHTML = '<b>Could not load the edit.</b> ' + esc(err.message);
+    $('errRetry').hidden = true;
+  }
+}
+/* read-only hooks for checking playback from the outside: nothing here changes the edit */
+window.__treatment = { PB, perf, core: C, state: () => S, ranges: () => R, clusters: () => CL, exporter, video: vid, words, undo, fine, net };
+boot();
+})();
+</script>
+</body>
+</html>

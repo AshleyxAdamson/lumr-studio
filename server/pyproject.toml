@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lumr-studio-server"
+version = "0.1.0"
+description = "Local MCP server for Lumr Studio: runs the machines and validates Claude's edit proposals."
+requires-python = ">=3.11,<3.14"
+# One locked environment (uv.lock), about 950 MB installed. torch and torchaudio
+# are pinned together: an unpinned torch resolves to a release that doesn't
+# match torchaudio. torch, torchaudio and parakeet-mlx are the heavy three:
+# measured word times and transcription. Nothing here is clipforge or hammy: the
+# engine files are copies inside the package (engine/, speech/).
+dependencies = [
+    "mcp==2.2.0",
+    "numpy",
+    "pillow",
+    "torch==2.11.0",
+    "torchaudio==2.11.0",
+    "parakeet-mlx==0.5.2",
+]
+
+[project.scripts]
+lumr-studio-server = "lumr_studio.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["lumr_studio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+# `uv run --locked` installs the default groups. Empty means the plugin's
+# environment holds no pytest. Tests ask for it: `--group dev`.
+default-groups = []
+# The speech and alignment stack is mlx on Apple Silicon. The lock covers that
+# one platform and refuses to resolve for any other.
+environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
