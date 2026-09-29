@@ -37,7 +37,16 @@ On a 21:47 test take, measured word times took out more than twice as much at ev
 
 ## Start
 
-You need a Mac with Apple Silicon, Claude Code 2.1.78 or newer, and `brew install uv ffmpeg`. Then:
+You need a Mac with Apple Silicon, Claude Code 2.1.78 or newer, and `brew install uv ffmpeg`.
+
+It also needs two models on your Mac, about 2.85 GB together. They download once, the first time you edit a video, and only after you say yes:
+
+| Model | What it does | Size | From |
+|---|---|---|---|
+| NVIDIA Parakeet TDT 0.6B v2 | Writes the transcript: the words you said, with punctuation. | 2.47 GB | Hugging Face |
+| wav2vec 2.0 base 960h | Finds exactly where each word starts and ends in the sound, so cuts trim the gaps between words without ever cutting into one. | 0.38 GB | PyTorch's download site |
+
+Two models because each does one job well. The transcript model gets the words right but only guesses at their timing, and the timing model measures timing but can't transcribe well. Without the timing model Lumr Studio still works, but it takes out much less. Then install:
 
 ```sh
 claude plugin marketplace add AshleyxAdamson/lumr-studio
@@ -48,7 +57,7 @@ Start a session and tell Claude Code:
 
 > Use tight-cut on this video. Give me a standard YouTube cut.
 
-The first session builds the plugin's Python environment (about 950 MB), and Claude asks before it downloads the two models (2.85 GB). [GUIDE.md](GUIDE.md) has the rest: the review page, the models, what runs, what's saved, extras and support. `TOOLS.md` is the tool contract, and [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md) cover privacy and security.
+The first session also builds the plugin's Python environment (about 950 MB). [GUIDE.md](GUIDE.md) has the rest: the review page, the models, what runs, what's saved, extras and support. `TOOLS.md` is the tool contract, and [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md) cover privacy and security.
 
 PolyForm Noncommercial 1.0.0. You can sell the videos you make with it. You can't resell the tool.
 
