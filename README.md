@@ -1,8 +1,63 @@
 # Lumr Studio
 
-Lumr Studio cuts the gaps out of a talking-head video and helps you tweak the cut. Claude reads the transcript and proposes cuts, with a reason for each one. You fix any of them on a review page in your browser, then export. Your video and audio files stay on your machine.
+**Finally, an editing harness that cuts your speech without dropping you mid-word, and trims the gaps between your words so seamlessly nobody hears the edit.**
 
-It runs inside Claude Code and it's free to use. For now it runs on Apple Silicon Macs only.
+Lumr Studio is a Claude Code plugin for talking-head video. Claude reads your whole take, cuts the dead air, the filler and the stumbles, and checks every join the way a viewer will hear it. You get a plan with a reason for every cut, a review page to change anything, and an export when you say go. It runs on your Mac (Apple Silicon for now), it's free, and your video never leaves it.
+
+## Why it's different
+
+Most tools that tighten a talking-head video work one of two ways, and both leave cuts you can hear.
+
+- **Silence cutters** (TimeBolt, AutoCut, the silence tools in Premiere and Resolve) cut wherever the sound drops under a loudness line. The fading "s" at the end of a word, a soft "th", a breath before you start all sit near that line, so the cut clips them. And they only find the long pauses. The small gaps inside a sentence, the ones that make a take feel slow, stay in.
+- **Transcript editors** (Descript, Gling, text-based editing in Premiere) let you cut by deleting text, so a cut is only as good as the word times under it. Raw speech-to-text times are loose. On our 21:47 test take, 94% of neighbouring words touched each other in the transcript, the median word ran twice as long as it sounded, and 427 seconds of real silence were hiding inside words. Cut on those times and you either leave the gaps in or slice through a word.
+
+Lumr Studio is built around the join, the moment one kept word lands next to the next.
+
+- **It measures every word against your voice.** A second model pins each word's start and end to the sound itself, then gives each word back the tail that belongs to it, like a fading "s". The engine never cuts inside a word. Any cut edge that would land in one gets moved out.
+- **It trims gaps instead of deleting them.** Every join keeps a pause sized to where it falls: longest between sentences, shorter at a comma, shortest inside a clause. Six paces, Natural to Max, set how much comes out. The sound is cut on the exact sample with a 20 ms fade either side, so there's no click. The result sounds tight and still breathes.
+- **It checks every join before you hear it.** Each saved edit comes back with a read of every join: a sentence that never finishes, a clipped laugh, a gap that's too tight, a jump in the picture. Claude fixes the flagged ones before it shows you the plan, and it can look at any join as a picture of the frames, the sound wave and the words either side.
+- **It reads before it cuts.** Claude reads the whole transcript before proposing anything, because a cut made halfway through can break a payoff it hasn't seen yet. It keeps your punchlines, their setups and the laughs after them. It judges each "like" by reading it: "I like jazz" stays, "into like three sections" goes, and when it's unsure the word stays.
+- **You have the last word, on your own Mac.** Every cut comes with a plain reason. Nothing renders until you say go. The review page lets you put any cut back, cut any word, or keep any stretch. No upload, no account, no telemetry.
+
+### What measuring buys you
+
+Same 21:47 take, same paces, with measured word times and with the estimated ones from the transcript:
+
+| | Measured word times | Estimated word times |
+|---|---|---|
+| Standard takes out | 3:26 | 1:25 |
+| Tight takes out | 6:30 | 2:02 |
+| Max takes out | 8:14 | 2:21 |
+| "Like" cut without clipping the word beside it | 94 of 112 | 28 of 112 |
+
+That's more than twice the dead air out at every pace, without cutting into a word. [Measured word times](#measured-word-times) has the full table.
+
+## What it can do
+
+The plugin gives Claude 11 tools and one skill, `tight-cut`. `TOOLS.md` is the contract for each tool. None of them deletes a file of yours, and none uploads your video.
+
+- `tight-cut` reads a whole recording, proposes a cut list with plain-language reasons, and only saves or renders once you say go.
+- Every saved edit comes back with a read of each join, the way a viewer hears it, and a fix for the ones likely to sound wrong. Claude repairs those before showing you the plan.
+- Likely laughs are marked in the transcript, and Claude keeps them in its own cuts. The automatic pause trims can still clip a laugh at the harder paces. On the test take, 10 places at Standard and 23 at Max. The join check flags those, and Claude tells you which stretch to keep on the page.
+- Six pace stops, from Natural to Max, set how much of each pause comes out. Each leaves a pause at every join, the most between sentences. Fine tune holds two sliders for a setting between the stops.
+- Claude finds every place you say "like" (`find_words`), reads each one, and picks the filler ones. "I like jazz" stays. "Into like three sections" goes. When Claude is unsure, the word stays. You get one switch for all of Claude's picks and a double-click for each.
+- The review page is one page to shape the edit after Claude makes it. It plays your video from disk, and every change saves at once.
+
+| On the page | What it does |
+|---|---|
+| Pace | Six stops: Natural, Standard, Fast, Tight, Hard, Max, with the time each saves. Hard and Max say what you give up. |
+| Fine tune | Opens under the pace. Two sliders, "Cut pauses longer than" and "Speech kept between cuts". Both cut harder to the right. The pace then reads Custom. Pressing a stop leaves Custom. |
+| Take out | A switch each for long pauses, filler words, stutters and filler likes, with a count. Filler words names the words it takes at this pace, such as "like, so, and". "Make this my usual" saves your pace and switches as the start for your next video. |
+| Filler likes | The likes Claude picked, all on or off. Until Claude has picked, it reads "Ask Claude to find them." |
+| Cuts | Your own cuts first, then Claude's in four groups, one row per cut. Hear it cut, leave it out, put it back, or take yours back. One count shows how many need a look, and each of those says why. |
+| Words | Double-click a word to cut it. Double-click a struck word to bring it back. Drag across words to pick a part, then press Cut or Keep. Cut takes exactly the words you picked. Keep means nothing is taken out there after that, and "Kept: 1" opens the list. |
+| Undo | Shows in the top line after you cut, keep, or bring back words. The Z key does the same. It takes back your last cut or keep, one step. It doesn't cover the pace, the sliders, or the switches. |
+| Play, Previous, Next | Centered under the video. Previous and Next go from cut to cut. The video and the words move together. |
+| Original and Edited | Switch between your recording and the edit. |
+| The bar | The whole video along the bottom. Each amber block is a stretch where lots was cut close together; hover one and it says "More cuts here" and how many edits it holds. The shade shows the same: a few, many, or the most. Press the play button on a block to hear that stretch. Click or drag anywhere else on the bar to move. |
+| Export video | The one filled button, upper right. It shows a percent while it runs, then the file's name with "Copy path". |
+
+Struck words say who took them out: dim for the pace, red for Claude, teal for you. When you're done, tell Claude, and it reads what you changed.
 
 ## Start
 
@@ -47,45 +102,25 @@ When all is well it prints nothing. When something's missing, Claude tells you w
 
 It does one thing besides look. When `uv` is there and the plugin's Python environment isn't built, it starts that build in the background from the plugin's own locked package list (`hooks/build-env.sh`), the same build the server's launch would do. It prints one line saying the build is running and that a failed server is expected until it's done. The environment, `build.log` and a short-lived `build.lock` folder in the plugin's data folder are all it writes. One build runs at a time, and a later session picks up a running build instead of starting another. If the last build failed, the line says so and points to `build.log`. Without the hook a missing `uv` would go unnoticed, because with no `uv` the server never starts and no tool could say so.
 
-## What it can do
+## Measured word times
 
-The plugin gives Claude 11 tools and one skill, `tight-cut`. `TOOLS.md` is the contract for each tool. None of them deletes a file of yours, and none uploads your video.
+The pace cuts the pauses between your words, so the plugin has to know where each word starts and ends. A transcript's own word times are estimates. Most words touch the next one, so the quiet between them is hidden inside the words, and the plugin never cuts inside a word.
 
-- `tight-cut` reads a whole recording, proposes a cut list with plain-language reasons, and only saves or renders once you say go.
-- Every saved edit comes back with a read of each join, the way a viewer hears it, and a fix for the ones likely to sound wrong. Claude repairs those before showing you the plan.
-- Likely laughs are marked in the transcript, and Claude keeps them in its own cuts. The automatic pause trims can still clip a laugh at the harder paces. On the test take, 10 places at Standard and 23 at Max. The join check flags those, and Claude tells you which stretch to keep on the page.
-- Six pace stops, from Natural to Max, set how much of each pause comes out. Each leaves a pause at every join, the most between sentences. Fine tune holds two sliders for a setting between the stops.
-- Claude finds every place you say "like" (`find_words`), reads each one, and picks the filler ones. "I like jazz" stays. "Into like three sections" goes. When Claude is unsure, the word stays. You get one switch for all of Claude's picks and a double-click for each.
-- The review page is one page to shape the edit after Claude makes it. It plays your video from disk, and every change saves at once.
+Measuring pins each word to the sound. It needs the wav2vec 2.0 model. It takes under a minute for a 20 minute video (22 seconds on the 21:47 test take), once per video, inside the same wait as transcribing. With the model missing or incomplete, the plugin uses estimated times and tells you so, on the page and in chat.
 
-| On the page | What it does |
-|---|---|
-| Pace | Six stops: Natural, Standard, Fast, Tight, Hard, Max, with the time each saves. Hard and Max say what you give up. |
-| Fine tune | Opens under the pace. Two sliders, "Cut pauses longer than" and "Speech kept between cuts". Both cut harder to the right. The pace then reads Custom. Pressing a stop leaves Custom. |
-| Take out | A switch each for long pauses, filler words, stutters and filler likes, with a count. Filler words names the words it takes at this pace, such as "like, so, and". "Make this my usual" saves your pace and switches as the start for your next video. |
-| Filler likes | The likes Claude picked, all on or off. Until Claude has picked, it reads "Ask Claude to find them." |
-| Cuts | Your own cuts first, then Claude's in four groups, one row per cut. Hear it cut, leave it out, put it back, or take yours back. One count shows how many need a look, and each of those says why. |
-| Words | Double-click a word to cut it. Double-click a struck word to bring it back. Drag across words to pick a part, then press Cut or Keep. Cut takes exactly the words you picked. Keep means nothing is taken out there after that, and "Kept: 1" opens the list. |
-| Undo | Shows in the top line after you cut, keep, or bring back words. The Z key does the same. It takes back your last cut or keep, one step. It doesn't cover the pace, the sliders, or the switches. |
-| Play, Previous, Next | Centered under the video. Previous and Next go from cut to cut. The video and the words move together. |
-| Original and Edited | Switch between your recording and the edit. |
-| The bar | The whole video along the bottom. Each amber block is a stretch where lots was cut close together; hover one and it says "More cuts here" and how many edits it holds. The shade shows the same: a few, many, or the most. Press the play button on a block to hear that stretch. Click or drag anywhere else on the bar to move. |
-| Export video | The one filled button, upper right. It shows a percent while it runs, then the file's name with "Copy path". |
+What you lose without it, measured on the test take (21:47, the word "like" said 112 times):
 
-Struck words say who took them out: dim for the pace, red for Claude, teal for you. When you're done, tell Claude, and it reads what you changed.
+| | Measured word times | Estimated word times |
+|---|---|---|
+| Natural takes out | 1:48 | 0:46 |
+| Standard takes out | 3:26 | 1:25 |
+| Fast takes out | 5:38 | 1:55 |
+| Tight takes out | 6:30 | 2:02 |
+| Hard takes out | 7:53 | 2:20 |
+| Max takes out | 8:14 | 2:21 |
+| Places where "like" can be cut without clipping the word beside it | 94 of 112 | 28 of 112 |
 
-## Turning the extras on
-
-Two extras are built and tested, and they ship switched off. One is the publish kit (the `publish-kit` skill, with the tools `chapter_times` and `save_publish_kit`), which writes title options and a description with chapters, plus tags, from the video's own transcript. The other is overlays (the `add-visuals` skill, with `set_overlays` and `get_overlays`), which shows your own photos and clips over the talk.
-
-The overlay code stays linked and dormant. With no saved overlays, nothing is drawn over your video. The publish kit's skill and tools don't load at all.
-
-To turn them on, edit two files inside the plugin's folder.
-
-1. In `.mcp.json`, add `"LUMR_STUDIO_EXTRAS": "publish_kit,overlays"` to `env`. Name one or both. A name that isn't an extra stops the server at start.
-2. In `.claude-plugin/plugin.json`, add `"skills": ["./extras/skills/publish-kit/", "./extras/skills/add-visuals/"]`. The key adds to the default `skills/` folder.
-
-Then restart Claude Code, or run `/reload-plugins`. A plugin update replaces those files, so you'd make the edit again.
+On estimated times the four harder stops sit within 26 seconds of each other, so Fast, Tight, Hard, and Max sound nearly alike. Cutting a single word by hand still works. It lands less exactly.
 
 ## The models
 
@@ -106,25 +141,18 @@ The plugin fetches them itself, in a background job that shows its progress. Som
 
 Credit for both models is in `NOTICE`, and below.
 
-## Measured word times
+## Turning the extras on
 
-The pace cuts the pauses between your words, so the plugin has to know where each word starts and ends. A transcript's own word times are estimates. Most words touch the next one, so the quiet between them is hidden inside the words, and the plugin never cuts inside a word.
+Two extras are built and tested, and they ship switched off. One is the publish kit (the `publish-kit` skill, with the tools `chapter_times` and `save_publish_kit`), which writes title options and a description with chapters, plus tags, from the video's own transcript. The other is overlays (the `add-visuals` skill, with `set_overlays` and `get_overlays`), which shows your own photos and clips over the talk.
 
-Measuring pins each word to the sound. It needs the wav2vec 2.0 model. It takes under a minute for a 20 minute video (22 seconds on the 21:47 test take), once per video, inside the same wait as transcribing. With the model missing or incomplete, the plugin uses estimated times and tells you so, on the page and in chat.
+The overlay code stays linked and dormant. With no saved overlays, nothing is drawn over your video. The publish kit's skill and tools don't load at all.
 
-What you lose without it, measured on the test take (21:47, the word "like" said 112 times):
+To turn them on, edit two files inside the plugin's folder.
 
-| | Measured word times | Estimated word times |
-|---|---|---|
-| Natural takes out | 1:48 | 0:46 |
-| Standard takes out | 3:26 | 1:25 |
-| Fast takes out | 5:38 | 1:55 |
-| Tight takes out | 6:30 | 2:02 |
-| Hard takes out | 7:53 | 2:20 |
-| Max takes out | 8:14 | 2:21 |
-| Places where "like" can be cut without clipping the word beside it | 94 of 112 | 28 of 112 |
+1. In `.mcp.json`, add `"LUMR_STUDIO_EXTRAS": "publish_kit,overlays"` to `env`. Name one or both. A name that isn't an extra stops the server at start.
+2. In `.claude-plugin/plugin.json`, add `"skills": ["./extras/skills/publish-kit/", "./extras/skills/add-visuals/"]`. The key adds to the default `skills/` folder.
 
-On estimated times the four harder stops sit within 26 seconds of each other, so Fast, Tight, Hard, and Max sound nearly alike. Cutting a single word by hand still works. It lands less exactly.
+Then restart Claude Code, or run `/reload-plugins`. A plugin update replaces those files, so you'd make the edit again.
 
 ## What runs, what it reaches, and what Claude sees
 
@@ -200,3 +228,11 @@ Lumr Studio is under the PolyForm Noncommercial License 1.0.0. The full text is 
 You can sell the videos you make with it. You can't resell the tool.
 
 The files in `server/lumr_studio/engine/` and `server/lumr_studio/speech/` are copies of files from two other projects. The copied ClipForge and Hammy files are by the same author and included here under this plugin's license. The originals keep their own terms where they live.
+
+## To do
+
+- Run on Intel Macs, Windows and Linux. Today it's Apple Silicon only.
+- Bring the server up in the first session, without a Reconnect in `/mcp` while the environment builds.
+- Keep laughs safe from the automatic pause trims at the harder paces. On the test take they can clip 10 at Standard and 23 at Max.
+- Undo more than one step, and cover the pace, the sliders and the switches.
+- Ship the publish kit and overlays switched on, so they don't need two file edits after every update.
