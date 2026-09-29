@@ -6,17 +6,25 @@ Lumr Studio is a Claude Code plugin for talking-head video. Claude reads your wh
 
 ## Why it's different
 
-Silence cutters (TimeBolt, AutoCut, the silence tools in Premiere and Resolve) cut on a loudness line. They clip soft word endings and miss the small gaps inside sentences. Transcript editors (Descript, Gling, text-based editing in Premiere) cut on word times, and raw speech-to-text times are loose. On our test take they hid 427 seconds of real silence inside words.
+Most tools cut on a loudness line or on the transcript's word times. Loudness cutters clip soft word endings and miss the small gaps inside sentences. Transcript cutters are only as good as their word times, and raw speech-to-text times are loose: on our test take they hid 427 seconds of real silence inside words. When those tools do shorten gaps, they cut every one to the same length.
 
 Lumr Studio is built around the join, where one kept word lands next to the next.
 
-- **It measures every word.** A second model pins each word to your voice, and the engine never cuts inside a word.
-- **It trims gaps instead of deleting them.** Each join keeps a pause sized to where it falls, longest between sentences, with a 20 ms fade so there's no click.
-- **It checks every join.** Claude flags clipped laughs, unfinished sentences and gaps that are too tight, and fixes them before you see the plan.
-- **It reads before it cuts.** Claude reads the whole take first, keeps your punchlines and their setups, and judges every "like" in context. "I like jazz" stays.
-- **You decide.** Every cut has a reason, nothing renders until you say go, and nothing uploads.
+### What only Lumr does
 
-On a 21:47 test take, measuring took out more than twice as much at every pace (3:26 vs 1:25 at Standard) and cut 94 of 112 "likes" cleanly, against 28 without it.
+- **Pauses sized to where they fall.** Most tools delete pauses or cut every gap to one length. Lumr leaves the longest pause between sentences, a shorter one at a comma and the shortest inside a clause, so the edit keeps your rhythm.
+- **A reason for every cut.** Claude reads the whole take before it cuts anything, and every cut on the plan says why.
+- **Your jokes stay funny.** Laughs are picked out of the audio, and Claude keeps the punchline, the setup before it and the laugh after it.
+- **It knows which "like" is filler.** Claude reads each one. "I like jazz" stays, "into like three sections" goes, and when it's unsure the word stays.
+
+### The standards, done properly
+
+- **Never cuts inside a word.** A second model measures each word against your voice instead of trusting the transcript's guess, and any cut edge that would land in a word gets moved out.
+- **Checks every join.** Each edit comes back with a read of every join, from clipped laughs to unfinished sentences to gaps that are too tight. Claude fixes the flagged ones before you see the plan, and can look at any join as a picture of the frames, the sound wave and the words.
+- **No clicks.** Cuts land on the exact sample, with a 20 ms fade either side.
+- **Private and yours.** Nothing uploads, nothing renders until you say go, and there's no account or telemetry.
+
+On a 21:47 test take, measured word times took out more than twice as much at every pace (3:26 vs 1:25 at Standard) and cut 94 of 112 "likes" cleanly, against 28 without them.
 
 ## What it can do
 
@@ -45,6 +53,7 @@ PolyForm Noncommercial 1.0.0. You can sell the videos you make with it. You can'
 
 ## To do
 
+- **Timeline export, next up.** Send the edit to Premiere, Final Cut or Resolve as a timeline (FCPXML, Premiere XML and EDL) instead of a finished file, so you can finish in your own editor. It's built from the same kept pieces the render uses, and each cut carries Claude's reason as a marker.
 - Intel Macs, Windows and Linux.
 - Bring the server up in the first session without a Reconnect.
 - Keep laughs safe from the automatic trims at the harder paces.
