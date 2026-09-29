@@ -57,7 +57,7 @@ environment variable `LUMR_STUDIO_EXTRAS` names them, as a comma list:
 With `LUMR_STUDIO_EXTRAS=publish_kit,overlays` the server lists all 15. A name
 that is not an extra stops the server at start. An extra's skill folder sits
 in `extras/skills/`, outside the folder Claude Code scans, and comes back with
-an entry in `plugin.json` (`README.md`, "Turning the extras on"). The overlay
+an entry in `plugin.json` (`GUIDE.md`, "Turning the extras on"). The overlay
 code stays linked and dormant: with no saved overlays `render`, `preview` and
 the page draw nothing over the talk. `server/lumr_studio/offering.py` holds
 the list, and a test holds every offered skill to it: a skill in view never

@@ -4,7 +4,7 @@ The slice is the video editor: transcribe, measure word times, pace the cuts,
 review on the page, export. The publish kit and the overlays are built and
 tested but switched off. ``LUMR_STUDIO_EXTRAS`` (a comma list, empty by
 default) turns them on: it adds their tools here, and their skills come back
-with an entry in ``plugin.json`` (README, "Turning the extras on").
+with an entry in ``plugin.json`` (GUIDE.md, "Turning the extras on").
 
 This is the one list of tool names. ``server.py`` registers a tool only when
 ``offers`` says so, and a test holds the skills and the tool contract to it.

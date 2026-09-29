@@ -63,7 +63,7 @@ Environment:
 - `LUMR_STUDIO_EXTRAS` is a comma list of extras to switch on, `publish_kit`
   and `overlays`. Empty by default: the server lists 11 tools. With both it
   lists 15. An unknown name stops the server at start. Their skills come back
-  with an entry in `plugin.json` (`../README.md`, "Turning the extras on").
+  with an entry in `plugin.json` (`../GUIDE.md`, "Turning the extras on").
 - `ffmpeg` and `ffprobe` must be on `PATH`. There is no `hammy` command.
 - Transcribing runs `python -m lumr_studio.speech` in a process of its own,
   with `HF_HUB_OFFLINE=1`. It reads Parakeet (`mlx-community/parakeet-tdt-0.6b-v2`,
@@ -85,7 +85,7 @@ Environment:
   byte after a stop. That is the only code that fetches a model. Aligning swaps
   out torch's downloader and refuses. `TOOLS.md`, "Models", is the contract.
   Without the aligner file every tool answers `word_times: "estimated"` with a
-  note that says why. The plugin's `README.md` has what that costs, in numbers.
+  note that says why. The plugin's `GUIDE.md` has what that costs, in numbers.
 - To change a model, edit its pin in `lumr_studio/models.py`: revision or
   file name, size and sha256. Compute the sha256 from the file itself
   (`shasum -a 256`). `tests/test_models.py` holds the aligner's file name and
