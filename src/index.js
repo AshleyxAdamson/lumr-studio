@@ -290,15 +290,12 @@ export default {
       const today = getToday();
       const key = `sends/${today}/${body.send_id}.json`;
 
-      // Check for duplicate
-      try {
-        await env.SENDS.head(key);
+      // Check for duplicate (head returns null when the key is missing)
+      if (await env.SENDS.head(key)) {
         return new Response(JSON.stringify({ error: 'Duplicate send_id' }), {
           status: 409,
           headers: { 'Content-Type': 'application/json' }
         });
-      } catch (e) {
-        // Not found is expected
       }
 
       // Add received_at and store
@@ -347,13 +344,10 @@ export default {
         const dateStr = `${year}-${month}-${day}`;
         const key = `sends/${dateStr}/${sendId}.json`;
 
-        try {
-          await env.SENDS.head(key);
+        if (await env.SENDS.head(key)) {
           await env.SENDS.delete(key);
           found = true;
           break;
-        } catch (e) {
-          // Not found, continue
         }
       }
 
@@ -401,15 +395,12 @@ export default {
       const today = getToday();
       const key = `feedback/${today}/${body.feedback_id}.json`;
 
-      // Check for duplicate
-      try {
-        await env.SENDS.head(key);
+      // Check for duplicate (head returns null when the key is missing)
+      if (await env.SENDS.head(key)) {
         return new Response(JSON.stringify({ error: 'Duplicate feedback_id' }), {
           status: 409,
           headers: { 'Content-Type': 'application/json' }
         });
-      } catch (e) {
-        // Not found is expected
       }
 
       // Add received_at and store
@@ -457,13 +448,10 @@ export default {
         const dateStr = `${year}-${month}-${day}`;
         const key = `feedback/${dateStr}/${feedbackId}.json`;
 
-        try {
-          await env.SENDS.head(key);
+        if (await env.SENDS.head(key)) {
           await env.SENDS.delete(key);
           found = true;
           break;
-        } catch (e) {
-          // Not found, continue
         }
       }
 
