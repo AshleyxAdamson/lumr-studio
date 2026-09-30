@@ -44,7 +44,7 @@ PACES = ["Natural", "Standard", "Fast", "Tight", "Hard", "Max"]
 # The samples left the page in the layout round, so it no longer asks for new ones.
 FEEDBACK_ISSUES = "https://github.com/AshleyxAdamson/lumr-studio/issues/new"
 ROUTES = {"api/feedback", "api/treatment", "api/export", "api/cut", "api/cut/add", "api/cut/remove", "api/keep", "api/keep/remove",
-          "api/undo", "api/usual", "api/rate"}
+          "api/undo", "api/usual", "api/rate", "api/share/preview", "api/share/send"}
 
 needs_node = pytest.mark.skipif(NODE is None, reason="node is not installed")
 
@@ -1415,6 +1415,70 @@ def test_the_feedback_words_read_plainly():
         assert not banned_in(line) and not decimal_times_in(line) and "—" not in line, line
     screen = words_on_screen()
     assert "Send feedback" in screen and "What's on your mind?" in screen
+    assert not banned_in(screen)
+
+
+# ── help improve Lumr: send the shape of what she changed ────────────────────
+
+SHARE_PARAGRAPH = ("This sends the shape of your changes, like cut lengths, pauses and what you put back. "
+                   "It never sends your words or your video. Remove anything you'd rather keep.")
+
+
+def test_help_improve_lumr_is_a_quiet_button_that_shows_only_when_sharing_is_on():
+    top = part(markup(), "header", "top")
+    right = top[top.index('class="topright"'):]
+    assert re.search(r'<button\b[^>]*id="shareBtn"[^>]*class="btn"[^>]*\bhidden\b[^>]*>Help improve Lumr</button>', right)
+    assert not re.search(r'id="shareBtn"[^>]*class="[^"]*primary', right), "Export stays the one filled button"
+    assert right.index('id="feedbackBtn"') < right.index('id="shareBtn"') < right.index('id="exportBtn"')
+    assert top.count("btn primary") == 1
+    html = page()
+    assert "function renderShare(){ $('shareBtn').hidden = !(S && S.share && S.share.on); }" in html
+    assert "renderShare();" in html[html.index("renderTaste();"):][:80], "it follows every new state"
+
+
+def test_the_share_panel_is_a_modal_with_the_asked_for_words_and_controls():
+    dialog = re.search(r'<dialog\b[^>]*id="share"[^>]*>(.*?)</dialog>', markup(), re.S)
+    assert dialog and re.search(r'<dialog\b[^>]*aria-labelledby="h-share"', markup())
+    inside = dialog.group(1)
+    assert '<h2 id="h-share">Send what you changed</h2>' in inside
+    assert SHARE_PARAGRAPH in inside
+    assert inside.index("<h2") < inside.index(SHARE_PARAGRAPH) < inside.index('id="shareLines"') < inside.index('id="shareShow"')
+    assert re.search(r'<button id="shareShow"[^>]*aria-expanded="false"[^>]*>Show exactly what\'s sent</button>', inside)
+    assert re.search(r'<pre id="shareJson"[^>]*\bhidden\b', inside), "the raw JSON waits behind the toggle"
+    buttons = re.findall(r'<button\b[^>]*id="(share(?:Cancel|Send))"[^>]*class="([^"]*)"[^>]*>(\w+)</button>', inside)
+    assert buttons == [("shareCancel", "btn", "Cancel"), ("shareSend", "btn primary", "Send")], "Cancel then Send, Send primary"
+    assert re.search(r'<p id="shareErr" role="alert" hidden>', inside)
+    assert re.search(r'<div id="shareDone" hidden>', inside)
+    assert "Sent. Thank you. If you ever want it deleted, send us this ID:" in inside
+    assert re.search(r'<button id="shareCopy"[^>]*>Copy</button>', inside)
+
+
+def test_the_share_panel_lists_each_line_with_a_remove_and_sends_only_what_was_previewed():
+    html = page()
+    body = html[html.index("/* ══ share"):html.index("/* ══ keyboard")]
+    assert "postJSON('api/share/preview', {})" in body
+    assert "postJSON('api/share/send', { send_id: share.send.send_id, removed:" in body
+    assert 'data-remove="' in body and ">Remove</button>" in body, "each line has a Remove"
+    assert "JSON.stringify(kept, null, 2)" in body and "records.filter((_, i) => !share.removed.has(i))" in body, \
+        "the raw JSON is what remains"
+    assert "d.showModal()" in body
+    assert "keydown" not in body, "Esc is the dialog's own"
+    assert "fetch(" not in body and "XMLHttpRequest" not in body and "sendBeacon" not in body, "the page itself never calls the internet"
+    caught = body[body.index("}catch(err){\n    shareBusy(false);"):]
+    assert caught.index("shareError(err.message)") < caught.index("return;"), "an error shows its plain message"
+    assert "shareDone" in body and "navigator.clipboard.writeText(id)" in body
+
+
+def test_the_share_words_read_plainly():
+    said = ["Help improve Lumr", "Send what you changed", SHARE_PARAGRAPH, "Show exactly what's sent", "Remove", "Send", "Cancel",
+            "Sent. Thank you. If you ever want it deleted, send us this ID:", "Copy", "Copied", "Getting it ready",
+            "Nothing to send.", "Could not copy. The ID is on the page.", "ID copied.",
+            "Send the shape of what you changed, after you've seen it"]
+    for line in said:
+        assert not banned_in(line) and not decimal_times_in(line) and "—" not in line, line
+        assert not WORDS_GONE.search(line) and not re.search(r"\bedits\b", line), line
+    screen = words_on_screen()
+    assert "Send what you changed" in screen and SHARE_PARAGRAPH in " ".join(screen.split())
     assert not banned_in(screen)
 
 

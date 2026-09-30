@@ -1210,7 +1210,9 @@ def page_state(ctx: Context, *, changed: dict[str, Any] | None = None) -> dict[s
     ``{videos}``, how many other videos Lumr is learning from, or None.
     ``version`` is the plugin's, or None when it can't be read, and
     ``feedback.direct`` says whether Send feedback goes to the team's server
-    (else the page opens a GitHub issue).
+    (else the page opens a GitHub issue). ``share.on`` says whether the
+    creator can choose to send the shape of their changes (see ``shapes.py``);
+    when it is off the page says nothing about sharing.
     """
     treatment = saved_treatment(ctx.edit)
     made = _remake(ctx, treatment)
@@ -1235,6 +1237,7 @@ def page_state(ctx: Context, *, changed: dict[str, Any] | None = None) -> dict[s
         "taste": taste.summary_for_page(ctx.project.root),
         "version": feedback.plugin_version(),
         "feedback": {"direct": share.share_url() is not None},
+        "share": {"on": share.share_url() is not None},
         "paces": paces,
         "custom": custom,
         "fine_ranges": fine_ranges(),

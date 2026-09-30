@@ -127,7 +127,7 @@ h2 .count .mine{color:var(--user)}
 #exportNote[data-warn="true"] #exportText{color:var(--red-soft)}
 
 #feedbackThanks{font-size:12px; color:var(--text2); white-space:nowrap}
-#feedbackBtn{min-height:32px; padding:4px 14px}
+#feedbackBtn, #shareBtn{min-height:32px; padding:4px 14px}
 
 /* the feedback form: a modal, so the page behind it waits */
 #feedback{
@@ -150,6 +150,27 @@ h2 .count .mine{color:var(--user)}
 #feedback .note{margin-top:var(--s4); font-size:12px; color:var(--text2); text-wrap:pretty}
 #fbErr{margin-top:var(--s3); font-size:12px; color:var(--red-soft)}
 .modalacts{display:flex; justify-content:flex-end; gap:var(--s2); margin-top:var(--s4)}
+
+/* Help improve Lumr: a modal that shows exactly what would be sent, line by line, before anything is */
+#share{
+  width:min(520px, calc(100vw - 32px)); max-height:calc(100vh - 32px); overflow-y:auto; padding:var(--s5);
+  border:1px solid var(--line2); border-radius:8px; background:var(--ink2); color:var(--text);
+  box-shadow:0 12px 32px rgba(0,0,0,.5);
+}
+#share::backdrop{background:rgba(0,0,0,.6)}
+#share h2{font-size:15px; margin-bottom:var(--s3)}
+#share .note{font-size:12px; color:var(--text2); text-wrap:pretty}
+#shareLines{list-style:none; margin:var(--s3) 0; max-height:min(280px, 40vh); overflow-y:auto; border:1px solid var(--line); border-radius:var(--r)}
+#shareLines li{display:flex; align-items:center; gap:var(--s2); padding:4px 4px 4px var(--s3); font-size:13px}
+#shareLines li + li{border-top:1px solid var(--line)}
+#shareLines li span{flex:1; min-width:0; text-wrap:pretty}
+#shareJson{
+  margin-top:var(--s2); max-height:min(220px, 30vh); overflow:auto; padding:var(--s2) var(--s3); border:1px solid var(--line);
+  border-radius:var(--r); background:var(--ink3); color:var(--text2); font:11px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space:pre;
+}
+#shareErr{margin-top:var(--s3); font-size:12px; color:var(--red-soft)}
+#shareId{display:block; margin-top:var(--s2); padding:var(--s2) var(--s3); border:1px solid var(--line); border-radius:var(--r);
+  background:var(--ink3); font:13px ui-monospace, Menlo, Consolas, monospace; user-select:all; overflow-wrap:anywhere}
 
 #errbar{
   grid-column:1 / -1;   /* across both columns, so an error never pushes the video out of its place */
@@ -560,6 +581,7 @@ h2 .count .mine{color:var(--user)}
       <button id="shortcutsBtn" class="helpbtn" type="button" popovertarget="shortcuts" aria-controls="shortcuts" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
       <span id="feedbackThanks" role="status"></span>
       <button id="feedbackBtn" class="btn" type="button" aria-haspopup="dialog" title="Tell the Lumr Studio team what's working and what isn't">Send feedback</button>
+      <button id="shareBtn" class="btn" type="button" aria-haspopup="dialog" hidden title="Send the shape of what you changed, after you've seen it">Help improve Lumr</button>
       <button id="exportBtn" class="btn primary" type="button" title="Make the finished video file">Export video</button>
     </div>
   </header>
@@ -709,6 +731,31 @@ h2 .count .mine{color:var(--user)}
       <button id="fbSubmit" class="btn primary" type="submit">Submit</button>
     </div>
   </form>
+</dialog>
+<dialog id="share" aria-labelledby="h-share">
+  <div id="sharePanel">
+    <h2 id="h-share">Send what you changed</h2>
+    <p class="note">This sends the shape of your changes, like cut lengths, pauses and what you put back. It never sends your words or your video. Remove anything you'd rather keep.</p>
+    <p class="note" id="shareWait" role="status" hidden>Getting it ready</p>
+    <ul id="shareLines" aria-label="What would be sent"></ul>
+    <p class="note" id="shareNone" hidden>Nothing to send.</p>
+    <button id="shareShow" class="link" type="button" aria-expanded="false" aria-controls="shareJson">Show exactly what's sent</button>
+    <pre id="shareJson" tabindex="0" hidden></pre>
+    <p id="shareErr" role="alert" hidden></p>
+    <div class="modalacts">
+      <button id="shareCancel" class="btn" type="button">Cancel</button>
+      <button id="shareSend" class="btn primary" type="button">Send</button>
+    </div>
+  </div>
+  <div id="shareDone" hidden>
+    <h2 id="h-shared">Sent</h2>
+    <p class="note" id="shareThanks">Sent. Thank you. If you ever want it deleted, send us this ID:</p>
+    <code id="shareId"></code>
+    <div class="modalacts">
+      <button id="shareCopy" class="btn" type="button">Copy</button>
+      <button id="shareClose" class="btn primary" type="button">Done</button>
+    </div>
+  </div>
 </dialog>
 <div id="announce" class="sr-only" aria-live="polite"></div>
 
@@ -2014,6 +2061,7 @@ function applyState(state, how){
   renderTakeOut();
   renderUsual();
   renderTaste();
+  renderShare();
   renderGroups();
   renderKeeps();
   renderBar();
@@ -2379,6 +2427,9 @@ function renderTaste(){
   $('tasteLine').hidden = !n;
   if(n) setText('tasteText', 'Learning from your changes on ' + n + (n === 1 ? ' video' : ' videos') + '. Ask Claude to forget any of it.');
 }
+
+/* ── Help improve Lumr: a quiet button, there only when there is somewhere to send ── */
+function renderShare(){ $('shareBtn').hidden = !(S && S.share && S.share.on); }
 
 /* ── kept no matter what: a link under the words that opens the list ── */
 function renderKeeps(){
@@ -3320,6 +3371,98 @@ $('feedbackForm').addEventListener('submit', async e => {
   ['fbMessage', 'fbName', 'fbEmail'].forEach(id => { $(id).value = ''; });
   closeFeedback();
   thanksForFeedback();
+});
+
+/* ══ share ═════════════════════════════════════════════════
+   "Help improve Lumr". The page asks this machine's server for a preview, shows each line with a Remove, and on Send
+   tells the server which lines to leave out. The server posts the preview it made; the page never calls the internet
+   and never builds the record itself. */
+const SHARE_MSG_DONE = 'Sent. Thank you. If you ever want it deleted, send us this ID:';
+const share = { send: null, lines: [], removed: new Set(), busy: false };
+function shareError(msg){ const p = $('shareErr'); p.textContent = msg || ''; p.hidden = !msg; }
+function shareBusy(on){
+  share.busy = on;
+  ['shareSend', 'shareCancel'].forEach(id => { $(id).disabled = on; });
+  if(on) $('shareSend').setAttribute('aria-busy', 'true'); else $('shareSend').removeAttribute('aria-busy');
+}
+/** What is left to send: the preview without the lines she removed. */
+function shareKept(){ return share.send ? Object.assign({}, share.send, { records: share.send.records.filter((_, i) => !share.removed.has(i)) }) : null; }
+function renderShareLines(){
+  const list = $('shareLines'), left = share.lines.map((line, i) => ({ line, i })).filter(x => !share.removed.has(x.i));
+  list.innerHTML = left.map(x => '<li><span>' + esc(x.line) + '</span><button type="button" class="btn quiet" data-remove="' + x.i +
+    '" aria-label="' + esc('Remove: ' + x.line) + '">Remove</button></li>').join('');
+  list.hidden = !left.length;
+  $('shareNone').hidden = !!left.length || !share.send;
+  $('shareSend').disabled = !left.length || share.busy;
+  const kept = shareKept();
+  $('shareJson').textContent = kept ? JSON.stringify(kept, null, 2) : '';
+}
+function showShareJson(on){
+  $('shareJson').hidden = !on;
+  $('shareShow').setAttribute('aria-expanded', on ? 'true' : 'false');
+}
+async function openShare(){
+  const d = $('share');
+  share.send = null; share.lines = []; share.removed = new Set();
+  $('sharePanel').hidden = false; $('shareDone').hidden = true;
+  shareError(''); showShareJson(false); renderShareLines();
+  $('shareWait').hidden = false; $('shareSend').disabled = true;
+  if(!d.open){ if(d.showModal) d.showModal(); else d.setAttribute('open', ''); }
+  $('shareCancel').focus();
+  try{
+    const got = await postJSON('api/share/preview', {});
+    share.send = got.send; share.lines = got.lines; share.removed = new Set();
+  }catch(err){
+    $('shareWait').hidden = true;
+    shareError(err.message);
+    return;
+  }
+  $('shareWait').hidden = true;
+  renderShareLines();
+}
+function closeShare(){
+  const d = $('share');
+  if(d.close) d.close(); else d.removeAttribute('open');
+}
+$('shareBtn').addEventListener('click', openShare);
+$('shareCancel').addEventListener('click', closeShare);
+$('shareClose').addEventListener('click', closeShare);
+$('shareShow').addEventListener('click', () => showShareJson($('shareJson').hidden));
+$('shareLines').addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('button[data-remove]');
+  if(!b || share.busy) return;
+  const next = b.closest('li').nextElementSibling || b.closest('li').previousElementSibling;
+  share.removed.add(+b.dataset.remove);
+  renderShareLines();
+  const again = next && next.querySelector('button');
+  (again || $('shareCancel')).focus();
+});
+$('shareSend').addEventListener('click', async () => {
+  if(!share.send || share.busy) return;
+  shareError(''); shareBusy(true);
+  let done;
+  try{
+    done = await postJSON('api/share/send', { send_id: share.send.send_id, removed: Array.from(share.removed).sort((a, b) => a - b) });
+  }catch(err){
+    shareBusy(false);
+    shareError(err.message);
+    renderShareLines();
+    return;
+  }
+  shareBusy(false);
+  setText('shareThanks', SHARE_MSG_DONE);
+  setText('shareId', done.send_id);
+  $('sharePanel').hidden = true; $('shareDone').hidden = false;
+  announce(SHARE_MSG_DONE + ' ' + done.send_id);
+  $('shareCopy').focus();
+});
+$('shareCopy').addEventListener('click', async () => {
+  const id = $('shareId').textContent;
+  let ok = true;
+  try{ await navigator.clipboard.writeText(id); }catch(err){ ok = false; }
+  if(!ok){ announce('Could not copy. The ID is on the page.'); return; }
+  setText('shareCopy', 'Copied'); announce('ID copied.');
+  setTimeout(() => setText('shareCopy', 'Copy'), COPIED_MS);
 });
 
 /* ══ keyboard ═════════════════════════════════════════════════ */

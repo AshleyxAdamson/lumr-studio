@@ -34,6 +34,8 @@ state; the shapes are in the round's API notes and ``treatment.page_state``.
     POST api/samples      {}: pick three new samples
     POST api/usual        {}: save the pace and switches as the creator's usual
     POST api/feedback     {message, name?, email?}: send feedback to the team's server (LUMR_SHARE_URL); answers {feedback_id}
+    POST api/share/preview {}: build what "Help improve Lumr" would send (shapes.build_send); answers {lines, send}
+    POST api/share/send   {send_id, removed: [indexes]}: send the last preview, minus the removed lines; answers {send_id, records}
     POST api/export       {}: start the full render, unless one is running
     GET  api/export       the latest export: {export: {state, progress, file, ...}}
     GET  api/peaks        the audio envelope (the page no longer asks for it)
@@ -69,7 +71,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from lumr_studio import feedback, review
+from lumr_studio import feedback, review, shapes, share
 from lumr_studio import treatment
 from lumr_studio.edit import clock, load_edit
 from lumr_studio.errors import StudioError
@@ -252,6 +254,10 @@ class _Session:
     # apart from ``lock`` so saving decisions never waits on it.
     peaks_lock: threading.Lock = field(default_factory=threading.Lock)
     peaks: bytes | None = None
+    # The send the creator was last shown (``shapes.build_send``), kept so that Send posts exactly that.
+    # ``share_lock`` holds the preview and the one request that sends it, which waits on the network.
+    previewed: dict[str, Any] | None = None
+    share_lock: threading.Lock = field(default_factory=threading.Lock)
 
     @property
     def frames_dir(self) -> Path:
@@ -406,6 +412,40 @@ class ReviewServer:
         start_full_render(session.project, jobs=self.jobs, duration=session.duration, render=self.render)
         return self.export_of(session)
 
+    def share_preview(self, session: _Session) -> dict[str, Any]:
+        """What Help improve Lumr would send for the session's video: ``{lines, send}``. Nothing is sent.
+
+        The send is kept in memory as the one ``share_send`` will post, so what
+        the creator read is what goes. Raises StudioError when sharing is off.
+        """
+        if share.share_url() is None:
+            raise StudioError(SHARING_OFF)
+        with session.lock:
+            send = shapes.build_send(session.project, duration=session.duration, join_rows=self.join_rows)
+        with session.share_lock:
+            session.previewed = send
+        return {"lines": shapes.describe(send), "send": send}
+
+    def share_send(self, session: _Session, body: dict[str, Any]) -> dict[str, Any]:
+        """Post the last preview minus the lines in ``body["removed"]``. Answers ``{send_id, records}``.
+
+        The preview is used once. A failed send keeps it, so the creator can press Send again.
+        """
+        if share.share_url() is None:
+            raise StudioError(SHARING_OFF)
+        if set(body) - {"send_id", "removed"} or not isinstance(body.get("send_id"), str):
+            raise StudioError('Send {"send_id": the preview\'s id, "removed": [line numbers]}.')
+        removed = body.get("removed", [])
+        if not isinstance(removed, list):
+            raise StudioError("removed must be a list of line numbers.")
+        with session.share_lock:
+            previewed = session.previewed
+            if previewed is None or previewed.get("send_id") != body["send_id"]:
+                raise StudioError("That preview is out of date. Open the preview again.")
+            result = shapes.send(session.project, previewed, removed)
+            session.previewed = None
+        return result
+
     def peaks(self, session: _Session) -> bytes:
         """The audio envelope, measured once per session and cached on disk by video size and time."""
         if session.peaks is None:
@@ -455,6 +495,10 @@ EXPORT_ROUTE = "api/export"
 # Feedback is apart too: it answers {feedback_id}, and it waits on the team's
 # server, so it runs without the session lock the edit's changes hold.
 FEEDBACK_ROUTE = "api/feedback"
+
+# Sharing is apart for the same reason: it waits on the team's server, and it changes no edit.
+SHARE_PREVIEW_ROUTE, SHARE_SEND_ROUTE = "api/share/preview", "api/share/send"
+SHARING_OFF = "Sharing isn't set up on this machine yet, so nothing can be sent."
 
 
 class _Refused(Exception):
@@ -624,13 +668,22 @@ class _Handler(BaseHTTPRequestHandler):
     # POST
 
     def _post(self, session: _Session, route: str) -> None:
-        if route not in ("api/decisions", "api/apply", EXPORT_ROUTE, FEEDBACK_ROUTE, *TREATMENT_ACTIONS):
+        if route not in ("api/decisions", "api/apply", EXPORT_ROUTE, FEEDBACK_ROUTE, SHARE_PREVIEW_ROUTE, SHARE_SEND_ROUTE,
+                         *TREATMENT_ACTIONS):
             raise _Refused(HTTPStatus.NOT_FOUND, "Not found.")
         body = self._json_body()
         if route == FEEDBACK_ROUTE:
             self._send_json(feedback.send_feedback(body))
             return
         review_server = self.server.review
+        if route == SHARE_PREVIEW_ROUTE:
+            if body:
+                raise _Refused(HTTPStatus.BAD_REQUEST, "The preview takes no settings. Send an empty JSON object, {}.")
+            self._send_json(review_server.share_preview(session))
+            return
+        if route == SHARE_SEND_ROUTE:
+            self._send_json(review_server.share_send(session, body))
+            return
         with session.lock:
             if route in TREATMENT_ACTIONS:
                 result = TREATMENT_ACTIONS[route](review_server.treatment_context(session), body)
