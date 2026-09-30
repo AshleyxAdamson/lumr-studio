@@ -110,6 +110,10 @@ never touches it, and `set_overlays` never touches the cuts.
 The projects root also holds `usual.json`, the creator's usual pace and
 switches, one file for every video.
 
+It also holds `taste.json`, `{version, forgotten_at}`. It is the reset marker
+for the taste profile and nothing else. The profile itself is never stored.
+`get_edit` works it out from the other projects' `edit.json` files each time.
+
 `LUMR_HOME` resolves the way ClipForge resolves it. The environment variable
 `LUMR_STUDIO_PROJECTS_DIR` overrides the projects root. Tests must set it.
 
@@ -428,6 +432,36 @@ Her cuts are settled. Never send one as a cut of Claude's, never offer to
 undo one, and never count its time as Claude's saving. Learn from
 `cut_words`: eleven "like"s cut by hand says she wants fewer of them, so say
 what you noticed and offer what would take more of them.
+
+When the creator changed things on other videos, the result also carries
+`taste`: what those corrections teach. It is read from the `edit.json` of
+every other project in the projects folder, with the same `creator` summary
+this video gets. This video is never counted. A project that can't be read is
+skipped. It stays on this Mac, and the creator can make Lumr forget it with
+"Forget" on the page. That writes `taste.json`; a video whose edit was saved
+before it no longer counts, and one changed after it counts again. Nothing is
+deleted.
+
+```
+{videos: 3,
+ put_back: {repeat: {put_back: 5, proposed: 7}},
+ cut_by_hand: [["like", 14], ["so", 5]],
+ brought_back: [["actually", 3]],
+ kept_parts: 2,
+ pace: {claude: {standard: 2}, creator: {fast: 3}},
+ take_out: {fillers: {off: 2, on: 0}},
+ lessons: ["Put back 5 of 7 restated-point cuts (repeat) across 3 videos.", ...]}
+```
+
+`videos` counts the projects with at least one change. `put_back` counts, per
+kind of Claude's cuts, how many the creator put back against how many Claude
+proposed in those projects; a put-back gets its kind from the cut it overlaps
+most, else `unknown`. `cut_by_hand` and `brought_back` list the ten most
+counted words, most first; `brought_back` holds only entries of one or two
+words. `lessons` are plain sentences worked out from the numbers, written only
+for what at least two videos, or three events, back. They are facts, not
+advice. Let them shape the proposal, and let this video's own `creator`
+changes win.
 
 When Claude has picked filler words, the result carries `picks`:
 
@@ -961,6 +995,7 @@ word_times}`. On the page the creator:
 - sees a name tag on the video while one of their photos or clips is on
   screen. The page only shows them; changes go through `set_overlays`.
 - saves the pace and switches as their usual for the next video
+- sees a quiet line, "Learning from your changes on N videos", when other videos taught Lumr something. Forget asks first, then starts the learning over.
 - exports the finished video with Export video
 
 Every change saves to the edit at once. The page plays the source video

@@ -141,6 +141,8 @@ Each video gets one project folder at `~/Lumr/studio/projects/<video name>-<id>/
 | `plans.json` | the automatic removals planned for each of the six stops and for the last 12 slider settings you tried, so the page answers fast |
 | `exports/` | the videos and previews you render |
 
+Lumr learns from the cuts you put back and the words you cut or bring back. It works that out from your saved edits, on your Mac, and keeps only a note in `taste.json` for when you press Forget on the page.
+
 The transcript itself stays beside your video, as `<video>.words.json`. It's the only file the plugin puts in your video's folder. Measured silences are cached under `~/Lumr/media_cache/`. The Python environment lives in the plugin's data folder, and Claude Code deletes it when you uninstall the plugin. The models stay in the shared caches (`~/.cache/huggingface` and `~/.cache/torch`) and survive an uninstall.
 
 ## Privacy

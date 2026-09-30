@@ -33,6 +33,7 @@ On a 21:47 test take, measured word times took out more than twice as much at ev
 - **Switches** for long pauses, filler words, stutters and filler likes.
 - **A review page** in your browser. Double-click any word to cut it or bring it back, hear any cut, flip between the original and the edit, and export.
 - **Cuts you can tell apart.** Dim for the pace, red for Claude, teal for you.
+- **Learns from your fixes.** Every cut you put back or word you bring back teaches it, and your next video starts from what you taught it. It stays on your Mac.
 - **Extras**, off by default: a publish kit (titles, description, chapters, tags) and overlays of your own photos and clips.
 
 ## Start
