@@ -42,7 +42,8 @@ BAR_MIN_HEIGHT_PX = 44
 PACES = ["Natural", "Standard", "Fast", "Tight", "Hard", "Max"]
 # Every route the page may ask for. One more here is one more thing the server must answer.
 # The samples left the page in the layout round, so it no longer asks for new ones.
-ROUTES = {"api/treatment", "api/export", "api/cut", "api/cut/add", "api/cut/remove", "api/keep", "api/keep/remove",
+FEEDBACK_ISSUES = "https://github.com/AshleyxAdamson/lumr-studio/issues/new"
+ROUTES = {"api/feedback", "api/treatment", "api/export", "api/cut", "api/cut/add", "api/cut/remove", "api/keep", "api/keep/remove",
           "api/undo", "api/usual", "api/rate"}
 
 needs_node = pytest.mark.skipif(NODE is None, reason="node is not installed")
@@ -1130,7 +1131,10 @@ def test_page_is_one_self_contained_file_with_no_outside_requests():
     assert not re.search(r"url\(\s*['\"]?(?:https?:)?//", html)
     assert "@import" not in html
     assert not re.search(r"fetch\(\s*['\"]https?:", html)
-    assert not re.search(r"https?://|\bwww\.", html), "the page holds no address outside itself"
+    # The one address it holds is the GitHub issue the feedback form opens in a new tab on the creator's click.
+    # It is a string the page opens and never fetches (the fetch check above), and the form's own send goes to this machine.
+    assert re.findall(r"https?://[^\s'\"?]+", html) == [FEEDBACK_ISSUES], "the page holds no address but the feedback fallback"
+    assert not re.search(r"\bwww\.", html)
 
 
 def test_page_forces_media_muted_when_asked():
@@ -1276,6 +1280,7 @@ def test_the_page_asks_for_nothing_it_no_longer_shows():
     asked = set(re.findall(r"fetch\(\s*'([^']+)'", html)) | set(re.findall(r"send\(\s*'([^']+)'", html))
     # a change built as {path, body} and sent later is a request too
     asked |= set(re.findall(r"\bpath: '([^']+)'", html))
+    asked |= set(re.findall(r"postJSON\(\s*'([^']+)'", html))
     assert asked == ROUTES
 
 
@@ -1332,6 +1337,85 @@ def test_rating_a_cut_in_the_example_answers_like_the_server():
     assert out["bad"] == ["bad", "put_back", True]
     assert out["clear"] == [None, "put_back"], "clearing a wrong cut does not cut it again"
     assert "one of yours" in out["yours"]
+
+
+def test_send_feedback_is_a_secondary_button_left_of_export_in_the_upper_right():
+    top = part(markup(), "header", "top")
+    right = top[top.index('class="topright"'):]
+    assert re.search(r'<button\b[^>]*id="feedbackBtn"[^>]*class="btn"[^>]*>Send feedback</button>', right)
+    assert right.index('id="feedbackBtn"') < right.index('id="exportBtn"'), "to the left of Export"
+    assert right.index('id="feedbackBtn"') > right.index('id="shortcutsBtn"')
+    assert not re.search(r'id="feedbackBtn"[^>]*class="[^"]*primary', right), "Export stays the one filled button"
+    assert re.search(r'id="exportBtn" class="btn primary"', right)
+    assert top.count("btn primary") == 1, "in the top line, Export is the one filled button"
+
+
+def test_the_feedback_form_is_a_modal_with_the_asked_for_fields_and_words():
+    dialog = re.search(r'<dialog\b[^>]*id="feedback"[^>]*>(.*?)</dialog>', markup(), re.S)
+    assert dialog, "the form is a <dialog>, which the browser makes modal"
+    inside = dialog.group(1)
+    assert re.search(r'<dialog\b[^>]*aria-labelledby="h-feedback"', markup())
+    assert re.search(r'<h2 id="h-feedback">Send feedback</h2>', inside)
+    assert re.search(r'<label for="fbMessage">What\'s on your mind\?</label>\s*<textarea id="fbMessage"[^>]*\brequired\b', inside)
+    assert re.search(r'<label for="fbName">Name <span class="opt">\(optional\)</span></label>\s*<input id="fbName"', inside)
+    assert re.search(r'<label for="fbEmail">Email <span class="opt">\(optional\)</span></label>\s*<input id="fbEmail"[^>]*type="email"', inside)
+    assert "Only if you'd like a reply" in inside
+    assert ("Sent privately to the Lumr Studio team with the plugin version. "
+            "Please don't paste anything you'd rather keep private.") in inside
+    assert re.search(r'<p id="fbErr" role="alert" hidden>', inside), "an error shows inside the form"
+    buttons = re.findall(r'<button\b[^>]*id="(fb\w+)"[^>]*class="([^"]*)"[^>]*type="(\w+)"[^>]*>(\w+)</button>', inside)
+    assert buttons == [("fbCancel", "btn", "button", "Cancel"), ("fbSubmit", "btn primary", "submit", "Submit")], \
+        "Cancel then Submit, Submit primary"
+    assert re.search(r"\.modalacts\{[^}]*justify-content:flex-end", page()), "at the lower right of the form"
+    assert inside.rindex('class="modalacts"') > inside.rindex('id="fbNote"'), "the buttons close the form"
+
+
+def test_the_feedback_form_opens_focused_closes_on_escape_and_holds_focus():
+    html = page()
+    opening = html[html.index("function openFeedback(){"):html.index("function closeFeedback(){")]
+    assert "d.showModal()" in opening, "modal: the page behind it is inert and focus stays in the form"
+    assert "$('fbMessage').focus()" in opening, "the textarea has focus on open"
+    assert "keydown" not in html[html.index("/* ══ feedback"):html.index("/* ══ keyboard")], "Esc is the dialog's own"
+    keys = html[html.index("document.addEventListener('keydown', e => {"):html.index("document.addEventListener('keyup'")]
+    assert "dialog[open]" in keys.split("\n")[2], "the page's shortcuts (Space, X, K, Esc) leave the open form alone"
+    assert "dialog[open]" in html[html.index("document.addEventListener('keyup'"):html.index("/* ══ boot")]
+
+
+def test_a_failed_send_keeps_what_was_typed_and_a_good_one_says_thanks():
+    html = page()
+    sending = html[html.index("$('feedbackForm').addEventListener('submit'"):html.index("/* ══ keyboard")]
+    assert "postJSON('api/feedback', { message, name: $('fbName').value.trim(), email: $('fbEmail').value.trim() })" in sending
+    caught = sending[sending.index("}catch(err){"):sending.index("feedbackBusy(false);\n  ['fbMessage'")]
+    assert "feedbackError(err.message)" in caught and "value = ''" not in caught, "the typed text stays"
+    assert "'Thanks. We got it.'" in html
+    assert sending.index("closeFeedback();\n  thanksForFeedback()") > sending.index("value = ''")
+
+
+def test_with_no_team_server_the_form_hides_name_and_email_and_opens_a_github_issue():
+    html = page()
+    assert FEEDBACK_ISSUES in html
+    assert "const feedbackDirect = () => !!(S && S.feedback && S.feedback.direct)" in html
+    assert "$('fbWho').hidden = !direct" in html, "Name and Email leave the form"
+    assert "This opens a public GitHub issue in your browser. Nothing is sent until you submit it there." in html
+    assert "window.open(url, '_blank', 'noopener,noreferrer')" in html
+    assert "encodeURIComponent('Feedback')" in html
+    assert "message + '\\n\\nLumr Studio' + version" in html, "the body is the message, a blank line, then the version"
+    assert "S.version" in html
+    fetched = re.findall(r"fetch\(\s*'([^']+)'", html)
+    assert all(not path.startswith("http") for path in fetched), "the page itself never calls the internet"
+
+
+def test_the_feedback_words_read_plainly():
+    said = ["Send feedback", "What's on your mind?", "Only if you'd like a reply", "Name (optional)", "Email (optional)",
+            "Sent privately to the Lumr Studio team with the plugin version. Please don't paste anything you'd rather keep private.",
+            "This opens a public GitHub issue in your browser. Nothing is sent until you submit it there.",
+            "Thanks. We got it.", "Write a few words first.", "That's too long for a GitHub issue. Shorten it a bit.",
+            "GitHub is open in a new tab. Nothing is sent until you submit it there.", "Cancel", "Submit"]
+    for line in said:
+        assert not banned_in(line) and not decimal_times_in(line) and "—" not in line, line
+    screen = words_on_screen()
+    assert "Send feedback" in screen and "What's on your mind?" in screen
+    assert not banned_in(screen)
 
 
 def test_what_the_creator_asked_to_remove_is_gone():

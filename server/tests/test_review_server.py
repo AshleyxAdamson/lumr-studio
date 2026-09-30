@@ -115,7 +115,9 @@ def test_page_is_served_with_a_policy_that_blocks_outside_requests(base):
     csp = headers["Content-Security-Policy"]
     assert "default-src 'none'" in csp and "connect-src 'self'" in csp
     page = body.decode()
-    assert "http://" not in page and "https://" not in page
+    assert "http://" not in page
+    # The only address in the page is the GitHub issue that Send feedback opens in a new tab on a click.
+    assert page.count("https://") == 1 and "https://github.com/AshleyxAdamson/lumr-studio/issues/new" in page
     assert "New York" not in page
     assert '<video id="vid" src="video"' in page
 

@@ -140,6 +140,11 @@ counts again, even on an old video. A second forget adds to the first.
 (`repeat`, `false_start`, `off_topic`, `other`, `likes`). A file that is
 missing or can't be read forgets nothing.
 
+`LUMR_SHARE_URL` is the address of the Lumr Studio team's server, for the review
+page's Send feedback form. There is no default yet (`share.DEFAULT_SHARE_URL`
+is `None`); a trailing slash is stripped. With it unset, the form opens a
+public GitHub issue instead. See `POST api/feedback` under `review`.
+
 `LUMR_HOME` resolves the way ClipForge resolves it. The environment variable
 `LUMR_STUDIO_PROJECTS_DIR` overrides the projects root. Tests must set it.
 
@@ -1030,6 +1035,9 @@ word_times}`. On the page the creator:
 - saves the pace and switches as their usual for the next video
 - sees a quiet line, "Learning from your changes on N videos. Ask Claude to forget any of it.", when other videos taught Lumr something. Forgetting goes through Claude (`forget_taste`), not the page.
 - exports the finished video with Export video
+- sends feedback with the Send feedback button, left of Export video. It opens
+  a form: a message (required, 1 to 5000 characters), an optional name and an
+  optional email. See `POST api/feedback` below.
 
 Every change saves to the edit at once. The page plays the source video
 straight from disk. Nothing is uploaded. The address works until the Claude
@@ -1040,6 +1048,28 @@ page shows its progress, then the file's name and folder. The creator may
 export without telling Claude, so after they used the page, read `export` in
 `get_edit` before rendering. When an export fails, the page tells the creator
 to try again or ask Claude; `job_status` with that `job_id` has the error.
+
+`POST api/feedback` is the one route that isn't a change to the edit. The page
+sends `{message, name, email}` to it, and the local server does the rest, so
+the page itself never calls the internet:
+
+1. It checks the fields: `message` 1 to 5000 characters, `name` at most 100,
+   `email` at most 200 with a loose check (`a@b.c`). Other fields are dropped.
+   A bad field answers 400 with a plain sentence.
+2. It POSTs JSON to `<LUMR_SHARE_URL>/v1/feedback`, with a 15 second timeout,
+   `User-Agent: lumr-studio/<version>` and no retry:
+   `{"schema": 1, "feedback_id": <22 URL-safe characters>, "plugin_version":
+   <from .claude-plugin/plugin.json, else "0.0.0">, "message", "name" or null,
+   "email" or null}`.
+3. It answers `{"feedback_id"}`. A non-2xx answer, or a server it can't reach,
+   answers 400 with a plain sentence, and the page keeps what was typed.
+
+With `LUMR_SHARE_URL` unset the route refuses with 400. The page state says
+which case it is: `feedback: {direct: true | false}`, and `version` is the
+plugin's version, or `null` when it can't be read. With `direct: false` the
+form hides Name and Email and Submit opens a public GitHub issue in a new tab,
+prefilled with the message and the version. Nothing is sent from this Mac then.
+The message is never logged.
 
 Ask the creator before calling this. It opens a window in their browser.
 

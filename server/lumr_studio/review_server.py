@@ -33,6 +33,7 @@ state; the shapes are in the round's API notes and ``treatment.page_state``.
     POST api/undo         {}: take back the last thing the creator did to the words
     POST api/samples      {}: pick three new samples
     POST api/usual        {}: save the pace and switches as the creator's usual
+    POST api/feedback     {message, name?, email?}: send feedback to the team's server (LUMR_SHARE_URL); answers {feedback_id}
     POST api/export       {}: start the full render, unless one is running
     GET  api/export       the latest export: {export: {state, progress, file, ...}}
     GET  api/peaks        the audio envelope (the page no longer asks for it)
@@ -68,7 +69,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from lumr_studio import review
+from lumr_studio import feedback, review
 from lumr_studio import treatment
 from lumr_studio.edit import clock, load_edit
 from lumr_studio.errors import StudioError
@@ -451,6 +452,10 @@ TREATMENT_ACTIONS: dict[str, Callable[[treatment.Context, dict[str, Any]], dict[
 # and answers the export alone, since the page asks for it once a second.
 EXPORT_ROUTE = "api/export"
 
+# Feedback is apart too: it answers {feedback_id}, and it waits on the team's
+# server, so it runs without the session lock the edit's changes hold.
+FEEDBACK_ROUTE = "api/feedback"
+
 
 class _Refused(Exception):
     """A request the server turns away. Carries the status and a plain message."""
@@ -619,9 +624,12 @@ class _Handler(BaseHTTPRequestHandler):
     # POST
 
     def _post(self, session: _Session, route: str) -> None:
-        if route not in ("api/decisions", "api/apply", EXPORT_ROUTE, *TREATMENT_ACTIONS):
+        if route not in ("api/decisions", "api/apply", EXPORT_ROUTE, FEEDBACK_ROUTE, *TREATMENT_ACTIONS):
             raise _Refused(HTTPStatus.NOT_FOUND, "Not found.")
         body = self._json_body()
+        if route == FEEDBACK_ROUTE:
+            self._send_json(feedback.send_feedback(body))
+            return
         review_server = self.server.review
         with session.lock:
             if route in TREATMENT_ACTIONS:

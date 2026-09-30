@@ -82,6 +82,9 @@ def isolated_home(tmp_path, monkeypatch):
     # The model caches are temp folders too: a test never reads or fills the ones on this machine.
     for name in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME"):
         monkeypatch.delenv(name, raising=False)
+    # No test sends feedback to a real server, or reads a plugin folder Claude Code named: each sets its own.
+    for name in ("LUMR_SHARE_URL", "CLAUDE_PLUGIN_ROOT"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("HF_HOME", str(tmp_path / "hf-home"))
     monkeypatch.setenv("TORCH_HOME", str(tmp_path / "torch-home"))
 

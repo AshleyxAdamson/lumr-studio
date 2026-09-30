@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any
 
 from lumr_studio import edit as edits
-from lumr_studio import taste, word_times
+from lumr_studio import feedback, share, taste, word_times
 from lumr_studio.autocuts import (
     FILLER_PAIRS,
     FILLER_TRIM_KIND,
@@ -1208,6 +1208,9 @@ def page_state(ctx: Context, *, changed: dict[str, Any] | None = None) -> dict[s
     ``busy`` is ``clusters`` under its earlier name with ``cuts`` beside
     ``edits``, kept so an earlier page still draws. ``taste`` is
     ``{videos}``, how many other videos Lumr is learning from, or None.
+    ``version`` is the plugin's, or None when it can't be read, and
+    ``feedback.direct`` says whether Send feedback goes to the team's server
+    (else the page opens a GitHub issue).
     """
     treatment = saved_treatment(ctx.edit)
     made = _remake(ctx, treatment)
@@ -1230,6 +1233,8 @@ def page_state(ctx: Context, *, changed: dict[str, Any] | None = None) -> dict[s
         "settings": treatment.as_dict(),
         "usual": None if usual is None else {k: v for k, v in usual.as_dict().items() if k != "gap_length"},
         "taste": taste.summary_for_page(ctx.project.root),
+        "version": feedback.plugin_version(),
+        "feedback": {"direct": share.share_url() is not None},
         "paces": paces,
         "custom": custom,
         "fine_ranges": fine_ranges(),

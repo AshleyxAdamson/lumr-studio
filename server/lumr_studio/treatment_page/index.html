@@ -126,6 +126,31 @@ h2 .count .mine{color:var(--user)}
 #exportText{min-width:0; max-width:min(340px, 38vw); line-height:1.3; overflow-wrap:anywhere; text-wrap:pretty}
 #exportNote[data-warn="true"] #exportText{color:var(--red-soft)}
 
+#feedbackThanks{font-size:12px; color:var(--text2); white-space:nowrap}
+#feedbackBtn{min-height:32px; padding:4px 14px}
+
+/* the feedback form: a modal, so the page behind it waits */
+#feedback{
+  width:min(480px, calc(100vw - 32px)); max-height:calc(100vh - 32px); overflow-y:auto; padding:var(--s5);
+  border:1px solid var(--line2); border-radius:8px; background:var(--ink2); color:var(--text);
+  box-shadow:0 12px 32px rgba(0,0,0,.5);
+}
+#feedback::backdrop{background:rgba(0,0,0,.6)}
+#feedback h2{font-size:15px; margin-bottom:var(--s3)}
+#feedback label{display:block; margin-top:var(--s3); margin-bottom:var(--s1); font-size:12px; color:var(--text)}
+#feedback h2 + label{margin-top:0}
+#feedback .opt{color:var(--text2)}
+#feedback textarea, #feedback input{
+  display:block; width:100%; padding:8px 10px; border:1px solid var(--line2); border-radius:var(--r);
+  background:var(--ink3); color:var(--text); font:inherit; font-size:13px;
+}
+#feedback textarea{min-height:120px; resize:vertical}
+#feedback textarea:focus-visible, #feedback input:focus-visible{outline-offset:0; border-radius:var(--r)}
+#feedback .hint{margin-top:var(--s1); font-size:12px; color:var(--text2)}
+#feedback .note{margin-top:var(--s4); font-size:12px; color:var(--text2); text-wrap:pretty}
+#fbErr{margin-top:var(--s3); font-size:12px; color:var(--red-soft)}
+.modalacts{display:flex; justify-content:flex-end; gap:var(--s2); margin-top:var(--s4)}
+
 #errbar{
   grid-column:1 / -1;   /* across both columns, so an error never pushes the video out of its place */
   display:flex; align-items:center; gap:var(--s3); padding:8px var(--s5);
@@ -526,6 +551,8 @@ h2 .count .mine{color:var(--user)}
     <div class="topright">
       <span id="exportNote" hidden><span id="exportText"></span><button id="copyPath" class="link" type="button" hidden>Copy path</button></span>
       <button id="shortcutsBtn" class="helpbtn" type="button" popovertarget="shortcuts" aria-controls="shortcuts" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+      <span id="feedbackThanks" role="status"></span>
+      <button id="feedbackBtn" class="btn" type="button" aria-haspopup="dialog" title="Tell the Lumr Studio team what's working and what isn't">Send feedback</button>
       <button id="exportBtn" class="btn primary" type="button" title="Make the finished video file">Export video</button>
     </div>
   </header>
@@ -656,6 +683,26 @@ h2 .count .mine{color:var(--user)}
     <li><span class="mark kept" aria-hidden="true">word</span>kept by you</li>
   </ul>
 </div>
+<dialog id="feedback" aria-labelledby="h-feedback">
+  <form id="feedbackForm" method="dialog" novalidate>
+    <h2 id="h-feedback">Send feedback</h2>
+    <label for="fbMessage">What's on your mind?</label>
+    <textarea id="fbMessage" name="message" rows="6" maxlength="5000" required aria-required="true"></textarea>
+    <div id="fbWho">
+      <label for="fbName">Name <span class="opt">(optional)</span></label>
+      <input id="fbName" name="name" type="text" maxlength="100" autocomplete="name">
+      <label for="fbEmail">Email <span class="opt">(optional)</span></label>
+      <input id="fbEmail" name="email" type="email" maxlength="200" autocomplete="email" aria-describedby="fbEmailHint">
+      <p class="hint" id="fbEmailHint">Only if you'd like a reply</p>
+    </div>
+    <p class="note" id="fbNote">Sent privately to the Lumr Studio team with the plugin version. Please don't paste anything you'd rather keep private.</p>
+    <p id="fbErr" role="alert" hidden></p>
+    <div class="modalacts">
+      <button id="fbCancel" class="btn" type="button">Cancel</button>
+      <button id="fbSubmit" class="btn primary" type="submit">Submit</button>
+    </div>
+  </form>
+</dialog>
 <div id="announce" class="sr-only" aria-live="polite"></div>
 
 <script id="core">
@@ -3203,10 +3250,75 @@ $('copyPath').addEventListener('click', async () => {
   setTimeout(() => setText('copyPath', 'Copy path'), COPIED_MS);
 });
 
+/* ══ feedback ═════════════════════════════════════════════════
+   A form in a modal. The page never calls the internet: Submit posts to this machine's server, which sends the
+   message to the Lumr Studio team. With no team server set up, Submit opens a GitHub issue, and the creator sends it there. */
+const FEEDBACK_ISSUES = 'https://github.com/AshleyxAdamson/lumr-studio/issues/new';
+const FEEDBACK_NOTE_DIRECT = "Sent privately to the Lumr Studio team with the plugin version. Please don't paste anything you'd rather keep private.";
+const FEEDBACK_NOTE_GITHUB = "This opens a public GitHub issue in your browser. Nothing is sent until you submit it there.";
+const FEEDBACK_URL_MOST = 7000;         /* a longer address is one GitHub turns away */
+const feedbackDirect = () => !!(S && S.feedback && S.feedback.direct);
+function feedbackError(msg){ const p = $('fbErr'); p.textContent = msg || ''; p.hidden = !msg; }
+function feedbackBusy(on){
+  ['fbSubmit', 'fbCancel'].forEach(id => { $(id).disabled = on; });
+  if(on) $('fbSubmit').setAttribute('aria-busy', 'true'); else $('fbSubmit').removeAttribute('aria-busy');
+}
+function openFeedback(){
+  const d = $('feedback'), direct = feedbackDirect();
+  $('fbWho').hidden = !direct;
+  setText('fbNote', direct ? FEEDBACK_NOTE_DIRECT : FEEDBACK_NOTE_GITHUB);
+  feedbackError('');
+  if(!d.open){ if(d.showModal) d.showModal(); else d.setAttribute('open', ''); }
+  $('fbMessage').focus();
+}
+function closeFeedback(){
+  const d = $('feedback');
+  if(d.close) d.close(); else d.removeAttribute('open');
+}
+/** The GitHub issue with the message and the plugin version filled in, or null when it is too long for one. */
+function feedbackIssueUrl(message){
+  const version = S && S.version ? ' ' + S.version : '';
+  const url = FEEDBACK_ISSUES + '?title=' + encodeURIComponent('Feedback') + '&body=' + encodeURIComponent(message + '\n\nLumr Studio' + version);
+  return url.length > FEEDBACK_URL_MOST ? null : url;
+}
+function thanksForFeedback(){
+  setText('feedbackThanks', 'Thanks. We got it.');
+  announce('Thanks. We got it.');
+  setTimeout(() => setText('feedbackThanks', ''), BRIEF_NOTE_MS);
+}
+$('feedbackBtn').addEventListener('click', openFeedback);
+$('fbCancel').addEventListener('click', closeFeedback);
+$('feedbackForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const message = $('fbMessage').value.trim();
+  feedbackError('');
+  if(!message){ feedbackError('Write a few words first.'); $('fbMessage').focus(); return; }
+  if(!feedbackDirect()){
+    const url = feedbackIssueUrl(message);
+    if(!url){ feedbackError("That's too long for a GitHub issue. Shorten it a bit."); $('fbMessage').focus(); return; }
+    window.open(url, '_blank', 'noopener,noreferrer');
+    closeFeedback();
+    announce('GitHub is open in a new tab. Nothing is sent until you submit it there.');
+    return;
+  }
+  feedbackBusy(true);
+  try{
+    await postJSON('api/feedback', { message, name: $('fbName').value.trim(), email: $('fbEmail').value.trim() });
+  }catch(err){
+    feedbackBusy(false);
+    feedbackError(err.message);   /* what she typed stays where it is */
+    return;
+  }
+  feedbackBusy(false);
+  ['fbMessage', 'fbName', 'fbEmail'].forEach(id => { $(id).value = ''; });
+  closeFeedback();
+  thanksForFeedback();
+});
+
 /* ══ keyboard ═════════════════════════════════════════════════ */
 document.addEventListener('keydown', e => {
   const tgt = e.target;
-  if(tgt.closest && tgt.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if(tgt.closest && tgt.closest('input, textarea, select, [contenteditable="true"], dialog[open]')) return;   /* the feedback form keeps its own keys, Space and Esc included */
   /* the undo every app has: Command or Control with Z. It is left alone when there is nothing of hers to undo. */
   if((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && S && S.can_undo){ e.preventDefault(); undoLast(); return; }
   if(e.metaKey || e.ctrlKey || e.altKey) return;
@@ -3237,7 +3349,7 @@ document.addEventListener('keydown', e => {
 /* a focused button would also take Space as a press on key-up; Space belongs to play */
 document.addEventListener('keyup', e => {
   if(e.key !== ' ' || e.metaKey || e.ctrlKey || e.altKey) return;
-  if(e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if(e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"], dialog[open]')) return;
   e.preventDefault();
 }, true);
 

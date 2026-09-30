@@ -2,7 +2,7 @@
 
 Last updated 2026-09-28.
 
-Lumr Studio doesn't collect your data. It has no server, no accounts, no analytics and no telemetry. Nothing on your Mac is ever sent to the person who wrote it.
+Lumr Studio doesn't collect your data. It has no server, no accounts, no analytics and no telemetry. Nothing on your Mac is ever sent to the person who wrote it, except feedback you choose to send (see "Feedback you send").
 
 Questions about this page go to [GitHub Issues](https://github.com/AshleyxAdamson/lumr-studio/issues). The page lives at `PRIVACY.md` in [the repo](https://github.com/AshleyxAdamson/lumr-studio/blob/main/PRIVACY.md), and its history is public.
 
@@ -10,7 +10,7 @@ Questions about this page go to [GitHub Issues](https://github.com/AshleyxAdamso
 
 - Your video and audio. The plugin opens a file only when you name it to Claude, like "use tight-cut on this video". It never browses your folders. It never uploads your video or audio, and it has no tool that could.
 - What it makes from them. The transcript, the measured word times, your edit and your exports. The section below says where each one lives.
-- The review page. A small web server on `127.0.0.1`, on a port your operating system picks, with a private token in the address. Nothing outside your Mac can reach it, and the page makes no outside requests.
+- The review page. A small web server on `127.0.0.1`, on a port your operating system picks, with a private token in the address. Nothing outside your Mac can reach it, and the page makes no outside requests. The one thing it can send out is feedback you write and submit, and your Mac's own server sends that (see "Feedback you send").
 
 ## What Claude sees
 
@@ -52,9 +52,17 @@ The plugin keeps files on your Mac until you delete them. The author holds nothi
 
 No tool in the plugin deletes a file of yours.
 
+## Feedback you send
+
+The review page has a Send feedback button. Nothing is sent until you press Submit in its form.
+
+- What goes: your message, the plugin version, and a random ID for that one message. Your name and email go only if you type them, and both are optional. No video, audio, transcript or file goes with it. Please don't paste anything you'd rather keep private into the message.
+- Where it goes: the Lumr Studio team's server, sent by the local server on your Mac when you press Submit. The page itself never calls the internet. The server's address is `LUMR_SHARE_URL`. Until that server is set up, the form opens a public GitHub issue in your browser instead, and nothing is sent until you submit it there. GitHub's own privacy policy covers it.
+- How long it's kept: until it's deleted. To ask for deletion, quote the ID you were given. TODO(owner): contact for deletion.
+
 ## Children
 
-The plugin collects nothing from anyone, whatever their age. It's built for people who edit their own videos with Claude Code.
+The plugin collects nothing from anyone, whatever their age. Feedback is sent only if the person presses Submit. It's built for people who edit their own videos with Claude Code.
 
 ## Changes
 
