@@ -173,21 +173,17 @@ def test_a_send_is_the_shape_of_each_change(video):
     assert by["rated_good"]["proposed"]["kind"] == "other", "a filler cut Claude filed under other"
 
 
-def test_off_topic_is_sent_as_other_until_the_server_takes_the_name(video):
+def test_off_topic_is_sent_by_its_own_name(video):
     changed(video)
     send = built(video)
-    assert "off_topic" not in json.dumps(send)
     bad = next(r for r in send["records"] if r["creator"]["action"] == "rated_bad")
-    assert bad["proposed"]["kind"] == "other"
-    # the server refuses any name that holds "topic", so the check refuses it too
-    record = copy.deepcopy(send["records"][0])
-    record["proposed"]["kind"] = "off_topic"
-    assert shapes.validate_send({**send, "records": [record]}) == "Record 0: proposed: kind contains prohibited text"
+    assert bad["proposed"]["kind"] == "off_topic"
+    assert shapes.validate_send(send) is None
 
 
 def test_kinds_are_named_the_way_the_schema_names_them():
     for internal, sent in {"pauses": "pause", "fillers": "filler", "repeats": "stutter", "repeat": "repeat",
-                           "false_start": "false_start", "other": "other", "likes": "likes",
+                           "false_start": "false_start", "off_topic": "off_topic", "other": "other", "likes": "likes",
                            "something new": "other", None: "other", "yours": "other"}.items():
         assert shapes._kind(internal) == sent
     assert set(shapes.SENDABLE_KIND.values()) <= shapes.KIND
@@ -460,7 +456,7 @@ def test_the_preview_says_what_each_record_is_without_a_word_from_the_video(vide
         assert not re.search(r"\d\.\d", line)
     assert any("You put back a restated-point cut (" in line for line in lines)
     assert any(line.startswith("You marked a cut as good") for line in lines)
-    assert any(line.startswith("You marked a cut as wrong") for line in lines)
+    assert any(line.startswith("You marked an off-topic cut as wrong") for line in lines)
     assert any(line.startswith("You brought back words that were cut") for line in lines)
     assert any(line.startswith("You cut words by hand") for line in lines)
     assert any(line.startswith("You kept a part no matter what") for line in lines)

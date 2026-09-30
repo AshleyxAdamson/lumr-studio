@@ -69,23 +69,12 @@ MAX_LENGTH_SECONDS, MAX_WORDS, MAX_LAUGH_SECONDS = 3600, 10000, 600
 SEND_ID = re.compile(r"[A-Za-z0-9_-]{16,32}")
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
-# The team's server turns away any name that holds one of these pieces of text,
-# even a name from the lists above. "off_topic" holds "topic", so a record of
-# that kind would fail the whole send. ``build_send`` files it under "other"
-# (``SENDABLE_KIND``) until the server lets it through.
-REFUSED_TEXT = (
-    "transcript", "audio", "podcast", "interview", "conversation", "speaker", "host", "guest", "dialogue",
-    "discussion", "section", "timestamp", "topic", "name", "user", "metadata", "cloudflare", "worker",
-    "request", "response", "error",
-)
-
 # ── What the creator's changes are called in a record ─────────────────────────
 
 # Inside Lumr, a kind of cut or trim, and the name it has in a record.
 SENDABLE_KIND = {
     "pauses": "pause", "fillers": "filler", "repeats": "stutter",
-    **{k: k for k in ("repeat", "false_start", "other", edits.PICK_KIND)},
-    "off_topic": "other",
+    **{k: k for k in ("repeat", "false_start", "off_topic", "other", edits.PICK_KIND)},
 }
 # A cut this close to a laugh, or closer, is "near a laugh" in the preview.
 NEAR_A_LAUGH_SECONDS = 3
@@ -142,11 +131,6 @@ def part_of_speech(said: str) -> str:
 # ── The check: a mirror of the team's server ──────────────────────────────────
 
 
-def _refused_text(value: str) -> bool:
-    low = value.lower()
-    return any(piece in low for piece in REFUSED_TEXT)
-
-
 def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
@@ -160,8 +144,6 @@ def _choice(value: Any, allowed: frozenset[str], label: str) -> str | None:
         return f"{label} must be string"
     if value not in allowed:
         return f"{label} invalid: {value}"
-    if _refused_text(value):
-        return f"{label} contains prohibited text"
     return None
 
 
@@ -592,7 +574,8 @@ def describe(send: dict[str, Any]) -> list[str]:
     lines = []
     for rec in send.get("records", []):
         proposed, action = rec["proposed"], rec["creator"]["action"]
-        noun = f"a {KIND_NOUN.get(proposed['kind'], 'cut')}"
+        name = KIND_NOUN.get(proposed["kind"], "cut")
+        noun = f"{'an' if name[0] in 'aeiou' else 'a'} {name}"
         size = _how_long(proposed["length_s"], proposed["words"])
         line = {
             "put_back": f"You put back {noun} {size}",
