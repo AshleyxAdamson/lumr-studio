@@ -59,6 +59,22 @@ Start a session and tell Claude Code:
 
 The first session also builds the plugin's Python environment (about 950 MB). [GUIDE.md](GUIDE.md) has the rest: the review page, the models, what runs, what's saved, extras and support. `TOOLS.md` is the tool contract, and [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md) cover privacy and security.
 
+It runs in Claude Code, and in Cowork when the session runs on your Mac. Chat on claude.ai can't start the plugin's local server, so it can't edit there.
+
+### Things to try
+
+> Use tight-cut on ~/Movies/take-3.mov. Give me a standard YouTube cut.
+
+> Tighten this one hard, but keep every joke: ~/Desktop/podcast-intro.mp4
+
+> Find the filler likes in ~/Movies/vlog.mov and take them out. Then open the review page.
+
+## What it runs and fetches
+
+- **On your Mac:** a local MCP server, `ffmpeg` and `ffprobe` for cutting and rendering, the two models, and the review page on `127.0.0.1`. A check at the start of each session looks for `uv` and `ffmpeg`, and the first time it builds the plugin's Python environment.
+- **Downloads, once:** the locked Python packages from PyPI through `uv`, plus a Python build from `github.com/astral-sh/python-build-standalone` if your Mac has none. Parakeet from `huggingface.co` and wav2vec 2.0 from `download.pytorch.org`, only after you say yes. Each model file is checked against a pinned size and sha256.
+- **What leaves your Mac:** nothing of yours, except what Claude reads in the conversation. That's the transcript text, the cut lists, and a small picture of a join when Claude checks one. Your video and audio never upload.
+
 PolyForm Noncommercial 1.0.0. You can sell the videos you make with it. You can't resell the tool.
 
 ## To do
