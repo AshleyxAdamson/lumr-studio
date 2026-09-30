@@ -110,7 +110,7 @@ Everything runs on your Mac. The one exception is Claude, which runs wherever yo
 | The server | Claude Code starts it over stdio with `uv run --active --locked --project ${CLAUDE_PLUGIN_ROOT}/server lumr-studio-server` (from `.mcp.json`). It's the only long-running process. |
 | The speech model | `python -m lumr_studio.speech <video>`, in a process of its own, once per video, reading the downloaded model from disk with Hugging Face set offline. |
 | Cutting and rendering | `ffmpeg` and `ffprobe`, from your PATH. |
-| The review page | A small web server on `127.0.0.1`, on a port the operating system picks, with a private token in the address. The plugin opens it in your default browser. It makes no outside requests. The Send feedback button sends a message only when you press Submit, and your Mac's local server sends it. |
+| The review page | A small web server on `127.0.0.1`, on a port the operating system picks, with a private token in the address. The plugin opens it in your default browser. It makes no outside requests. The Send feedback button sends a message only when you press Submit, and Help improve Lumr sends the shape of your changes only when you press Send. Your Mac's local server sends both. |
 | The first-run check | `sh "${CLAUDE_PLUGIN_ROOT}/hooks/doctor.sh"`, at the start of each session. It reads your PATH and prints. |
 
 The plugin reaches the network on first use only. It fetches these. Nothing you own goes out in any of them.
@@ -130,6 +130,10 @@ What Claude sees is the conversation. The plugin adds to it in three ways.
 
 The plugin never uploads your video or audio file.
 
+## Helping improve Lumr
+
+When the Lumr Studio team's server is set up, the review page shows a small Help improve Lumr button. It opens a list of what would be sent: how long each cut was, what kind it was, and what you did to it, such as putting it back or marking it wrong. It never sends your words or your video. Remove any line you'd rather keep, press "Show exactly what's sent" to see the data itself, and press Send only when you're happy. Nothing goes before that. After a send, you get an ID to quote if you ever want it deleted, and `shares.jsonl` in the video's project folder keeps it. `PRIVACY.md` has the detail.
+
 ## What is saved, and where
 
 Each video gets one project folder at `~/Lumr/studio/projects/<video name>-<id>/`. The `~/Lumr` part follows `LUMR_HOME`, or the folder named in `~/.config/lumr/home.txt` if that file exists. `TOOLS.md` lists every file in the project folder. The main ones:
@@ -147,7 +151,7 @@ The transcript itself stays beside your video, as `<video>.words.json`. It's the
 
 ## Privacy
 
-Lumr Studio collects nothing. It has no server, no accounts and no telemetry, and the author never receives your files, your transcript or a usage count. The one exception is feedback you write in the review page's Send feedback form and submit. `PRIVACY.md` says what it sends.
+Lumr Studio collects nothing. It has no server, no accounts and no telemetry, and the author never receives your files, your transcript or a usage count. The two exceptions are feedback you write in the review page's Send feedback form and submit, and the shape of your changes if you press Send in Help improve Lumr. `PRIVACY.md` says what each sends.
 
 - On your Mac. Your video, audio, transcript, word times, edits and exports. The plugin reads a video only when you name it to Claude, and only on your own Mac. It never browses your folders, and it never uploads your video or audio.
 - What Claude sees. The transcript text, cut lists with reasons, and the results of each tool. When Claude checks a join with `look`, a few still frames go with it. That goes wherever your Claude Code sends its requests.

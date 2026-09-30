@@ -1,8 +1,8 @@
 # Privacy
 
-Last updated 2026-09-28.
+Last updated 2026-09-30.
 
-Lumr Studio doesn't collect your data. It has no server, no accounts, no analytics and no telemetry. Nothing on your Mac is ever sent to the person who wrote it, except feedback you choose to send (see "Feedback you send").
+Lumr Studio doesn't collect your data. It has no server, no accounts, no analytics and no telemetry. Nothing on your Mac is ever sent to the person who wrote it, except feedback you choose to send (see "Feedback you send") and the shape of your changes, if you choose to send it (see "What you can choose to send").
 
 Questions about this page go to [GitHub Issues](https://github.com/AshleyxAdamson/lumr-studio/issues). The page lives at `PRIVACY.md` in [the repo](https://github.com/AshleyxAdamson/lumr-studio/blob/main/PRIVACY.md), and its history is public.
 
@@ -10,7 +10,7 @@ Questions about this page go to [GitHub Issues](https://github.com/AshleyxAdamso
 
 - Your video and audio. The plugin opens a file only when you name it to Claude, like "use tight-cut on this video". It never browses your folders. It never uploads your video or audio, and it has no tool that could.
 - What it makes from them. The transcript, the measured word times, your edit and your exports. The section below says where each one lives.
-- The review page. A small web server on `127.0.0.1`, on a port your operating system picks, with a private token in the address. Nothing outside your Mac can reach it, and the page makes no outside requests. The one thing it can send out is feedback you write and submit, and your Mac's own server sends that (see "Feedback you send").
+- The review page. A small web server on `127.0.0.1`, on a port your operating system picks, with a private token in the address. Nothing outside your Mac can reach it, and the page makes no outside requests. The two things it can send out are feedback you write and submit, and the shape of your changes if you press Send. Your Mac's own server sends both (see "Feedback you send" and "What you can choose to send").
 
 ## What Claude sees
 
@@ -60,9 +60,20 @@ The review page has a Send feedback button. Nothing is sent until you press Subm
 - Where it goes: the Lumr Studio team's server, sent by the local server on your Mac when you press Submit. The page itself never calls the internet. The server's address is `LUMR_SHARE_URL`. Until that server is set up, the form opens a public GitHub issue in your browser instead, and nothing is sent until you submit it there. GitHub's own privacy policy covers it.
 - How long it's kept: until it's deleted. To ask for deletion, quote the ID you were given. TODO(owner): contact for deletion.
 
+## What you can choose to send
+
+The review page has a Help improve Lumr button. It shows only when the Lumr Studio team's server is set up. It opens a list of what would be sent, one line for each change, and you can remove any line. Nothing is sent until you press Send.
+
+- What a record holds: one record for each thing you did to Claude's edit (a cut you put back, a cut you marked good or wrong, words you brought back, words you cut by hand, a part you kept, or a cut of Claude's you left in place). Each holds the pace, how long the cut was and how many words it held, what kind of cut it was and who made it, what you did to it, and the shape of up to three words on each side: what sort of word it is, how long it lasts, the pause after it, and which filler it is if it is one. It also holds whether the cut sat at the start or end of a sentence, how far a laugh was, the silence left at the join, and any warnings the join check gave. Each send carries the plugin version and a random ID.
+- What it never holds: your words, your transcript, your video or audio, file names, your name or email, or a time in your video. The words beside a cut are sent as shapes, not text. The only words that can appear are a fixed list of filler words, such as "um", "uh" and "you know". The button shows the list, and "Show exactly what's sent" shows the data itself.
+- Where it goes: the Lumr Studio team's server, sent by the local server on your Mac when you press Send. The page itself never calls the internet. The server's address is `LUMR_SHARE_URL`, the same as for feedback. Until that server is set up, the button doesn't show. The server keeps the day it received the send, not the time. It stores and logs no IP address and no details of your Mac. It uses your IP address only to limit how fast one Mac can send, and doesn't keep it.
+- How long it's kept: until deleted, up to 2 years. TODO(owner): confirm the retention period.
+- How to ask for deletion: send the ID you were given. Open a GitHub issue or email us, and quote the ID. TODO(owner): contact for deletion.
+- What stays on your Mac: `shares.jsonl` in the video's project folder keeps the ID of each send, the date and how many records it held, so you have the ID to quote. It holds nothing else. Delete the file and nothing else changes.
+
 ## Children
 
-The plugin collects nothing from anyone, whatever their age. Feedback is sent only if the person presses Submit. It's built for people who edit their own videos with Claude Code.
+The plugin collects nothing from anyone, whatever their age. Feedback and shapes are sent only if the person presses Submit or Send. It's built for people who edit their own videos with Claude Code.
 
 ## Changes
 

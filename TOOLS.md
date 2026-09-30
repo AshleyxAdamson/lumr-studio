@@ -97,6 +97,8 @@ One per video, created on first use:
   review.json        the creator's decisions from the round 2 review page, if any
   sounds.json        which sounds in the transcript are likely laughs
   receipts.jsonl     one line per completed step
+  shares.jsonl       one line per send the creator made with Help improve Lumr:
+                     {send_id, sent_at (a date), records}. Nothing else.
   exports/           rendered videos and previews
   work/              the edit's encode while overlays are drawn over it; emptied after
   looks/             pictures of joins made by `look`, and the stills `set_overlays` draws
@@ -141,9 +143,11 @@ counts again, even on an old video. A second forget adds to the first.
 missing or can't be read forgets nothing.
 
 `LUMR_SHARE_URL` is the address of the Lumr Studio team's server, for the review
-page's Send feedback form. There is no default yet (`share.DEFAULT_SHARE_URL`
-is `None`); a trailing slash is stripped. With it unset, the form opens a
-public GitHub issue instead. See `POST api/feedback` under `review`.
+page's Send feedback form and its Help improve Lumr button. There is no default
+yet (`share.DEFAULT_SHARE_URL` is `None`); a trailing slash is stripped. With it
+unset, the feedback form opens a public GitHub issue instead, and the page shows
+nothing about Help improve Lumr. See `POST api/feedback` and `POST
+api/share/preview` under `review`.
 
 `LUMR_HOME` resolves the way ClipForge resolves it. The environment variable
 `LUMR_STUDIO_PROJECTS_DIR` overrides the projects root. Tests must set it.
@@ -1038,6 +1042,10 @@ word_times}`. On the page the creator:
 - sends feedback with the Send feedback button, left of Export video. It opens
   a form: a message (required, 1 to 5000 characters), an optional name and an
   optional email. See `POST api/feedback` below.
+- shows a quiet Help improve Lumr button beside it when `share.on` is true. It
+  opens "Send what you changed": one plain line for each record, each with a
+  Remove, a "Show exactly what's sent" toggle with the raw JSON of what
+  remains, and Send and Cancel. See `POST api/share/preview` below.
 
 Every change saves to the edit at once. The page plays the source video
 straight from disk. Nothing is uploaded. The address works until the Claude
@@ -1070,6 +1078,36 @@ plugin's version, or `null` when it can't be read. With `direct: false` the
 form hides Name and Email and Submit opens a public GitHub issue in a new tab,
 prefilled with the message and the version. Nothing is sent from this Mac then.
 The message is never logged.
+
+`POST api/share/preview` and `POST api/share/send` are the other two routes that
+aren't a change to the edit. They hold the creator's choice to send the shape
+of their changes. The code is `server/lumr_studio/shapes.py`. Claude doesn't
+call either, and both refuse with 400 when `LUMR_SHARE_URL` is unset. The page state
+says which case it is: `share: {on: true | false}`.
+
+1. `POST api/share/preview` takes `{}` and answers `{lines, send}`. `send` is the
+   record set built from the saved `edit.json`, the words and the join check
+   (`shapes.build_send`): `{"schema": 1, "send_id": <22 URL-safe characters>,
+   "plugin_version", "records": [...]}`, at most 500 records and 256 KiB.
+   `lines` is one plain sentence for each record (`shapes.describe`), with no
+   word from the video. The server keeps that send in memory for the session.
+2. `POST api/share/send` takes `{send_id, removed: [record indexes]}`. It builds
+   nothing: it posts the kept preview minus the removed records, so exactly
+   what was shown is sent. A `send_id` that isn't the last preview answers 400.
+   It checks the records again (`shapes.validate_send`), POSTs JSON to
+   `<LUMR_SHARE_URL>/v1/sends` with a 15 second timeout,
+   `User-Agent: lumr-studio/<version>` and no retry, and answers `{send_id,
+   records}`. A non-2xx answer or a server it can't reach answers 400 with a
+   plain sentence and keeps the preview. On success it adds a line to
+   `shares.jsonl` and drops the preview.
+
+A record holds numbers and names from fixed lists, never a word from the video:
+`pace`, `proposed` (`source`, `kind`, `length_s`, `words`), `context` (up to
+three word shapes each side, each `{pos, dur, gap_after, pitch, filler}`,
+`sentence_position`, `laugh_within_s`), `creator.action` and `join` (`gap_left_s`,
+`flags`). Only a fixed list of filler words can appear as text. The team's
+server applies the same rules. `off_topic` is sent as `other` for now, because
+the server refuses any name that holds the text "topic".
 
 Ask the creator before calling this. It opens a window in their browser.
 

@@ -22,7 +22,7 @@ Lumr Studio is built around the join, where one kept word lands next to the next
 - **Never cuts inside a word.** A second model measures each word against your voice instead of trusting the transcript's guess, and any cut edge that would land in a word gets moved out.
 - **Checks every join.** Each edit comes back with a read of every join, from clipped laughs to unfinished sentences to gaps that are too tight. Claude fixes the flagged ones before you see the plan, and can look at any join as a picture of the frames, the sound wave and the words.
 - **No clicks.** Cuts land on the exact sample, with a 20 ms fade either side.
-- **Private and yours.** Nothing uploads, nothing renders until you say go, and there's no account or telemetry.
+- **Private and yours.** Nothing leaves your Mac unless you press Send, and you see exactly what's sent first. It never sends your words or your video.
 - **Free, with nothing else to pay for.** Most tools like this charge a monthly subscription, and some add per-minute fees or need a paid transcription API. Lumr Studio's transcription and word timing run on your Mac, so there's no subscription, no usage bill and no API key beyond your Claude Code.
 
 On a 21:47 test take, measured word times took out more than twice as much at every pace (3:26 vs 1:25 at Standard) and cut 94 of 112 "likes" cleanly, against 28 without them.
@@ -76,6 +76,7 @@ It runs in Claude Code, and in Cowork when the session runs on your Mac. Chat on
 - **Downloads, once:** the locked Python packages from PyPI through `uv`, plus a Python build from `github.com/astral-sh/python-build-standalone` if your Mac has none. Parakeet from `huggingface.co` and wav2vec 2.0 from `download.pytorch.org`, only after you say yes. Each model file is checked against a pinned size and sha256.
 - **What leaves your Mac:** nothing of yours, except what Claude reads in the conversation. That's the transcript text, the cut lists, and a small picture of a join when Claude checks one. Your video and audio never upload.
 - **Feedback, only when you press Submit:** the review page's Send feedback button sends your message to the Lumr Studio team's server, and your name and email only if you enter them. Until that server is set up, Submit opens a public GitHub issue in your browser instead, and nothing is sent until you submit it there. The page itself never calls the internet; your Mac's local server makes the one request.
+- **Help improve Lumr, only when you press Send:** the review page's Help improve Lumr button shows a list of what would be sent, and you can remove any line. Send then posts the shape of your changes to a Lumr Studio server (its address isn't set yet): how long each cut was, what kind, what you did to it and what the words beside it sound like. It never holds your words or your video. Nothing is sent until you press Send, and the button only shows once that server is set up. `PRIVACY.md` has the detail.
 
 PolyForm Noncommercial 1.0.0. You can sell the videos you make with it. You can't resell the tool.
 
