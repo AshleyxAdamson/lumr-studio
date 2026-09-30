@@ -50,12 +50,12 @@ trap 'stop 143' TERM
 
 # The same two variables .mcp.json gives the server. test_doctor.py checks the
 # two stay in step.
-UV_PROJECT_ENVIRONMENT="$CLAUDE_PLUGIN_DATA/venv"
+VIRTUAL_ENV="$CLAUDE_PLUGIN_DATA/venv"
 HF_HUB_DISABLE_TELEMETRY=1
-export UV_PROJECT_ENVIRONMENT HF_HUB_DISABLE_TELEMETRY
+export VIRTUAL_ENV HF_HUB_DISABLE_TELEMETRY
 
-echo "Building the Lumr Studio environment in $UV_PROJECT_ENVIRONMENT"
-uv sync --locked --project "$CLAUDE_PLUGIN_ROOT/server" &
+echo "Building the Lumr Studio environment in $VIRTUAL_ENV"
+uv sync --active --locked --project "$CLAUDE_PLUGIN_ROOT/server" &
 uv=$!
 wait "$uv"
 finish $?

@@ -16,14 +16,14 @@ Nothing here needs a checkout of the repo, ClipForge or the `hammy` command.
 The plugin starts it with the line in `../.mcp.json`:
 
 ```sh
-uv run --locked --project ${CLAUDE_PLUGIN_ROOT}/server lumr-studio-server
+uv run --active --locked --project ${CLAUDE_PLUGIN_ROOT}/server lumr-studio-server
 ```
 
-`.mcp.json` also sets `UV_PROJECT_ENVIRONMENT=${CLAUDE_PLUGIN_DATA}/venv`, so
+`.mcp.json` also sets `VIRTUAL_ENV=${CLAUDE_PLUGIN_DATA}/venv`, and `--active` tells uv to use it, so
 the environment is built once, outside the plugin's versioned folder, and
 survives an update (an update re-points the project at the new folder and
 installs nothing). The first session builds it. The plugin's SessionStart hook
-(`../hooks/doctor.sh`) runs `uv sync --locked` for this folder in the
+(`../hooks/doctor.sh`) runs `uv sync --active --locked` for this folder in the
 background, detached, because Claude Code stops a server that hasn't started
 after 30 seconds (`MCP_TIMEOUT`) and a cold build takes longer. A build inside
 the server would die with it. When the build has finished, the server's own

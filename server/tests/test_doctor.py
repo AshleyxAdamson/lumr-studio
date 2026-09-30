@@ -46,7 +46,7 @@ esac
 # waits for the release file when there is one, then leaves the launcher behind,
 # as a finished build does.
 UV_TEMPLATE = """#!/bin/sh
-printf '%s|%s|%s\\n' "$*" "$UV_PROJECT_ENVIRONMENT" "$HF_HUB_DISABLE_TELEMETRY" >> "@CALLS@"
+printf '%s|%s|%s\\n' "$*" "$VIRTUAL_ENV" "$HF_HUB_DISABLE_TELEMETRY" >> "@CALLS@"
 echo "$$" > "@CALLS@.pid"
 echo "stub uv: building"
 if [ -n "@HOLD@" ]; then
@@ -54,8 +54,8 @@ if [ -n "@HOLD@" ]; then
   while [ ! -e "@HOLD@" ] && [ "$n" -lt 400 ]; do /bin/sleep 0.05; n=$((n + 1)); done
 fi
 if [ @STATUS@ -eq 0 ]; then
-  mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"
-  : > "$UV_PROJECT_ENVIRONMENT/bin/lumr-studio-server"
+  mkdir -p "$VIRTUAL_ENV/bin"
+  : > "$VIRTUAL_ENV/bin/lumr-studio-server"
 fi
 exit @STATUS@
 """
@@ -207,7 +207,7 @@ def test_the_build_is_the_servers_launch_line_minus_the_server(tmp_path):
     assert "--locked" in args.split()
     # No dev group: no flag asks for one, and the server's own launch doesn't either.
     assert "group" not in args and "dev" not in args
-    assert project_env == resolved(server["env"]["UV_PROJECT_ENVIRONMENT"])
+    assert project_env == resolved(server["env"]["VIRTUAL_ENV"])
     assert telemetry == server["env"]["HF_HUB_DISABLE_TELEMETRY"]
 
 

@@ -44,7 +44,7 @@ def server_params(extras: str = "") -> StdioServerParameters:
     """
     declared = json.loads((PLUGIN_DIR / ".mcp.json").read_text())["mcpServers"]["lumr-studio"]
     root = str(PLUGIN_DIR)
-    env = {k: v for k, v in declared.get("env", {}).items() if k != "UV_PROJECT_ENVIRONMENT"}
+    env = {k: v for k, v in declared.get("env", {}).items() if k != "VIRTUAL_ENV"}
     return StdioServerParameters(
         command=declared["command"],
         args=[arg.replace("${CLAUDE_PLUGIN_ROOT}", root) for arg in declared["args"]],

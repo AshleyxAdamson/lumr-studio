@@ -107,7 +107,7 @@ Everything runs on your Mac. The one exception is Claude, which runs wherever yo
 
 | What | How it runs |
 |---|---|
-| The server | Claude Code starts it over stdio with `uv run --locked --project ${CLAUDE_PLUGIN_ROOT}/server lumr-studio-server` (from `.mcp.json`). It's the only long-running process. |
+| The server | Claude Code starts it over stdio with `uv run --active --locked --project ${CLAUDE_PLUGIN_ROOT}/server lumr-studio-server` (from `.mcp.json`). It's the only long-running process. |
 | The speech model | `python -m lumr_studio.speech <video>`, in a process of its own, once per video, reading the downloaded model from disk with Hugging Face set offline. |
 | Cutting and rendering | `ffmpeg` and `ffprobe`, from your PATH. |
 | The review page | A small web server on `127.0.0.1`, on a port the operating system picks, with a private token in the address. The plugin opens it in your default browser. It makes no outside requests. |

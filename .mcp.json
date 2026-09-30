@@ -4,13 +4,14 @@
       "command": "uv",
       "args": [
         "run",
+        "--active",
         "--locked",
         "--project",
         "${CLAUDE_PLUGIN_ROOT}/server",
         "lumr-studio-server"
       ],
       "env": {
-        "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_DATA}/venv",
+        "VIRTUAL_ENV": "${CLAUDE_PLUGIN_DATA}/venv",
         "HF_HUB_DISABLE_TELEMETRY": "1"
       }
     }
