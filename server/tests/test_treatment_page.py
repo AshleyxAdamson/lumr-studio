@@ -43,7 +43,7 @@ PACES = ["Natural", "Standard", "Fast", "Tight", "Hard", "Max"]
 # Every route the page may ask for. One more here is one more thing the server must answer.
 # The samples left the page in the layout round, so it no longer asks for new ones.
 ROUTES = {"api/treatment", "api/export", "api/cut", "api/cut/add", "api/cut/remove", "api/keep", "api/keep/remove",
-          "api/undo", "api/usual"}
+          "api/undo", "api/usual", "api/taste/forget"}
 
 needs_node = pytest.mark.skipif(NODE is None, reason="node is not installed")
 
@@ -1279,6 +1279,19 @@ def test_the_page_asks_for_nothing_it_no_longer_shows():
     assert asked == ROUTES
 
 
+def test_the_taste_line_sits_under_the_usual_button_and_forgets_after_asking():
+    html = page()
+    settings = part(markup(), "aside", "settings")
+    assert settings.index('id="usualBtn"') < settings.index('id="tasteLine"') < settings.index('id="h-cuts"')
+    assert re.search(r'<p\b[^>]*id="tasteLine"[^>]*\bhidden\b', settings), "the line shows only when something was learned"
+    assert re.search(r'<button\b[^>]*id="tasteForget"[^>]*class="link"|<button\b[^>]*class="link"[^>]*id="tasteForget"', settings)
+    ask = "Forget what Lumr learned from your changes? Your videos and edits stay as they are."
+    assert html.index(ask) < html.index("send('api/taste/forget'"), "she is asked before anything is sent"
+    assert "'Learning from your changes on ' + n + (n === 1 ? ' video' : ' videos')" in html
+    for line in (ask, "Learning from your changes on 3 videos", "Forget"):
+        assert not banned_in(line) and not decimal_times_in(line), line
+
+
 def test_what_the_creator_asked_to_remove_is_gone():
     html = page()
     for gone in ("fromStart", "back5", "fwd5", "changedSec", "stripcv", "prevBusy", "nextBusy", "lookBtn", "h-keeps",
@@ -1395,8 +1408,10 @@ def test_the_words_she_never_has_to_learn_are_not_on_screen():
     sentences = [s for s in said if " " in s.strip() and "<" not in s and re.search(r"[a-z]{3}", s)]
     jargon = {s: banned_in(s) for s in sentences if banned_in(s)}
     assert not jargon, f"editor jargon a script can put on screen: {jargon}"
-    # the approved words: a count ("11 edits"), the legend, and the finished length in the top line
-    approved = (" edits", " after edits")
+    # the approved words: a count ("11 edits"), the legend, the finished length in the top line, and the
+    # question before she forgets what Lumr learned, which says her edits stay
+    approved = (" edits", " after edits",
+                "Forget what Lumr learned from your changes? Your videos and edits stay as they are.")
     elsewhere = [s for s in sentences if re.search(r"\bedits\b", s) and s not in approved]
     assert not elsewhere, f"'edits' shows only where she approved it: {elsewhere}"
 

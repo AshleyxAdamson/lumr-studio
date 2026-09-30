@@ -289,6 +289,7 @@ h2 .count .mine{color:var(--user)}
 
 .usualrow{display:flex; align-items:center; gap:var(--s3); flex-wrap:wrap; margin-top:var(--s3)}
 #usualNote{font-size:12px; color:var(--text2)}
+.tasteline{display:flex; align-items:center; gap:var(--s2); flex-wrap:wrap; margin-top:var(--s2); font-size:12px; color:var(--text2)}
 .empty{font-size:12px; color:var(--text2); margin-top:var(--s2); text-wrap:pretty}
 
 /* ── right: the preview ──────────────────────────────────────────
@@ -550,6 +551,7 @@ h2 .count .mine{color:var(--user)}
           <button id="usualBtn" class="btn" type="button" hidden title="New videos start with this pace and these switches">Make this my usual</button>
           <span id="usualNote" role="status"></span>
         </div>
+        <p class="tasteline" id="tasteLine" hidden><span id="tasteText"></span> <span aria-hidden="true">·</span> <button id="tasteForget" class="link" type="button">Forget</button></p>
       </section>
 
       <section aria-labelledby="h-cuts">
@@ -1948,6 +1950,7 @@ function applyState(state, how){
   renderFine();
   renderTakeOut();
   renderUsual();
+  renderTaste();
   renderGroups();
   renderKeeps();
   renderBar();
@@ -2286,6 +2289,23 @@ $('usualBtn').addEventListener('click', () => {
     if(b.hidden && document.activeElement === document.body && switches.length) switches[switches.length - 1].focus();
     setText('usualNote', 'Saved. New videos start this way.');
     setTimeout(() => setText('usualNote', ''), BRIEF_NOTE_MS);
+  });
+});
+
+/* ── what Lumr learned from her other videos: one quiet line, with a way to forget it ── */
+function renderTaste(){
+  const t = S.taste, n = t ? t.videos : 0;
+  $('tasteLine').hidden = !n;
+  if(n) setText('tasteText', 'Learning from your changes on ' + n + (n === 1 ? ' video' : ' videos'));
+}
+$('tasteForget').addEventListener('click', () => {
+  if(!window.confirm('Forget what Lumr learned from your changes? Your videos and edits stay as they are.')) return;
+  const b = $('tasteForget'); b.setAttribute('aria-busy', 'true');
+  send('api/taste/forget', {}).then(() => {
+    b.removeAttribute('aria-busy');
+    /* the line leaves with the button under the keyboard; it goes back to the switch above, as after "Make this my usual" */
+    const switches = $('takeList').querySelectorAll('.switch');
+    if(document.activeElement === document.body && switches.length) switches[switches.length - 1].focus();
   });
 });
 
