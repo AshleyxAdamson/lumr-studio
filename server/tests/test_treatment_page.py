@@ -1451,6 +1451,25 @@ def test_the_words_offer_cut_and_keep_and_say_how():
     assert line + gap < 28, "the how-to line takes the words less than one line of their own (16 px at 1.75)"
 
 
+def test_the_how_to_is_the_words_size_and_its_halves_are_paired_by_color():
+    # Her words: "make it the same size as the type in the viewing area", "double click a word to cut
+    # it underlined in the same red", "drag to cut or keep a part, underline that in the same
+    # green-ish blue", "so that way they're visually paired".
+    css = page()
+    words_size = re.search(r"#words\{[^}]*?font-size:(\d+)px", css).group(1)
+    assert re.search(r"#pickHint\{[^}]*?font-size:(\d+)px", css).group(1) == words_size
+    hint = part(markup(), "p", "pickHint")
+    assert re.findall(r'<span class="(\w+)">([^<]*)</span>', hint) == [
+        ("dbl", "Double-click a word to cut it."), ("drag", "Drag to cut or keep a part.")]
+    assert "#pickHint .dbl{text-decoration-color:var(--red-soft)}" in css, "the red of a cut word"
+    assert "#pickHint .drag{text-decoration-color:var(--user)}" in css, "her teal, the color of Keep"
+    assert "#pickHint .dbl, #pickHint .drag{white-space:nowrap; text-decoration:underline solid 2px" in css
+    # The bigger how-to is taller than her part, which shows in its place. It keeps its room while
+    # hidden, so the words stay under the pointer through a drag.
+    assert "#pickHint[hidden]{display:block!important; visibility:hidden}" in css
+    assert "#wordsHead p{grid-area:1 / 1;" in css
+
+
 def test_the_marks_on_the_words_are_explained_under_the_help_button():
     shortcuts = part(markup(), "div", "shortcuts")
     marks = re.findall(r'<li><span class="mark ([^"]*)"[^>]*>word</span>([^<]*)</li>', shortcuts)
