@@ -32,7 +32,7 @@ from lumr_studio.mcp_results import json_text, result as _result, run as _run
 EXTRAS = offering.enabled_extras()
 
 _INSTRUCTIONS_START = (
-    "Lumr Studio edits one video at a time. Every tool except job_status takes the "
+    "Lumr Studio edits one video at a time. Every tool except job_status and forget_taste takes the "
     "absolute path of the source video. Times are seconds in the SOURCE video unless a "
     "field says edited. Long work returns a job_id; call job_status with wait=50 "
     "until it is done. transcribe also measures the word times, in the same job; every "
@@ -236,6 +236,22 @@ def review(
 ) -> CallToolResult:
     """Ask the creator before calling this: it opens a window in their browser. Opens the page for the saved edit and returns its address. There the creator sets the pace, by stop or with two sliders, and what to take out (long pauses, filler words, stutters, and the filler likes you picked), puts back or keeps out each of your cuts, cuts words by hand, brings removed words back, flags parts to keep no matter what, listens to three short samples, hops through the stretches with the most editing, and can export the finished video. Every change saves to the edit at once. The page runs on this machine only and plays the source video from disk. When the creator is done, call get_edit and read creator and export."""
     return _call(tools.review, video_path, open_browser)
+
+
+@_tool(title="Forget taste", annotations=_annotations("Forget taste", read_only=False, idempotent=True))
+def forget_taste(
+    everything: Annotated[
+        bool | None,
+        Field(description="Pass true to forget every change the creator made on all their videos so far. Only after the creator said yes to that."),
+    ] = None,
+    word: Annotated[str | None, Field(description='One word to stop learning from, such as "so".')] = None,
+    kind: Annotated[
+        str | None,
+        Field(description=f"One kind of cut to stop learning from: {', '.join(CUT_KINDS)}, or likes (the filler words you pick)."),
+    ] = None,
+) -> CallToolResult:
+    """Stop learning from some of what the creator changed on their videos, when they ask you to forget or stop learning something. Send exactly one of everything, word or kind. It takes no video: taste covers all their videos. Ask the creator before you pass everything, and say what it will forget; word and kind need only a clear ask. Their videos and edits do not change, and no file is deleted; changes they make later count again. Returns forgot (what was forgotten) and taste (what get_edit would still carry, or null when nothing is left), so you can say in one line what is gone and what Lumr still uses."""
+    return _call(tools.forget_taste, everything, word, kind)
 
 
 @_tool(title="Job status", annotations=_annotations("Job status", read_only=True))

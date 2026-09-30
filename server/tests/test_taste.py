@@ -16,6 +16,7 @@ import pytest
 from creator_words import banned_in, decimal_times_in
 from lumr_studio import edit as edits
 from lumr_studio import taste, tools, treatment
+from lumr_studio.errors import StudioError
 from lumr_studio.project import open_project, projects_root, write_json_atomic
 from lumr_studio.silences import no_silences
 from lumr_studio.tools import unmeasured_labels
@@ -252,43 +253,226 @@ def test_a_corrupt_edit_in_another_project_is_skipped(video):
 # ── forgetting ────────────────────────────────────────────────────────────────
 
 
-def test_forget_writes_only_a_marker():
-    got = taste.forget()
-    data = json.loads((projects_root() / taste.TASTE_FILE).read_text())
-    assert data == {"version": 1, "forgotten_at": got["forgotten_at"]}
-    assert got["forgotten_at"].endswith("+00:00")
+def folder_of(ctx):
+    """The name a project's folder goes by in taste.json."""
+    return ctx.project.root.name
 
 
-def test_forget_hides_earlier_projects_and_a_project_changed_after_counts_again(video):
-    first = taught(video, "first")
-    assert taste.learn()["videos"] == 1
-    taste.forget()
+def marker():
+    return json.loads((projects_root() / taste.TASTE_FILE).read_text())
+
+
+def test_forgetting_everything_writes_ids_and_the_treatment_and_no_date(video):
+    ctx = taught(video, "first")
+    got = taste.forget_all()
+    assert got == {"videos": 1}
+    data = marker()
+    assert set(data) == {"version", "forgotten", "ignored_words", "ignored_kinds"}
+    assert data["version"] == 2 and data["ignored_words"] == [] and data["ignored_kinds"] == []
+    kept = data["forgotten"][folder_of(ctx)]
+    assert set(kept) == {"keep", "creator_cuts", "ratings", "treatment"}
+    assert kept["keep"] == [k["id"] for k in ctx.edit["keep"]] and len(kept["keep"]) == 1
+    assert kept["creator_cuts"] == [c["id"] for c in ctx.edit["creator_cuts"]] and len(kept["creator_cuts"]) == 1
+    assert kept["ratings"] == [] and kept["treatment"] == ctx.edit["treatment"]
+
+
+def test_forgetting_everything_leaves_every_edit_as_it_was(video):
+    ctx = taught(video, "first")
+    before = open_project(str(ctx.project.video)).edit_path.read_bytes()
+    taste.forget_all()
     assert taste.learn() is None
-    assert open_project(str(first.project.video)).edit_path.exists(), "the edit stays as it was"
-    # Changed after forgetting: the file's time moves past the marker.
+    assert open_project(str(ctx.project.video)).edit_path.read_bytes() == before
+
+
+def test_forgetting_sticks_when_the_old_video_is_edited_again(video):
+    """The file's date moves on a new edit; what it taught before must not come back."""
+    first = taught(video, "first")
+    taste.forget_all()
     path = open_project(str(first.project.video)).edit_path
     later = time.time() + 5
     os.utime(path, (later, later))
-    assert taste.learn()["videos"] == 1
-    # Edited for real after forgetting.
+    assert taste.learn() is None
+    # A new change of the same video counts, and only that one.
+    treatment.add_cut(first, {"start": 4.95, "end": 5.3})
+    got = taste.learn()
+    assert got["videos"] == 1 and got["cut_by_hand"] == [["about", 1]]
+    assert got["put_back"] == {}, "the put-back she forgot stays forgotten"
+
+
+def test_the_pace_and_switches_come_back_only_when_they_change(video):
+    ctx = edited(another(video, "first"), pace="standard", auto_tighten=True)
+    treatment.change_treatment(ctx, {"pace": "fast", "take_out": {"fillers": False}})
+    assert taste.learn()["pace"] == {"claude": {"standard": 1}, "creator": {"fast": 1}}
+    taste.forget_all()
+    assert taste.learn() is None
+    treatment.change_treatment(ctx, {"pace": "tight"})
+    got = taste.learn()
+    assert got["pace"] == {"claude": {"standard": 1}, "creator": {"tight": 1}}
+    assert got["take_out"] == {"fillers": {"off": 1, "on": 0}}
+
+
+def test_a_change_made_after_forgetting_counts_and_an_earlier_one_does_not(video):
+    taught(video, "first")
+    taste.forget_all()
     taught(video, "second")
-    os.utime(open_project(str(video.with_name("second.mp4"))).edit_path, (later, later))
-    assert taste.learn()["videos"] == 2
+    got = taste.learn()
+    assert got["videos"] == 1
+    assert got["cut_by_hand"] == [["we", 1]] and got["put_back"] == {"repeat": {"put_back": 1, "proposed": 1}}
+
+
+def test_forgetting_twice_keeps_the_first_ids_and_adds_the_new(video):
+    ctx = taught(video, "first")
+    first = marker_after(taste.forget_all)["forgotten"][folder_of(ctx)]
+    treatment.add_cut(ctx, {"start": 4.95, "end": 5.3})
+    second = marker_after(taste.forget_all)["forgotten"][folder_of(ctx)]
+    assert set(first["creator_cuts"]) < set(second["creator_cuts"]) and len(second["creator_cuts"]) == 2
+    assert second["keep"] == first["keep"]
+    assert taste.learn() is None
+
+
+def marker_after(action):
+    action()
+    return marker()
+
+
+def test_a_project_added_after_forgetting_counts(video):
+    taught(video, "first")
+    taste.forget_all()
+    assert len(marker()["forgotten"]) == 1
+    taught(video, "second")
+    assert taste.learn()["videos"] == 1
+
+
+def test_forgetting_a_word_drops_it_from_cut_and_brought_back(video):
+    for name in ("a", "b"):
+        plant(name, planted(cut_words=["like", "so"], brought=["Actually,", "you know"]))
+    assert taste.forget_word("Like,") == "like"
+    assert taste.forget_word("actually") == "actually"
+    assert taste.forget_word("Like") == "like"
+    assert marker()["ignored_words"] == ["like", "actually"]
+    got = taste.learn()
+    assert got["cut_by_hand"] == [["so", 2]] and got["brought_back"] == [["you know", 2]]
+    assert not any("like" in line or "actually" in line for line in got["lessons"])
+
+
+def test_a_project_with_only_forgotten_words_no_longer_counts():
+    plant("a", planted(cut_words=["like"]))
+    taste.forget_word("like")
+    assert taste.learn() is None and taste.summary_for_page() is None
+
+
+def test_forgetting_a_kind_drops_it_from_put_back():
+    requested = [(0.0, 1.0, "repeat"), (2.0, 3.0, "false_start")]
+    for name in ("a", "b"):
+        plant(name, planted(requested=requested, put_back=[(0.0, 1.0), (2.0, 3.0)]))
+    assert set(taste.learn()["put_back"]) == {"repeat", "false_start"}
+    assert taste.forget_kind("repeat") == "repeat"
+    got = taste.learn()
+    assert set(got["put_back"]) == {"false_start"}
+    assert all("(repeat)" not in line for line in got["lessons"])
+
+
+def test_only_a_real_kind_can_be_forgotten():
+    for kind in (*edits.CUT_KINDS, "likes"):
+        taste.forget_kind(kind)
+    assert marker()["ignored_kinds"] == [*edits.CUT_KINDS, "likes"]
+    for bad in ("pace", "", "Repeat", "unknown"):
+        with pytest.raises(StudioError, match="is not a kind of cut"):
+            taste.forget_kind(bad)
+    with pytest.raises(StudioError, match="Send the word"):
+        taste.forget_word("  ,, ")
 
 
 def test_a_marker_that_cannot_be_read_forgets_nothing(video):
     taught(video, "first")
+    for text in ("{not json", "[1, 2]", '{"forgotten": 5, "ignored_words": "so", "ignored_kinds": [1]}', "{}"):
+        (projects_root() / taste.TASTE_FILE).write_text(text)
+        assert taste.learn()["videos"] == 1, text
+    # a damaged marker is replaced by the next forget
     (projects_root() / taste.TASTE_FILE).write_text("{not json")
-    assert taste.learn()["videos"] == 1
-    write_json_atomic(projects_root() / taste.TASTE_FILE, {"version": 1, "forgotten_at": "yesterday"})
-    assert taste.learn()["videos"] == 1
+    taste.forget_word("so")
+    assert marker()["ignored_words"] == ["so"] and marker()["version"] == 2
 
 
-def test_forgetting_leaves_every_edit_as_it_was(video):
+def test_learning_works_with_no_marker_at_all(video):
+    taught(video, "first")
+    assert not (projects_root() / taste.TASTE_FILE).exists()
+    assert taste.learn()["videos"] == 1
+    assert not (projects_root() / taste.TASTE_FILE).exists(), "learning never writes"
+
+
+# ── the forget_taste tool ─────────────────────────────────────────────────────
+
+
+def test_the_tool_forgets_one_word_and_says_what_is_left(video):
+    for name in ("a", "b"):
+        plant(name, planted(cut_words=["like", "so"]))
+    got = tools.forget_taste(word="Like")
+    assert got["forgot"] == 'the word "like"'
+    assert got["taste"]["cut_by_hand"] == [["so", 2]]
+
+
+def test_the_tool_forgets_one_kind():
+    for name in ("a", "b"):
+        plant(name, planted(requested=[(0.0, 1.0, "repeat")], put_back=[(0.0, 1.0)], cut_words=["so"]))
+    got = tools.forget_taste(kind="repeat")
+    assert got["forgot"] == 'the kind "repeat"' and got["taste"]["put_back"] == {}
+
+
+def test_the_tool_forgets_everything_and_taste_is_null(video):
     ctx = taught(video, "first")
-    before = open_project(str(ctx.project.video)).edit_path.read_bytes()
-    taste.forget()
-    assert open_project(str(ctx.project.video)).edit_path.read_bytes() == before
+    assert tools.forget_taste(everything=True) == {"forgot": "everything", "taste": None}
+    assert marker()["forgotten"][folder_of(ctx)]["creator_cuts"]
+
+
+def test_the_tool_takes_exactly_one_input():
+    for kwargs in ({}, {"everything": True, "word": "so"}, {"word": "so", "kind": "repeat"},
+                   {"everything": False}, {"everything": False, "word": "so"}):
+        with pytest.raises(StudioError):
+            tools.forget_taste(**kwargs)
+    assert not (projects_root() / taste.TASTE_FILE).exists(), "a refused call writes nothing"
+    with pytest.raises(StudioError, match="not a kind of cut"):
+        tools.forget_taste(kind="nonsense")
+
+
+def test_the_tool_is_forgetting_twice_the_same_as_once(video):
+    taught(video, "first")
+    tools.forget_taste(everything=True)
+    once = marker()
+    tools.forget_taste(everything=True)
+    assert marker() == once
+    tools.forget_taste(word="so")
+    tools.forget_taste(word="so")
+    assert marker()["ignored_words"] == ["so"]
+
+
+def test_the_server_offers_the_tool_without_a_video():
+    import asyncio
+
+    from lumr_studio import offering, server
+
+    assert "forget_taste" in offering.EDITOR_TOOLS
+    listed = {t.name: t for t in asyncio.run(server.mcp.list_tools())}
+    tool = listed["forget_taste"]
+    assert set(tool.input_schema["properties"]) == {"everything", "word", "kind"}
+    assert not tool.input_schema.get("required")
+    assert tool.annotations.read_only_hint is False
+    assert tool.annotations.destructive_hint is False
+    assert tool.annotations.idempotent_hint is True
+    assert "ask the creator" in tool.description.lower()
+    assert "except job_status and forget_taste" in server.INSTRUCTIONS
+
+
+def test_the_server_tool_answers_and_refuses_the_way_the_others_do():
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from lumr_studio import server
+
+    plant("a", planted(cut_words=["so"] * 3))
+    answered = server.forget_taste(word="so")
+    assert answered.structured_content == {"forgot": 'the word "so"', "taste": None}
+    with pytest.raises(ToolError, match="exactly one"):
+        server.forget_taste()
 
 
 # ── the page ──────────────────────────────────────────────────────────────────
@@ -307,24 +491,19 @@ def test_the_page_does_not_count_its_own_video(video):
     assert treatment.page_state(ctx)["taste"] is None
 
 
-def test_forget_on_the_page_answers_the_new_state(video):
+def test_the_page_forgets_nothing_itself():
+    from lumr_studio import review_server
+
+    assert not hasattr(treatment, "forget_taste")
+    assert "api/taste/forget" not in review_server.TREATMENT_ACTIONS
+
+
+def test_the_page_state_drops_out_when_everything_is_forgotten(video):
     ctx = edited(video)
     taught(video, "first")
     assert treatment.page_state(ctx)["taste"] == {"videos": 1}
-    state = treatment.forget_taste(ctx, {})
-    assert state["taste"] is None
-    assert taste.learn() is None
-
-
-def test_forget_on_the_page_takes_no_fields(video):
-    with pytest.raises(treatment.StudioError, match="Unknown field"):
-        treatment.forget_taste(edited(video), {"all": True})
-
-
-def test_the_forget_route_is_in_the_route_table():
-    from lumr_studio import review_server
-
-    assert review_server.TREATMENT_ACTIONS["api/taste/forget"] is treatment.forget_taste
+    taste.forget_all()
+    assert treatment.page_state(ctx)["taste"] is None
 
 
 # ── the words the creator reads ───────────────────────────────────────────────

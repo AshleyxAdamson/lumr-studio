@@ -24,9 +24,12 @@ from lumr_studio.jobs import describe_failure
 logger = logging.getLogger("lumr_studio")
 
 
-def tool_annotations(title: str, read_only: bool) -> ToolAnnotations:
-    """Tool annotations: a title, whether it only reads, and never destructive."""
-    return ToolAnnotations(title=title, read_only_hint=read_only, destructive_hint=False)
+def tool_annotations(title: str, read_only: bool, *, idempotent: bool | None = None) -> ToolAnnotations:
+    """Tool annotations: a title, whether it only reads, and never destructive.
+
+    ``idempotent`` is set only for a tool that says the same thing when called twice.
+    """
+    return ToolAnnotations(title=title, read_only_hint=read_only, destructive_hint=False, idempotent_hint=idempotent)
 
 
 def run(fn: Callable[..., dict[str, Any]], *args: Any, **kwargs: Any) -> dict[str, Any]:

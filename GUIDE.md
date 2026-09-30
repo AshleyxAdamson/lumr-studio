@@ -4,7 +4,7 @@ The details behind the [README](README.md): the review page, what you need, the 
 
 ## The review page and tools
 
-The plugin gives Claude 11 tools and one skill, `tight-cut`. `TOOLS.md` is the contract for each tool. None of them deletes a file of yours, and none uploads your video.
+The plugin gives Claude 12 tools and one skill, `tight-cut`. `TOOLS.md` is the contract for each tool. None of them deletes a file of yours, and none uploads your video.
 
 - `tight-cut` reads a whole recording, proposes a cut list with plain-language reasons, and only saves or renders once you say go.
 - Every saved edit comes back with a read of each join, the way a viewer hears it, and a fix for the ones likely to sound wrong. Claude repairs those before showing you the plan.
@@ -141,7 +141,7 @@ Each video gets one project folder at `~/Lumr/studio/projects/<video name>-<id>/
 | `plans.json` | the automatic removals planned for each of the six stops and for the last 12 slider settings you tried, so the page answers fast |
 | `exports/` | the videos and previews you render |
 
-Lumr learns from the cuts you put back and the words you cut or bring back. It works that out from your saved edits, on your Mac, and keeps only a note in `taste.json` for when you press Forget on the page.
+Lumr learns from the cuts you put back and the words you cut or bring back. It works that out from your saved edits, on your Mac, and keeps only a note in `taste.json` of what you asked it to forget. To forget something, ask Claude: one word, one kind of cut, or everything. Your videos and edits don't change.
 
 The transcript itself stays beside your video, as `<video>.words.json`. It's the only file the plugin puts in your video's folder. Measured silences are cached under `~/Lumr/media_cache/`. The Python environment lives in the plugin's data folder, and Claude Code deletes it when you uninstall the plugin. The models stay in the shared caches (`~/.cache/huggingface` and `~/.cache/torch`) and survive an uninstall.
 

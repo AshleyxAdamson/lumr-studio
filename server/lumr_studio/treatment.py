@@ -1806,13 +1806,6 @@ def save_as_usual(ctx: Context, body: Any) -> dict[str, Any]:
     return page_state(ctx, changed=None)
 
 
-def forget_taste(ctx: Context, body: Any) -> dict[str, Any]:
-    """Forget what the creator's other videos taught. Their edits stay as they are. Answers the new state."""
-    _need_object(body, set(), "{}")
-    taste.forget()
-    return page_state(ctx, changed=None)
-
-
 # ── What the creator changed, for Claude ──────────────────────────────────────
 
 

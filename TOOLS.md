@@ -44,9 +44,9 @@ reads. To the creator, name what goes: long pauses, filler words, stutters.
 
 ## What the plugin offers
 
-By default the server lists 11 tools: `transcribe`, `read_transcript`,
+By default the server lists 12 tools: `transcribe`, `read_transcript`,
 `analyze_take`, `find_words`, `get_edit`, `set_edit`, `preview`, `render`,
-`look`, `review` and `job_status`. Four more are extras, off unless the
+`look`, `review`, `job_status` and `forget_taste`. Four more are extras, off unless the
 environment variable `LUMR_STUDIO_EXTRAS` names them, as a comma list:
 
 | Extra | Adds | Skill that goes with it |
@@ -54,7 +54,7 @@ environment variable `LUMR_STUDIO_EXTRAS` names them, as a comma list:
 | `publish_kit` | `chapter_times`, `save_publish_kit` | `publish-kit` |
 | `overlays` | `set_overlays`, `get_overlays` | `add-visuals` |
 
-With `LUMR_STUDIO_EXTRAS=publish_kit,overlays` the server lists all 15. A name
+With `LUMR_STUDIO_EXTRAS=publish_kit,overlays` the server lists all 16. A name
 that is not an extra stops the server at start. An extra's skill folder sits
 in `extras/skills/`, outside the folder Claude Code scans, and comes back with
 an entry in `plugin.json` (`GUIDE.md`, "Turning the extras on"). The overlay
@@ -67,7 +67,7 @@ extras too, for when they are on.
 ## Rules for every tool
 
 - Every tool takes `video_path`, an absolute path to the source video, except
-  `job_status`.
+  `job_status` and `forget_taste`.
 - The source video is never modified or overwritten.
 - Results are short. A tool returns a summary and file paths. It never returns
   a whole transcript.
@@ -110,9 +110,27 @@ never touches it, and `set_overlays` never touches the cuts.
 The projects root also holds `usual.json`, the creator's usual pace and
 switches, one file for every video.
 
-It also holds `taste.json`, `{version, forgotten_at}`. It is the reset marker
-for the taste profile and nothing else. The profile itself is never stored.
-`get_edit` works it out from the other projects' `edit.json` files each time.
+It also holds `taste.json`, what the creator asked Lumr to forget, and nothing
+else. The profile itself is never stored. `get_edit` works it out from the
+other projects' `edit.json` files each time, leaving out what `taste.json`
+lists:
+
+```
+{"version": 2,
+ "forgotten": {"<project folder name>": {"keep": [ids], "creator_cuts": [ids], "ratings": [ids],
+                                          "treatment": {...} or null}},
+ "ignored_words": ["so"],
+ "ignored_kinds": ["repeat"]}
+```
+
+`forgotten` is a snapshot, taken when the creator forgets everything, of the
+ids of each project's changes and of its treatment. A change with one of those
+ids is left out, and so are the project's pace, switches and slider values
+while its treatment is still the snapshot. A change made later has a new id and
+counts again, even on an old video. A second forget adds to the first.
+`ignored_words` and `ignored_kinds` are lower-case words and kinds of cut
+(`repeat`, `false_start`, `off_topic`, `other`, `likes`). A file that is
+missing or can't be read forgets nothing.
 
 `LUMR_HOME` resolves the way ClipForge resolves it. The environment variable
 `LUMR_STUDIO_PROJECTS_DIR` overrides the projects root. Tests must set it.
@@ -437,10 +455,9 @@ When the creator changed things on other videos, the result also carries
 `taste`: what those corrections teach. It is read from the `edit.json` of
 every other project in the projects folder, with the same `creator` summary
 this video gets. This video is never counted. A project that can't be read is
-skipped. It stays on this Mac, and the creator can make Lumr forget it with
-"Forget" on the page. That writes `taste.json`; a video whose edit was saved
-before it no longer counts, and one changed after it counts again. Nothing is
-deleted.
+skipped. It stays on this Mac. The creator can make Lumr forget it by asking
+Claude, which calls `forget_taste`. That writes `taste.json`; nothing else is
+touched or deleted.
 
 ```
 {videos: 3,
@@ -995,7 +1012,7 @@ word_times}`. On the page the creator:
 - sees a name tag on the video while one of their photos or clips is on
   screen. The page only shows them; changes go through `set_overlays`.
 - saves the pace and switches as their usual for the next video
-- sees a quiet line, "Learning from your changes on N videos", when other videos taught Lumr something. Forget asks first, then starts the learning over.
+- sees a quiet line, "Learning from your changes on N videos. Ask Claude to forget any of it.", when other videos taught Lumr something. Forgetting goes through Claude (`forget_taste`), not the page.
 - exports the finished video with Export video
 
 Every change saves to the edit at once. The page plays the source video
@@ -1031,6 +1048,33 @@ After the creator says they're done, call `get_edit` and read `creator` and
 Her cuts and keeps outlive every pace change, every switch and every
 `set_edit`. A word she cut beside a trimmed pause still leaves the pause the
 pace leaves.
+
+### forget_taste
+
+Read only: no. Destructive: no, since it deletes no file of the creator's. It
+only writes `taste.json`. Idempotent: yes.
+
+Takes no `video_path`: taste spans all the creator's videos. Send exactly one
+input; anything else is an error.
+
+| Input | Type | Note |
+|---|---|---|
+| `everything` | bool | must be `true`. Forgets every change made on all videos so far. Ask the creator first. |
+| `word` | string | stop learning from one word, such as `"so"`. Stored lower case, without punctuation. |
+| `kind` | string | stop learning from one kind of cut: `repeat`, `false_start`, `off_topic`, `other`, or `likes` (the filler words Claude picks) |
+
+Returns what was forgotten and what is left:
+
+```
+{forgot: "the word \"so\"", taste: {videos: 3, ...} or null}
+```
+
+`forgot` is `"everything"`, `the word "so"` or `the kind "repeat"`. `taste` is
+what `get_edit` would now carry, or `null` when nothing is left, so Claude can
+say in one line what is gone and what Lumr still uses. Videos and edits do not
+change. Changes the creator makes after forgetting everything count again.
+Calling it twice does the same as once. The format of `taste.json` is under
+"Project folder".
 
 ### job_status
 

@@ -6,23 +6,32 @@ project in the projects folder and adds it up: the kinds of cut they put back,
 the words they cut by hand or bring back, the pace and switches they choose.
 ``get_edit`` hands the sum to Claude so the next cut starts from it.
 
-Nothing is stored but a reset marker. The profile is worked out again from the
-edits each time, so it can never drift from them, and it never leaves this
-Mac. ``forget`` writes ``taste.json`` in the projects folder; a project whose
-edit was last saved before that no longer counts, and one changed after it
-counts again.
+Nothing is stored but what the creator asked to forget. The profile is worked
+out again from the edits each time, so it can never drift from them, and it
+never leaves this Mac. ``taste.json`` in the projects folder lists what to
+leave out: the changes that existed when the creator forgot everything (by
+id, so a change made later counts again), and any words and kinds of cut they
+asked to forget. Forgetting never touches an edit.
+
+``taste.json``::
+
+    {"version": 2,
+     "forgotten": {"<project folder>": {"keep": [ids], "creator_cuts": [ids], "ratings": [ids],
+                                        "treatment": <treatment dict or null>}},
+     "ignored_words": ["so"],
+     "ignored_kinds": ["repeat"]}
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from lumr_studio import edit as edits
 from lumr_studio.pace import PACES
+from lumr_studio.errors import StudioError
 from lumr_studio.project import projects_root, write_json_atomic
 from lumr_studio.transcript import plain_text
 
@@ -30,7 +39,7 @@ log = logging.getLogger(__name__)
 
 TASTE_FILE = "taste.json"
 EDIT_FILE = "edit.json"
-TASTE_VERSION = 1
+TASTE_VERSION = 2
 # The longest lists the profile carries.
 TOP = 10
 # A lesson needs this many videos, or this many events in fewer.
@@ -44,39 +53,160 @@ KIND_WORDS = {"repeat": "restated-point", "false_start": "false-start", "off_top
 
 
 def taste_path() -> Path:
-    """The reset marker: one file in the projects folder, for every video."""
+    """What the creator asked to forget: one file in the projects folder, for every video."""
     return projects_root() / TASTE_FILE
 
 
-def _forgotten_at() -> float | None:
-    """When the creator last asked to forget, in epoch seconds, or None.
+def _strings(value: Any) -> list[str]:
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
-    A marker that can't be read forgets nothing, since a profile only picks a
-    starting point.
+
+def _marker() -> dict[str, Any]:
+    """What to leave out, read from ``taste.json``. A file that is missing or can't be read forgets nothing.
+
+    The profile only picks a starting point, so a damaged marker must never
+    stop it. Whatever part of the file is readable is used.
     """
     try:
         data = json.loads(taste_path().read_text(encoding="utf-8"))
-        return datetime.fromisoformat(str(data["forgotten_at"])).timestamp()
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
+    except (OSError, ValueError):
+        data = None
+    data = data if isinstance(data, dict) else {}
+    forgotten = data.get("forgotten")
+    return {
+        "forgotten": {k: v for k, v in forgotten.items() if isinstance(v, dict)} if isinstance(forgotten, dict) else {},
+        "ignored_words": _strings(data.get("ignored_words")),
+        "ignored_kinds": _strings(data.get("ignored_kinds")),
+    }
 
 
-def forget() -> dict[str, str]:
-    """Forget what earlier videos taught. Their edits are not touched; only a marker is written.
+def _write_marker(marker: dict[str, Any]) -> None:
+    write_json_atomic(taste_path(), {"version": TASTE_VERSION, **marker})
 
-    The time keeps its microseconds: a project saved a moment before this
-    call must read as earlier, and whole seconds could not tell.
+
+def _ids(entries: Any) -> list[str]:
+    """The saved ids of a list of entries, in order."""
+    return [e["id"] for e in entries if isinstance(e, dict) and isinstance(e.get("id"), str)] if isinstance(entries, list) else []
+
+
+def _snapshot(edit: dict[str, Any]) -> dict[str, Any]:
+    """The ids of the creator's changes in ``edit`` right now, and its treatment."""
+    from lumr_studio.treatment import keep_id
+
+    keeps = [keep_id(k) for k in edit.get("keep", []) if isinstance(k, dict) and "start" in k and "end" in k] \
+        if isinstance(edit.get("keep"), list) else []
+    cuts = [edits.creator_cut_id(c) for c in edit.get("creator_cuts", []) if isinstance(c, dict) and "start" in c and "end" in c] \
+        if isinstance(edit.get("creator_cuts"), list) else []
+    treatment = edit.get("treatment")
+    return {"keep": keeps, "creator_cuts": cuts, "ratings": _ids(edit.get("ratings")),
+            "treatment": treatment if isinstance(treatment, dict) else None}
+
+
+def _union(old: list[str], new: list[str]) -> list[str]:
+    return list(dict.fromkeys([*old, *new]))
+
+
+def forget_all() -> dict[str, int]:
+    """Forget everything the creator has changed so far, on every video. Their edits are not touched.
+
+    Each project's current changes are written down by id: kept parts, cuts of
+    their own, ratings, and the treatment as it stands. ``learn`` leaves those
+    out, and the pace and switches while the treatment is still that one. A
+    change made after this counts again. An earlier snapshot is kept, with the
+    new ids added. Answers ``{"videos": n}``, how many projects were noted.
     """
-    at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
-    write_json_atomic(taste_path(), {"version": TASTE_VERSION, "forgotten_at": at})
-    return {"forgotten_at": at}
+    marker = _marker()
+    root = projects_root()
+    noted = 0
+    for folder in sorted(root.iterdir()) if root.is_dir() else []:
+        try:
+            path = folder / EDIT_FILE
+            edit = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+            if not isinstance(edit, dict):
+                continue
+            now = _snapshot(edit)
+        except Exception as err:  # noqa: BLE001 - one broken folder must not stop the rest
+            log.debug("Skipping %s when forgetting: %s", folder.name, err)
+            continue
+        before = marker["forgotten"].get(folder.name, {})
+        marker["forgotten"][folder.name] = {
+            **{key: _union(_strings(before.get(key)), now[key]) for key in ("keep", "creator_cuts", "ratings")},
+            "treatment": now["treatment"] if now["treatment"] is not None else before.get("treatment"),
+        }
+        noted += 1
+    _write_marker(marker)
+    return {"videos": noted}
+
+
+def forget_word(word: str) -> str:
+    """Stop learning from one word, on every video. Answers the word as it is kept: lower case, no punctuation."""
+    said = _said(word) if isinstance(word, str) else ""
+    if not said:
+        raise StudioError('Send the word to forget, like "so".')
+    marker = _marker()
+    marker["ignored_words"] = _union(marker["ignored_words"], [said])
+    _write_marker(marker)
+    return said
+
+
+def forgettable_kinds() -> list[str]:
+    """The kinds of cut the creator can forget: Claude's ``CUT_KINDS`` and the filler likes Claude picks."""
+    return [*edits.CUT_KINDS, edits.PICK_KIND]
+
+
+def forget_kind(kind: str) -> str:
+    """Stop learning from one kind of cut, on every video. Raises StudioError for a kind that is not one."""
+    if kind not in forgettable_kinds():
+        raise StudioError(f"{kind!r} is not a kind of cut. The kinds are {', '.join(forgettable_kinds())}.")
+    marker = _marker()
+    marker["ignored_kinds"] = _union(marker["ignored_kinds"], [kind])
+    _write_marker(marker)
+    return kind
+
+
+def _left_out(edit: dict[str, Any], gone: dict[str, Any], kinds: list[str]) -> tuple[dict[str, Any], bool]:
+    """``edit`` without the changes that were forgotten, and whether its treatment is still the forgotten one."""
+    from lumr_studio.treatment import keep_id
+
+    keep, cuts, rated = set(gone.get("keep", [])), set(gone.get("creator_cuts", [])), set(gone.get("ratings", []))
+    out = dict(edit)
+    if isinstance(edit.get("keep"), list):
+        out["keep"] = [k for k in edit["keep"] if not (isinstance(k, dict) and "start" in k and "end" in k and keep_id(k) in keep)]
+    if isinstance(edit.get("creator_cuts"), list):
+        out["creator_cuts"] = [c for c in edit["creator_cuts"]
+                               if not (isinstance(c, dict) and "start" in c and "end" in c and edits.creator_cut_id(c) in cuts)]
+    if isinstance(edit.get("ratings"), list):
+        out["ratings"] = [r for r in edit["ratings"]
+                          if isinstance(r, dict) and r.get("id") not in rated and r.get("kind") not in kinds]
+    return out, bool(gone) and edit.get("treatment") == gone.get("treatment")
+
+
+def _ignoring(changes: dict[str, Any], requested: list[dict[str, Any]], words: list[str], kinds: list[str]) -> dict[str, Any]:
+    """``changes`` without the words and kinds the creator asked to forget."""
+    out = dict(changes)
+    if words and "cut_words" in out:
+        out["cut_words"] = [[t, n] for t, n in out["cut_words"] if t not in words]
+        if not out["cut_words"]:
+            out.pop("cut_words")
+            out.pop("cuts", None)
+    if words and "brought_back" in out:
+        out["brought_back"] = [b for b in out["brought_back"] if _said(b.get("text", "")) not in words]
+        if not out["brought_back"]:
+            out.pop("brought_back")
+    if kinds and "put_back" in out:
+        out["put_back"] = [k for k in out["put_back"] if _kind_of(k, requested) not in kinds]
+        if not out["put_back"]:
+            out.pop("put_back")
+    return out
 
 
 def _changed_projects(exclude: Path | None) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
     """``(name, edit, creator)`` for each project with something the creator changed, skipping ``exclude``.
 
-    A project that can't be read, or holds an edit that can't be summed up,
-    is skipped: one broken folder must never cost the creator the rest.
+    Each edit comes without what the creator asked to forget (see
+    ``forget_all``, ``forget_word`` and ``forget_kind``). A project that can't
+    be read, or holds an edit that can't be summed up, is skipped: one broken
+    folder must never cost the creator the rest.
     """
     # The page and Claude both ask; treatment.page_state asks this module in turn.
     from lumr_studio.treatment import creator_changes
@@ -84,7 +214,7 @@ def _changed_projects(exclude: Path | None) -> list[tuple[str, dict[str, Any], d
     root = projects_root()
     if not root.is_dir():
         return []
-    forgotten = _forgotten_at()
+    marker = _marker()
     skip = exclude.resolve() if exclude is not None else None
     found = []
     for folder in sorted(root.iterdir()):
@@ -92,10 +222,17 @@ def _changed_projects(exclude: Path | None) -> list[tuple[str, dict[str, Any], d
         try:
             if not path.is_file() or (skip is not None and folder.resolve() == skip):
                 continue
-            if forgotten is not None and path.stat().st_mtime <= forgotten:
-                continue
             edit = json.loads(path.read_text(encoding="utf-8"))
-            changes = creator_changes(edit) if isinstance(edit, dict) else None
+            if not isinstance(edit, dict):
+                continue
+            edit, same = _left_out(edit, marker["forgotten"].get(folder.name, {}), marker["ignored_kinds"])
+            changes = creator_changes(edit)
+            if changes and same:
+                for key in ("pace", "take_out", "fine"):
+                    changes.pop(key, None)
+            if changes:
+                requested = [r for r in edit.get("requested", []) if isinstance(r, dict)]
+                changes = _ignoring(changes, requested, marker["ignored_words"], marker["ignored_kinds"])
         except Exception as err:  # noqa: BLE001 - any one project may fail without costing the rest
             log.debug("Skipping %s for the taste profile: %s", folder.name, err)
             continue
@@ -148,8 +285,9 @@ def learn(exclude: Path | None = None) -> dict[str, Any] | None:
     """What every other video's changes teach, or None when none of them changed anything.
 
     ``exclude`` is the project folder of the video being edited: its own
-    changes reach Claude as ``creator`` and are not counted twice. Videos
-    whose edit was saved before the last ``forget`` don't count.
+    changes reach Claude as ``creator`` and are not counted twice. What the
+    creator asked to forget is left out (see ``forget_all``, ``forget_word``
+    and ``forget_kind``).
 
     ``videos`` counts the projects with at least one change. ``put_back`` maps
     each kind of Claude's cuts to how many were put back and how many Claude

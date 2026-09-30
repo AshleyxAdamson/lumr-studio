@@ -551,7 +551,7 @@ h2 .count .mine{color:var(--user)}
           <button id="usualBtn" class="btn" type="button" hidden title="New videos start with this pace and these switches">Make this my usual</button>
           <span id="usualNote" role="status"></span>
         </div>
-        <p class="tasteline" id="tasteLine" hidden><span id="tasteText"></span> <span aria-hidden="true">·</span> <button id="tasteForget" class="link" type="button">Forget</button></p>
+        <p class="tasteline" id="tasteLine" hidden><span id="tasteText"></span></p>
       </section>
 
       <section aria-labelledby="h-cuts">
@@ -2292,22 +2292,12 @@ $('usualBtn').addEventListener('click', () => {
   });
 });
 
-/* ── what Lumr learned from her other videos: one quiet line, with a way to forget it ── */
+/* ── what Lumr learned from her other videos: one quiet line. Forgetting goes through Claude. ── */
 function renderTaste(){
   const t = S.taste, n = t ? t.videos : 0;
   $('tasteLine').hidden = !n;
-  if(n) setText('tasteText', 'Learning from your changes on ' + n + (n === 1 ? ' video' : ' videos'));
+  if(n) setText('tasteText', 'Learning from your changes on ' + n + (n === 1 ? ' video' : ' videos') + '. Ask Claude to forget any of it.');
 }
-$('tasteForget').addEventListener('click', () => {
-  if(!window.confirm('Forget what Lumr learned from your changes? Your videos and edits stay as they are.')) return;
-  const b = $('tasteForget'); b.setAttribute('aria-busy', 'true');
-  send('api/taste/forget', {}).then(() => {
-    b.removeAttribute('aria-busy');
-    /* the line leaves with the button under the keyboard; it goes back to the switch above, as after "Make this my usual" */
-    const switches = $('takeList').querySelectorAll('.switch');
-    if(document.activeElement === document.body && switches.length) switches[switches.length - 1].focus();
-  });
-});
 
 /* ── kept no matter what: a link under the words that opens the list ── */
 function renderKeeps(){

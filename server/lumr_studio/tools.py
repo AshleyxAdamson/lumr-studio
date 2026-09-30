@@ -296,7 +296,7 @@ def get_edit(
     parts they flagged to keep, the words they brought back, and the cuts
     they made by hand. ``taste`` sums up what the creator changed on their
     other videos, with ``lessons`` in plain sentences; it stays on this Mac,
-    and the creator can have Lumr forget it from the page. When a full
+    and the creator can have Lumr forget it through Claude (``forget_taste``). When a full
     render of this video has run since the server started, ``export`` names
     its job, so Claude can follow an export the creator started from the
     page. ``word_times`` says whether the word times are measured or
@@ -775,6 +775,32 @@ def job_status(job_id: str, wait: float = 0.0, *, jobs: JobRegistry = JOBS) -> d
     if wait:
         return jobs.wait(job_id, timeout=wait)
     return jobs.status(job_id)
+
+
+def forget_taste(everything: bool | None = None, word: str | None = None, kind: str | None = None) -> dict[str, Any]:
+    """Stop learning from some of what the creator changed, across all their videos. Exactly one input.
+
+    ``everything`` forgets every change made so far; changes made after this
+    count again. ``word`` forgets one word, and ``kind`` one kind of cut
+    (``edit.CUT_KINDS`` or ``likes``). No video is named: the taste profile
+    spans them all. Nothing of the creator's is deleted or changed; only
+    ``taste.json`` in the projects folder is written. Answers ``forgot``, what
+    was forgotten, and ``taste``, what Lumr still learns from (None when
+    nothing).
+    """
+    asked = [name for name, value in (("everything", everything), ("word", word), ("kind", kind)) if value is not None]
+    if len(asked) != 1:
+        raise StudioError("Send exactly one of everything (true), word or kind, like {\"word\": \"so\"}.")
+    if everything is not None:
+        if everything is not True:
+            raise StudioError("everything must be true. To forget one word or one kind of cut, send word or kind instead.")
+        taste.forget_all()
+        forgot = "everything"
+    elif word is not None:
+        forgot = f'the word "{taste.forget_word(word)}"'
+    else:
+        forgot = f'the kind "{taste.forget_kind(kind)}"'
+    return {"forgot": forgot, "taste": taste.learn(exclude=None)}
 
 
 def chapter_times(video_path: str, source_times: list[float]) -> dict[str, Any]:

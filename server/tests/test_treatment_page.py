@@ -43,7 +43,7 @@ PACES = ["Natural", "Standard", "Fast", "Tight", "Hard", "Max"]
 # Every route the page may ask for. One more here is one more thing the server must answer.
 # The samples left the page in the layout round, so it no longer asks for new ones.
 ROUTES = {"api/treatment", "api/export", "api/cut", "api/cut/add", "api/cut/remove", "api/keep", "api/keep/remove",
-          "api/undo", "api/usual", "api/taste/forget"}
+          "api/undo", "api/usual"}
 
 needs_node = pytest.mark.skipif(NODE is None, reason="node is not installed")
 
@@ -1279,17 +1279,16 @@ def test_the_page_asks_for_nothing_it_no_longer_shows():
     assert asked == ROUTES
 
 
-def test_the_taste_line_sits_under_the_usual_button_and_forgets_after_asking():
+def test_the_taste_line_sits_under_the_usual_button_and_sends_her_to_claude_to_forget():
     html = page()
     settings = part(markup(), "aside", "settings")
     assert settings.index('id="usualBtn"') < settings.index('id="tasteLine"') < settings.index('id="h-cuts"')
     assert re.search(r'<p\b[^>]*id="tasteLine"[^>]*\bhidden\b', settings), "the line shows only when something was learned"
-    assert re.search(r'<button\b[^>]*id="tasteForget"[^>]*class="link"|<button\b[^>]*class="link"[^>]*id="tasteForget"', settings)
-    ask = "Forget what Lumr learned from your changes? Your videos and edits stay as they are."
-    assert html.index(ask) < html.index("send('api/taste/forget'"), "she is asked before anything is sent"
-    assert "'Learning from your changes on ' + n + (n === 1 ? ' video' : ' videos')" in html
-    for line in (ask, "Learning from your changes on 3 videos", "Forget"):
-        assert not banned_in(line) and not decimal_times_in(line), line
+    assert "tasteForget" not in html and "window.confirm" not in html and "api/taste" not in html, "forgetting is not on the page"
+    said = "'Learning from your changes on ' + n + (n === 1 ? ' video' : ' videos') + '. Ask Claude to forget any of it.'"
+    assert said in html
+    line = "Learning from your changes on 3 videos. Ask Claude to forget any of it."
+    assert not banned_in(line) and not decimal_times_in(line) and "—" not in line
 
 
 def test_what_the_creator_asked_to_remove_is_gone():
