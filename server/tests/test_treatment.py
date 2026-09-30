@@ -28,7 +28,7 @@ UM = {"start": 3.3, "end": 3.8, "reason": "filler before the line", "kind": "oth
 RETAKE = {"start": 7.9, "end": 10.75, "reason": "second take of the opening line", "kind": "repeat"}
 
 STATE_KEYS = {
-    "video", "word_times", "word_times_note", "settings", "usual", "paces", "custom", "fine_ranges", "take_out",
+    "video", "word_times", "word_times_note", "settings", "usual", "taste", "paces", "custom", "fine_ranges", "take_out",
     "need_a_look",
     "cut_counts", "groups", "rows", "removed", "trims", "keeps", "samples", "clusters", "busy", "overlays",
     "export", "durations", "changed", "can_undo", "words", "sounds", "updated_at",

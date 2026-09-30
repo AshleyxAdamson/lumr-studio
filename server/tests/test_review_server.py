@@ -3,6 +3,7 @@
 import base64
 import http.client
 import json
+import shutil
 import urllib.error
 import urllib.request
 
@@ -575,6 +576,21 @@ def test_samples_and_usual_over_http(treated):
     status, _h, body = post_json(treated + "api/usual", {})
     assert status == 200 and state_of(body)["usual"]["pace"] == "natural"
     assert json.loads((projects_root() / treatment.USUAL_FILE).read_text())["pace"] == "natural"
+
+
+def test_forget_what_was_learned_over_http(treated, video):
+    other = video.with_name("other.mp4")
+    shutil.copy(video, other)
+    shutil.copy(video.with_suffix(".words.json"), other.with_suffix(".words.json"))
+    tools.set_edit(str(other), TREATMENT_CUTS, auto_tighten=True, silences=no_silences, labels=tools.unmeasured_labels)
+    ctx = treatment.load_context(open_project(str(other)), duration=20.0, silences=no_silences)
+    treatment.add_cut(ctx, {"start": 4.35, "end": 4.5})
+    assert state_of(call(treated + "api/treatment")[2])["taste"] == {"videos": 1}
+    status, _h, body = post_json(treated + "api/taste/forget", {})
+    assert status == 200 and state_of(body)["taste"] is None
+    assert json.loads((projects_root() / "taste.json").read_text())["version"] == 1
+    status, _h, raw = post_json(treated + "api/taste/forget", {"all": True})
+    assert status == 400 and "Unknown field" in error_of(raw)
 
 
 @pytest.mark.parametrize("route", sorted(review_server.TREATMENT_ACTIONS))

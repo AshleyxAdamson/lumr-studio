@@ -32,6 +32,7 @@ state; the shapes are in the round's API notes and ``treatment.page_state``.
     POST api/undo         {}: take back the last thing the creator did to the words
     POST api/samples      {}: pick three new samples
     POST api/usual        {}: save the pace and switches as the creator's usual
+    POST api/taste/forget {}: forget what the creator's other videos taught
     POST api/export       {}: start the full render, unless one is running
     GET  api/export       the latest export: {export: {state, progress, file, ...}}
     GET  api/peaks        the audio envelope (the page no longer asks for it)
@@ -442,6 +443,7 @@ TREATMENT_ACTIONS: dict[str, Callable[[treatment.Context, dict[str, Any]], dict[
     "api/undo": treatment.undo,
     "api/samples": treatment.new_samples,
     "api/usual": treatment.save_as_usual,
+    "api/taste/forget": treatment.forget_taste,
 }
 
 

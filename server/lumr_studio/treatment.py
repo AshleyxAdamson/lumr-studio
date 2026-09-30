@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any
 
 from lumr_studio import edit as edits
-from lumr_studio import word_times
+from lumr_studio import taste, word_times
 from lumr_studio.autocuts import (
     FILLER_PAIRS,
     FILLER_TRIM_KIND,
@@ -1178,7 +1178,8 @@ def page_state(ctx: Context, *, changed: dict[str, Any] | None = None) -> dict[s
     """Everything the treatment page shows, from the saved edit. The round's API notes list each field.
 
     ``busy`` is ``clusters`` under its earlier name with ``cuts`` beside
-    ``edits``, kept so an earlier page still draws.
+    ``edits``, kept so an earlier page still draws. ``taste`` is
+    ``{videos}``, how many other videos Lumr is learning from, or None.
     """
     treatment = saved_treatment(ctx.edit)
     made = _remake(ctx, treatment)
@@ -1200,6 +1201,7 @@ def page_state(ctx: Context, *, changed: dict[str, Any] | None = None) -> dict[s
         "word_times_note": ctx.times_note,
         "settings": treatment.as_dict(),
         "usual": None if usual is None else {k: v for k, v in usual.as_dict().items() if k != "gap_length"},
+        "taste": taste.summary_for_page(ctx.project.root),
         "paces": paces,
         "custom": custom,
         "fine_ranges": fine_ranges(),
@@ -1801,6 +1803,13 @@ def save_as_usual(ctx: Context, body: Any) -> dict[str, Any]:
         "version": TREATMENT_VERSION, "updated_at": now_iso(),
         "pace": treatment.pace, "take_out": treatment.as_dict()["take_out"], "fine": treatment.fine_values(),
     })
+    return page_state(ctx, changed=None)
+
+
+def forget_taste(ctx: Context, body: Any) -> dict[str, Any]:
+    """Forget what the creator's other videos taught. Their edits stay as they are. Answers the new state."""
+    _need_object(body, set(), "{}")
+    taste.forget()
     return page_state(ctx, changed=None)
 
 

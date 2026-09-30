@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Any
 
 from lumr_studio import edit as edits
-from lumr_studio import models
+from lumr_studio import models, taste
 from lumr_studio import treatment as treatments
 from lumr_studio import word_times
 from lumr_studio.aligner import Wav2Vec2Aligner
@@ -294,10 +294,13 @@ def get_edit(
     When the creator changed something on the treatment page, ``creator``
     says what: the pace, the switches, the cuts the creator put back, the
     parts they flagged to keep, the words they brought back, and the cuts
-    they made by hand. When a full render of this video has run since the
-    server started, ``export`` names its job, so Claude can follow an export
-    the creator started from the page. ``word_times`` says whether the word
-    times are measured or estimated.
+    they made by hand. ``taste`` sums up what the creator changed on their
+    other videos, with ``lessons`` in plain sentences; it stays on this Mac,
+    and the creator can have Lumr forget it from the page. When a full
+    render of this video has run since the server started, ``export`` names
+    its job, so Claude can follow an export the creator started from the
+    page. ``word_times`` says whether the word times are measured or
+    estimated.
     """
     project = open_project(video_path)
     duration = project.duration()
@@ -314,6 +317,9 @@ def get_edit(
     changes = treatments.creator_changes(edit)
     if changes:
         summary["creator"] = changes
+    learned = taste.learn(exclude=project.root)
+    if learned:
+        summary["taste"] = learned
     exported = _latest_export(project, edit, jobs)
     if exported:
         summary["export"] = exported
