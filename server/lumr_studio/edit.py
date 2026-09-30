@@ -100,6 +100,9 @@ PICK_REASON = "A filler word Claude picked"
 SWITCHES: dict[str, str] = {**TRIM_KINDS, PICK_KIND: PICK_LABEL}
 # Ids of the creator's own cuts and of the spans she kept start with these.
 CREATOR_ROW_PREFIX, KEEP_PREFIX = "y", "k"
+# The creator rates one of Claude's cuts or picks good or bad; a rating's id is ``r<start>-<end>``.
+RATING_PREFIX = "r"
+RATINGS = ("good", "bad")
 # Where a saved edit says how the measured word times it was placed on were made.
 MADE_AS = "word_times_made_as"
 # Set on a loaded edit whose spans were moved onto the word times the project
@@ -1093,7 +1096,7 @@ def on_the_word_times_of(project: Project, edit: dict[str, Any]) -> dict[str, An
     they move, so no reader of a saved edit gets a span that lost its words.
     A moved edit says so under ``MOVED_FROM``; its ``cuts`` are as saved.
     """
-    hers = ("requested", "keep", "creator_cuts", "picks")
+    hers = ("requested", "keep", "creator_cuts", "picks", "ratings")
     if not any(edit.get(key) for key in hers):
         return edit
     now = times.source_of(project)
@@ -1101,7 +1104,7 @@ def on_the_word_times_of(project: Project, edit: dict[str, Any]) -> dict[str, An
         return edit
     was_on = placed_on(edit)
     words = times.load_words(project)
-    prefixes = {"keep": KEEP_PREFIX, "creator_cuts": CREATOR_ROW_PREFIX, "picks": PICK_ID_PREFIX}
+    prefixes = {"keep": KEEP_PREFIX, "creator_cuts": CREATOR_ROW_PREFIX, "picks": PICK_ID_PREFIX, "ratings": RATING_PREFIX}
     moved = {**edit, MOVED_FROM: was_on}
     for key in hers:
         if isinstance(edit.get(key), list):
@@ -1147,6 +1150,7 @@ def save_edit(
     word_times: str | None = None,
     undo: dict[str, Any] | None = None,
     picks: list[dict[str, Any]] | None = None,
+    ratings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Write edit.json atomically and return what was written.
 
@@ -1160,7 +1164,9 @@ def save_edit(
     way measured times were made is saved beside it. ``undo`` holds what
     the page needs to take back her last change.
     ``picks`` are the filler words Claude picked; None means Claude has not
-    picked, which an empty list does not.
+    picked, which an empty list does not. ``ratings`` are the creator's
+    thumbs up and down on Claude's cuts and picks, and outlive every
+    ``set_edit`` like ``keep`` and ``creator_cuts``.
     """
     edit = {
         "version": EDIT_VERSION,
@@ -1189,5 +1195,7 @@ def save_edit(
         edit["undo"] = undo
     if picks is not None:
         edit["picks"] = picks
+    if ratings:
+        edit["ratings"] = ratings
     write_json_atomic(project.edit_path, edit)
     return edit

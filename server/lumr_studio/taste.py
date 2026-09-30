@@ -48,6 +48,8 @@ LESSON_VIDEOS, LESSON_EVENTS = 2, 3
 LESSONS_PER_SORT = 3
 # A put-back cut whose kind can't be found from Claude's own cuts.
 UNKNOWN_KIND = "unknown"
+# The kinds a rating can carry: Claude's cuts, and the filler words it picks.
+RATED_KINDS = (*edits.CUT_KINDS, edits.PICK_KIND)
 # How each kind of Claude's cuts reads in a lesson.
 KIND_WORDS = {"repeat": "restated-point", "false_start": "false-start", "off_topic": "off-topic", "other": "other"}
 
@@ -292,7 +294,9 @@ def learn(exclude: Path | None = None) -> dict[str, Any] | None:
     ``videos`` counts the projects with at least one change. ``put_back`` maps
     each kind of Claude's cuts to how many were put back and how many Claude
     proposed in those projects. ``cut_by_hand`` and ``brought_back`` are
-    ``[word, count]`` lists, most first. ``lessons`` are plain sentences
+    ``[word, count]`` lists, most first. ``ratings`` maps each kind (Claude's
+    cut kinds, or ``likes`` for its picked filler words) to how many the
+    creator marked ``good`` and ``bad``. ``lessons`` are plain sentences
     written from the numbers, and only for what at least two videos, or three
     events, back.
     """
@@ -309,6 +313,8 @@ def learn(exclude: Path | None = None) -> dict[str, Any] | None:
     pace: dict[str, dict[str, int]] = {"claude": {}, "creator": {}}
     took: dict[str, dict[str, int]] = {}
     slower_faster: dict[str, dict[str, int]] = {"faster": {}, "slower": {}}
+    rated: dict[str, dict[str, int]] = {}
+    rated_in: dict[tuple[str, str], set[str]] = {}
     kept_parts = 0
     stops = list(PACES)
     for name, edit, changes in projects:
@@ -328,6 +334,11 @@ def learn(exclude: Path | None = None) -> dict[str, Any] | None:
             if 0 < len(said.split()) <= 2:
                 brought[said] = brought.get(said, 0) + 1
                 brought_in.setdefault(said, set()).add(name)
+        for side, entries in changes.get("rated", {}).items():
+            for entry in entries:
+                kind = entry.get("kind") if entry.get("kind") in RATED_KINDS else edits.DEFAULT_CUT_KIND
+                rated.setdefault(kind, {"good": 0, "bad": 0})[side] += 1
+                rated_in.setdefault((kind, side), set()).add(name)
         kept_parts += len(changes.get("kept", []))
         if "pace" in changes:
             claude, creator = changes["pace"]["claude"], changes["pace"]["creator"]
@@ -344,12 +355,14 @@ def learn(exclude: Path | None = None) -> dict[str, Any] | None:
         "cut_by_hand": _top(cut_words),
         "brought_back": _top(brought),
         "kept_parts": kept_parts,
+        "ratings": rated,
         "pace": {k: v for k, v in pace.items() if v},
         "take_out": took,
     }
     lessons = _lessons_put_back(put_back, put_back_in)
     lessons += _lessons_cut_by_hand(cut_words, cut_in)
     lessons += _lessons_brought_back(brought, brought_in)
+    lessons += _lessons_rated(rated, rated_in)
     lessons += _lessons_take_out(took, n)
     lessons += _lessons_pace(slower_faster)
     profile["lessons"] = lessons
@@ -368,6 +381,19 @@ def _lessons_put_back(tally: dict[str, dict[str, int]], where: dict[str, set[str
         back, of = got["put_back"], max(got["put_back"], got["proposed"])
         out.append(f"Put back {back} of {of} {KIND_WORDS[kind]} cuts ({kind}) across {_videos(len(where[kind]))}.")
     return out
+
+
+def _lessons_rated(tally: dict[str, dict[str, int]], where: dict[tuple[str, str], set[str]]) -> list[str]:
+    """What thumbs up and down teach, kind by kind, the most marked first."""
+    said = {"good": "good", "bad": "wrong"}
+    found = []
+    for kind in RATED_KINDS:
+        for side in ("good", "bad"):
+            count = tally.get(kind, {}).get(side, 0)
+            if count and _backed(count, len(where[(kind, side)])):
+                what = "filler-word picks" if kind == edits.PICK_KIND else f"{KIND_WORDS[kind]} cuts ({kind})"
+                found.append((count, f"Marked {count} {what} {said[side]} across {_videos(len(where[(kind, side)]))}."))
+    return [line for _count, line in sorted(found, key=lambda item: -item[0])[:LESSONS_PER_SORT]]
 
 
 def _lessons_cut_by_hand(tally: dict[str, int], where: dict[str, set[str]]) -> list[str]:

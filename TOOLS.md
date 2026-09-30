@@ -104,6 +104,14 @@ One per video, created on first use:
   publish-kit/       title, description, chapters, tags
 ```
 
+`edit.json` also holds `ratings`, the creator's "Good cut" and "Wrong cut" marks:
+a list of `{id: "r<start>-<end>", row, rating: "good" | "bad", source:
+"claude" | "pick", kind, start, end, reason}`. `row` is the page's row id, and
+`kind` and `reason` are saved at rating time, so nothing has to be matched
+later. Like `keep` and `creator_cuts`, ratings outlive every `set_edit` and
+move with their words when the word times change. The key is missing when
+nothing is rated.
+
 `overlays.json` sits beside `edit.json` and is independent of it. `set_edit`
 never touches it, and `set_overlays` never touches the cuts.
 
@@ -427,6 +435,7 @@ When the creator changed something on the page, the result carries `creator`:
  brought_back: [{clock, start, end, text}],
  cuts: [{clock, start, end, text}],
  cut_words: [["like", 11], ["so", 3], ["you know", 2]],
+ rated: {good: [{clock, start, end, reason, kind}], bad: [{clock, start, end, reason, kind}]},
  fine: {gap_length: 0.35, rhythm: 3.5, speech_kept_between_cuts: 0.85, note}}
 ```
 
@@ -441,6 +450,7 @@ Each key is there only when it applies.
 | `brought_back` | brought back exactly these words, one by one, from a cut of Claude's or an automatic trim |
 | `cuts` | cut these words by hand |
 | `cut_words` | what her cuts say, counted, most first. A cut of one or two words counts as what it says; a longer cut counts each word. |
+| `rated` | marked some of Claude's cuts with "Good cut" or "Wrong cut" on the page. `good` and `bad` each list the cuts with Claude's `reason` and `kind`. A wrong cut was also put back, so it is in `put_back` too. Never propose a `bad` cut again on this video. Ratings outlive every `set_edit`. |
 
 Read it before proposing anything new: every entry is the creator saying what
 they want. Once Claude calls `set_edit` with their pace and switches, those
@@ -465,12 +475,17 @@ touched or deleted.
  cut_by_hand: [["like", 14], ["so", 5]],
  brought_back: [["actually", 3]],
  kept_parts: 2,
+ ratings: {repeat: {good: 4, bad: 0}, likes: {good: 0, bad: 3}},
  pace: {claude: {standard: 2}, creator: {fast: 3}},
  take_out: {fillers: {off: 2, on: 0}},
  lessons: ["Put back 5 of 7 restated-point cuts (repeat) across 3 videos.", ...]}
 ```
 
-`videos` counts the projects with at least one change. `put_back` counts, per
+`videos` counts the projects with at least one change. `ratings` counts, per
+kind of Claude's cuts (or `likes`, the filler words it picks), how many the
+creator marked good and how many wrong; lessons read like "Marked 4
+restated-point cuts (repeat) good across 2 videos." and "Marked 3 filler-word
+picks wrong across 2 videos." `put_back` counts, per
 kind of Claude's cuts, how many the creator put back against how many Claude
 proposed in those projects; a put-back gets its kind from the cut it overlaps
 most, else `unknown`. `cut_by_hand` and `brought_back` list the ten most
@@ -1011,6 +1026,7 @@ word_times}`. On the page the creator:
   that stretch. Previous and Next go from cut to cut.
 - sees a name tag on the video while one of their photos or clips is on
   screen. The page only shows them; changes go through `set_overlays`.
+- marks any of Claude's cuts "Good cut" or "Wrong cut". Wrong puts the cut back, the way Put back does. Pressing the same button again clears the rating, and clearing "Wrong cut" does not cut it again.
 - saves the pace and switches as their usual for the next video
 - sees a quiet line, "Learning from your changes on N videos. Ask Claude to forget any of it.", when other videos taught Lumr something. Forgetting goes through Claude (`forget_taste`), not the page.
 - exports the finished video with Export video

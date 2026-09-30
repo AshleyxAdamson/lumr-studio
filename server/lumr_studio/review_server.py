@@ -25,6 +25,7 @@ state; the shapes are in the round's API notes and ``treatment.page_state``.
     GET  api/treatment    the treatment state (treatment.page_state)
     POST api/treatment    {pace?, take_out?}: change the pace and switches
     POST api/cut          {id, state}: put one of Claude's cuts back or keep it out
+    POST api/rate         {id, rating}: rate one of Claude's cuts good or bad (null clears); bad also puts it back
     POST api/cut/add      {start, end}: the creator cuts exactly these words
     POST api/cut/remove   {id, start?, end?}: take back a cut the creator made, or part of it
     POST api/keep         {start, end, exact?, note?}: keep a stretch no matter what
@@ -435,6 +436,7 @@ class ReviewServer:
 TREATMENT_ACTIONS: dict[str, Callable[[treatment.Context, dict[str, Any]], dict[str, Any]]] = {
     "api/treatment": treatment.change_treatment,
     "api/cut": treatment.set_cut_state,
+    "api/rate": treatment.rate_cut,
     "api/cut/add": treatment.add_cut,
     "api/cut/remove": treatment.remove_cut,
     "api/keep": treatment.add_keep,

@@ -43,7 +43,7 @@ PACES = ["Natural", "Standard", "Fast", "Tight", "Hard", "Max"]
 # Every route the page may ask for. One more here is one more thing the server must answer.
 # The samples left the page in the layout round, so it no longer asks for new ones.
 ROUTES = {"api/treatment", "api/export", "api/cut", "api/cut/add", "api/cut/remove", "api/keep", "api/keep/remove",
-          "api/undo", "api/usual"}
+          "api/undo", "api/usual", "api/rate"}
 
 needs_node = pytest.mark.skipif(NODE is None, reason="node is not installed")
 
@@ -1289,6 +1289,49 @@ def test_the_taste_line_sits_under_the_usual_button_and_sends_her_to_claude_to_f
     assert said in html
     line = "Learning from your changes on 3 videos. Ask Claude to forget any of it."
     assert not banned_in(line) and not decimal_times_in(line) and "—" not in line
+
+
+RATE_WORDS = ("Good cut", "Wrong cut",
+              "Claude was right to cut this. Press again to clear.",
+              "This should not have been cut. It goes back in. Press again to clear.",
+              "Marked wrong. It is back in, so those words play now.", "Marked good.", "Rating cleared.")
+
+
+def test_each_of_claudes_cuts_has_good_cut_and_wrong_cut_buttons():
+    html = page()
+    row = html[html.index("function cutHTML(r){"):html.index("$('groups').addEventListener('click'")]
+    assert re.search(r"""data-rate="good" aria-pressed="' \+ \(r\.rating === 'good'\) \+ '" title="[^"]+">Good cut</button>""", row)
+    assert re.search(r"""data-rate="bad" aria-pressed="' \+ \(r\.rating === 'bad'\) \+ '" title="[^"]+">Wrong cut</button>""", row)
+    assert "role=\"group\" aria-label=\"' + esc('Rate the cut at '" in row, "the two buttons are one named group"
+    assert "const rate = mine ? ''" in row, "her own cuts are not rated"
+    assert "send('api/rate', { id, rating }" in html
+    assert "r.rating === side ? null : side" in html, "pressing the active one again clears it"
+    for said in RATE_WORDS:
+        assert said in html, said
+        assert not banned_in(said) and not decimal_times_in(said) and "—" not in said, said
+    assert "👍" not in html and "👎" not in html, "the page uses no emoji, so the buttons are words"
+    assert "'api/rate'" in re.search(r"const EDIT_ROUTES = \[[^\]]*\]", html).group(0)
+
+
+@needs_node
+def test_rating_a_cut_in_the_example_answers_like_the_server():
+    out = js("""
+      const s = Core.exampleState(), row = s.rows.find(r => r.by === 'claude');
+      const good = Core.exampleChange(s, 'api/rate', { id: row.id, rating: 'good' });
+      const bad = Core.exampleChange(good, 'api/rate', { id: row.id, rating: 'bad' });
+      const clear = Core.exampleChange(bad, 'api/rate', { id: row.id, rating: null });
+      const refuse = (state, body) => { try { Core.exampleChange(state, 'api/rate', body); return null; } catch(err){ return err.message; } };
+      const at = x => x.rows.find(r => r.id === row.id);
+      return {
+        good: [at(good).rating, at(good).state], bad: [at(bad).rating, at(bad).state, bad.durations.edited > good.durations.edited],
+        clear: [at(clear).rating, at(clear).state],
+        yours: refuse(s, { id: s.rows.find(r => r.by === 'you').id, rating: 'good' }),
+      };
+    """)
+    assert out["good"] == ["good", "kept_out"]
+    assert out["bad"] == ["bad", "put_back", True]
+    assert out["clear"] == [None, "put_back"], "clearing a wrong cut does not cut it again"
+    assert "one of yours" in out["yours"]
 
 
 def test_what_the_creator_asked_to_remove_is_gone():

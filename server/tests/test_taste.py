@@ -506,6 +506,242 @@ def test_the_page_state_drops_out_when_everything_is_forgotten(video):
     assert treatment.page_state(ctx)["taste"] is None
 
 
+# ── rating a cut ──────────────────────────────────────────────────────────────
+
+
+def row_of(ctx, rid):
+    return next(r for r in treatment.page_state(ctx)["rows"] if r["id"] == rid)
+
+
+def saved_ratings(ctx):
+    return json.loads(open_project(str(ctx.project.video)).edit_path.read_text()).get("ratings", [])
+
+
+def rated(video, name, sides, cuts=(UM, RETAKE)):
+    """A copy of ``video`` where the creator rated Claude's cuts: ``sides`` maps a kind to good or bad."""
+    ctx = edited(another(video, name), cuts=cuts)
+    for kind, side in sides.items():
+        treatment.rate_cut(ctx, {"id": row_id(ctx, kind), "rating": side})
+    return ctx
+
+
+def test_a_good_rating_is_saved_and_the_cut_stays(video):
+    ctx = edited(video)
+    rid = row_id(ctx, "repeat")
+    edited_before = treatment.page_state(ctx)["durations"]["edited"]
+    state = treatment.rate_cut(ctx, {"id": rid, "rating": "good"})
+    row = row_of(ctx, rid)
+    assert row["rating"] == "good" and row["state"] == "kept_out"
+    assert state["durations"]["edited"] == edited_before
+    assert saved_ratings(ctx) == [{
+        "id": rid.replace("c", "r", 1), "row": rid, "rating": "good", "source": "claude", "kind": "repeat",
+        "start": row["start"], "end": row["end"], "reason": RETAKE["reason"],
+    }]
+    assert "put_back" not in (treatment.creator_changes(ctx.edit) or {})
+
+
+def test_a_wrong_rating_puts_the_cut_back_the_way_put_back_does(video):
+    ctx = edited(video)
+    rid = row_id(ctx, "repeat")
+    before = treatment.page_state(ctx)["durations"]["edited"]
+    state = treatment.rate_cut(ctx, {"id": rid, "rating": "bad"})
+    row = row_of(ctx, rid)
+    assert row["rating"] == "bad" and row["state"] == "put_back"
+    assert state["durations"]["edited"] > before, "the words play again"
+    assert state["changed"]["seconds"] > 0
+    assert [k["origin"] for k in ctx.edit["keep"]] == ["put_back"]
+    (rating,) = saved_ratings(ctx)
+    assert rating["rating"] == "bad" and rating["kind"] == "repeat" and rating["reason"] == RETAKE["reason"]
+    seen = treatment.creator_changes(ctx.edit)
+    assert [p["reason"] for p in seen["put_back"]] == [RETAKE["reason"]]
+    assert [r["reason"] for r in seen["rated"]["bad"]] == [RETAKE["reason"]]
+
+
+def test_the_wrong_rating_and_put_back_end_in_the_same_edit(video):
+    a, b = edited(another(video, "rated")), edited(another(video, "pushed"))
+    treatment.rate_cut(a, {"id": row_id(a, "repeat"), "rating": "bad"})
+    treatment.set_cut_state(b, {"id": row_id(b, "repeat"), "state": "put_back"})
+    keep = lambda ctx: [(k["start"], k["end"], k["origin"]) for k in ctx.edit["keep"]]  # noqa: E731
+    assert keep(a) == keep(b)
+    assert a.edit["cuts"] == b.edit["cuts"]
+
+
+def test_pressing_the_same_rating_again_clears_it(video):
+    ctx = edited(video)
+    rid = row_id(ctx, "other")
+    treatment.rate_cut(ctx, {"id": rid, "rating": "good"})
+    state = treatment.rate_cut(ctx, {"id": rid, "rating": None})
+    assert row_of(ctx, rid)["rating"] is None and saved_ratings(ctx) == []
+    assert "rated" not in (treatment.creator_changes(ctx.edit) or {})
+    assert "ratings" not in ctx.edit and state["rows"]
+
+
+def test_clearing_a_wrong_rating_does_not_cut_it_again(video):
+    ctx = edited(video)
+    rid = row_id(ctx, "repeat")
+    treatment.rate_cut(ctx, {"id": rid, "rating": "bad"})
+    treatment.rate_cut(ctx, {"id": rid, "rating": None})
+    row = row_of(ctx, rid)
+    assert row["rating"] is None and row["state"] == "put_back"
+    treatment.set_cut_state(ctx, {"id": rid, "state": "kept_out"})
+    assert row_of(ctx, rid)["state"] == "kept_out"
+
+
+def test_a_new_rating_replaces_the_old_one_and_each_cut_has_its_own(video):
+    ctx = edited(video)
+    a, b = row_id(ctx, "other"), row_id(ctx, "repeat")
+    treatment.rate_cut(ctx, {"id": a, "rating": "good"})
+    treatment.rate_cut(ctx, {"id": b, "rating": "good"})
+    treatment.rate_cut(ctx, {"id": a, "rating": "bad"})
+    assert sorted((r["kind"], r["rating"]) for r in saved_ratings(ctx)) == [("other", "bad"), ("repeat", "good")]
+
+
+def test_ratings_outlive_a_new_set_edit_and_every_page_change(video):
+    ctx = edited(video)
+    treatment.rate_cut(ctx, {"id": row_id(ctx, "repeat"), "rating": "good"})
+    treatment.change_treatment(ctx, {"pace": "fast"})
+    treatment.add_cut(ctx, WE)
+    assert len(saved_ratings(ctx)) == 1
+    tools.set_edit(str(video), [UM, RETAKE], auto_tighten=True, **QUIET)
+    assert [r["rating"] for r in saved_ratings(ctx)] == ["good"]
+    assert tools.get_edit(str(video))["creator"]["rated"]["good"][0]["kind"] == "repeat"
+
+
+def test_only_claudes_cuts_can_be_rated_and_the_body_is_checked(video):
+    ctx = edited(video)
+    treatment.add_cut(ctx, WE)
+    yours = next(r["id"] for r in treatment.page_state(ctx)["rows"] if r["by"] == "you")
+    rid = row_id(ctx, "repeat")
+    with pytest.raises(StudioError, match="one of yours"):
+        treatment.rate_cut(ctx, {"id": yours, "rating": "good"})
+    with pytest.raises(StudioError, match="not one of Claude's cuts"):
+        treatment.rate_cut(ctx, {"id": "c1.00-2.00", "rating": "good"})
+    with pytest.raises(StudioError, match="rating must be"):
+        treatment.rate_cut(ctx, {"id": rid, "rating": "meh"})
+    with pytest.raises(StudioError, match="Send a rating"):
+        treatment.rate_cut(ctx, {"id": rid})
+    with pytest.raises(StudioError, match="Unknown field"):
+        treatment.rate_cut(ctx, {"id": rid, "rating": "good", "kind": "other"})
+    with pytest.raises(StudioError, match="Send the id"):
+        treatment.rate_cut(ctx, {"id": "q1", "rating": "good"})
+    assert saved_ratings(ctx) == []
+
+
+def test_a_wrong_rating_on_a_cut_that_is_gone_saves_nothing(video):
+    ctx = edited(video)
+    with pytest.raises(StudioError, match="not one of Claude's cuts"):
+        treatment.rate_cut(ctx, {"id": "c99.00-100.00", "rating": "bad"})
+    assert saved_ratings(ctx) == []
+    assert ctx.edit.get("keep", []) == []
+
+
+def test_the_rate_route_is_in_the_route_table():
+    from lumr_studio import review_server
+
+    assert review_server.TREATMENT_ACTIONS["api/rate"] is treatment.rate_cut
+
+
+def test_creator_changes_lists_what_was_rated_with_kind_and_reason(video):
+    ctx = rated(video, "mixed", {"other": "good", "repeat": "bad"})
+    got = treatment.creator_changes(ctx.edit)["rated"]
+    assert set(got) == {"good", "bad"}
+    (good,), (bad,) = got["good"], got["bad"]
+    assert good["kind"] == "other" and good["reason"] == UM["reason"] and set(good) == {"clock", "start", "end", "reason", "kind"}
+    assert bad["kind"] == "repeat" and bad["reason"] == RETAKE["reason"]
+    assert tools.get_edit(str(ctx.project.video))["creator"]["rated"] == got
+
+
+def planted_ratings(edit, ratings):
+    """A planted edit with ratings: ``(kind, side, source)`` each."""
+    return {**edit, "ratings": [
+        {"id": f"r{i}.00-{i}.50", "row": f"c{i}.00-{i}.50", "rating": side, "source": source, "kind": kind,
+         "start": float(i), "end": i + 0.5, "reason": "why"}
+        for i, (kind, side, source) in enumerate(ratings)
+    ]}
+
+
+def test_learn_adds_up_the_ratings_by_kind():
+    plant("a", planted_ratings(planted(), [("repeat", "good", "claude")] * 3 + [("likes", "bad", "pick")] * 2))
+    plant("b", planted_ratings(planted(), [("repeat", "good", "claude"), ("likes", "bad", "pick"), ("other", "bad", "claude")]))
+    got = taste.learn()
+    assert got["videos"] == 2
+    assert got["ratings"] == {"repeat": {"good": 4, "bad": 0}, "likes": {"good": 0, "bad": 3}, "other": {"good": 0, "bad": 1}}
+    assert got["lessons"] == [
+        "Marked 4 restated-point cuts (repeat) good across 2 videos.",
+        "Marked 3 filler-word picks wrong across 2 videos.",
+    ]
+
+
+def test_a_rating_lesson_needs_two_videos_or_three_events():
+    plant("a", planted_ratings(planted(), [("off_topic", "bad", "claude")] * 2))
+    assert taste.learn()["ratings"] == {"off_topic": {"good": 0, "bad": 2}} and taste.learn()["lessons"] == []
+    plant("b", planted_ratings(planted(), [("off_topic", "bad", "claude")]))
+    assert taste.learn()["lessons"] == ["Marked 3 off-topic cuts (off_topic) wrong across 2 videos."]
+    plant("c", planted_ratings(planted(), [("false_start", "good", "claude")] * 3))
+    assert "Marked 3 false-start cuts (false_start) good across 1 video." in taste.learn()["lessons"]
+
+
+def test_a_project_with_only_ratings_counts_and_the_profile_has_no_ratings_without_them():
+    assert taste.learn() is None
+    plant("a", planted_ratings(planted(), [("repeat", "good", "claude")]))
+    assert taste.learn()["videos"] == 1 and taste.summary_for_page() == {"videos": 1}
+    plant("b", planted(cut_words=["so"]))
+    plant("a", planted())
+    assert taste.learn()["ratings"] == {}
+
+
+def test_learn_reads_ratings_made_through_the_page(video):
+    rated(video, "one", {"repeat": "good", "other": "bad"})
+    rated(video, "two", {"repeat": "good"})
+    got = taste.learn()
+    assert got["ratings"] == {"repeat": {"good": 2, "bad": 0}, "other": {"good": 0, "bad": 1}}
+    assert "Marked 2 restated-point cuts (repeat) good across 2 videos." in got["lessons"]
+
+
+def test_forgotten_ratings_drop_out_and_new_ones_count(video):
+    first = rated(video, "one", {"repeat": "good"})
+    rated(video, "two", {"repeat": "good"})
+    assert taste.learn()["ratings"] == {"repeat": {"good": 2, "bad": 0}}
+    taste.forget_all()
+    assert taste.learn() is None
+    assert marker()["forgotten"][folder_of(first)]["ratings"] == [r["id"] for r in saved_ratings(first)]
+    treatment.rate_cut(first, {"id": row_id(first, "other"), "rating": "good"})
+    assert taste.learn()["ratings"] == {"other": {"good": 1, "bad": 0}}
+
+
+def test_a_forgotten_kind_drops_its_ratings_and_a_forgotten_word_leaves_them():
+    plant("a", planted_ratings(planted(cut_words=["so"]), [("repeat", "good", "claude")] * 3 + [("likes", "bad", "pick")] * 3))
+    taste.forget_kind("likes")
+    assert taste.learn()["ratings"] == {"repeat": {"good": 3, "bad": 0}}
+    taste.forget_word("so")
+    assert taste.learn()["ratings"] == {"repeat": {"good": 3, "bad": 0}}
+    taste.forget_kind("repeat")
+    assert taste.learn() is None
+
+
+def test_a_rating_with_an_odd_kind_reads_as_other_and_broken_ones_are_skipped():
+    plant("a", planted_ratings(planted(), [("mystery", "good", "claude")]))
+    edit = json.loads((projects_root() / "a" / "edit.json").read_text())
+    edit["ratings"] += ["nope", {"rating": "meh", "start": 1.0, "end": 2.0}, {"rating": "good", "start": "x", "end": 2}]
+    plant("a", edit)
+    assert taste.learn()["ratings"] == {"other": {"good": 1, "bad": 0}}
+
+
+def test_the_rating_words_read_plainly():
+    for name in ("a", "b"):
+        plant(name, planted_ratings(planted(), [(k, side, "pick" if k == "likes" else "claude")
+                                                  for k in (*edits.CUT_KINDS, "likes") for side in ("good", "bad")]))
+    got = taste.learn()
+    assert len(got["lessons"]) == taste.LESSONS_PER_SORT
+    for line in got["lessons"]:
+        assert not banned_in(line) and not decimal_times_in(line) and "—" not in line, line
+    every = taste._lessons_rated(
+        {k: {"good": 4, "bad": 4} for k in (*edits.CUT_KINDS, "likes")},
+        {(k, s): {"a", "b"} for k in (*edits.CUT_KINDS, "likes") for s in ("good", "bad")},
+    )
+    assert every and all(not banned_in(line) and "—" not in line for line in every)
+
+
 # ── the words the creator reads ───────────────────────────────────────────────
 
 

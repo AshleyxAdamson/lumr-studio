@@ -42,7 +42,7 @@ CHANGED_KEYS = {
 }
 ROW_KEYS = {
     "id", "start", "end", "clock", "seconds", "group", "reason", "by", "flags", "flag_labels", "note", "why",
-    "state", "before", "removed", "after",
+    "state", "before", "removed", "after", "rating",
 }
 
 

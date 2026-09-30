@@ -544,6 +544,7 @@ def set_edit(
     previous = _saved_edit_or_empty(project, duration)
     keep = list(previous.get("keep", []))
     creator_cuts = list(previous.get("creator_cuts", []))
+    ratings = treatments.saved_ratings(previous)
     treatment = _treatment_for_set_edit(previous, auto_tighten, pace, gap_length)
     picked, refused = _picks_for_set_edit(picks, previous, words)
     requested = [
@@ -563,7 +564,7 @@ def set_edit(
         )
     saved = treatments.save_made(
         project, made, duration=duration, requested=requested, keep=keep, set_by_claude=treatment.as_dict(),
-        creator_cuts=creator_cuts, times=times.source, picks=picked,
+        creator_cuts=creator_cuts, times=times.source, picks=picked, ratings=ratings,
     )
     summary = edits.edit_summary(saved, duration)
     append_receipt(

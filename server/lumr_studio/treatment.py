@@ -437,6 +437,7 @@ def save_made(
     times: str | None = None,
     undo: dict[str, Any] | None = None,
     picks: list[dict[str, Any]] | None = None,
+    ratings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Write what ``make_edit`` built to edit.json and return the saved edit.
 
@@ -451,7 +452,7 @@ def save_made(
         auto_tighten=bool(t.trims), gap_length=t.gap_length if t.trims else None,
         keep=keep, pace=t.pace if t.trims else None,
         treatment=t.as_dict(), set_by_claude=set_by_claude,
-        creator_cuts=creator_cuts, word_times=times, undo=undo, picks=picks,
+        creator_cuts=creator_cuts, word_times=times, undo=undo, picks=picks, ratings=ratings,
     )
 
 
@@ -565,6 +566,12 @@ def saved_picks(edit: dict[str, Any]) -> list[dict[str, Any]] | None:
     return [dict(k) for k in picks] if isinstance(picks, list) else None
 
 
+def saved_ratings(edit: dict[str, Any]) -> list[dict[str, Any]]:
+    """The creator's ratings of Claude's cuts and picks, as saved."""
+    ratings = edit.get("ratings")
+    return [dict(r) for r in ratings if isinstance(r, dict)] if isinstance(ratings, list) else []
+
+
 def bring_up_to_date(ctx: Context) -> bool:
     """Make the saved edit again when the word times changed under it. True when it did.
 
@@ -636,22 +643,24 @@ def _rebuild(ctx: Context, treatment: Treatment, *, requested: list[Any] | None 
              keep: list[dict[str, Any]] | None = None,
              creator_cuts: list[dict[str, Any]] | None = None,
              undo: dict[str, Any] | None = None,
-             picks: list[dict[str, Any]] | None = None) -> None:
+             picks: list[dict[str, Any]] | None = None,
+             ratings: list[dict[str, Any]] | None = None) -> None:
     """Make the edit again with the recipe and save it. Updates ``ctx.edit``.
 
     ``undo`` is what the next ``undo`` action restores; without it the saved
-    edit has nothing to undo. Claude's picks carry over as saved unless
-    ``picks`` replaces them.
+    edit has nothing to undo. Claude's picks and the creator's ratings carry
+    over as saved unless ``picks`` or ``ratings`` replaces them.
     """
     requested = list(ctx.edit.get("requested", [])) if requested is None else requested
     keep = list(ctx.edit.get("keep", [])) if keep is None else keep
     creator_cuts = list(ctx.edit.get("creator_cuts", [])) if creator_cuts is None else creator_cuts
     picks = saved_picks(ctx.edit) if picks is None else picks
+    ratings = saved_ratings(ctx.edit) if ratings is None else ratings
     made = _remake(ctx, treatment, requested=requested, keep=keep, creator_cuts=creator_cuts, picks=picks or [])
     ctx.edit = save_made(
         ctx.project, made, duration=ctx.duration, requested=requested, keep=keep,
         set_by_claude=ctx.edit.get("set_by_claude"), creator_cuts=creator_cuts, times=ctx.times, undo=undo,
-        picks=picks,
+        picks=picks, ratings=ratings,
     )
 
 
@@ -983,8 +992,26 @@ def _row(ctx: Context, joined: list[dict[str, Any]], rid: str, start: float, end
         "flags": flags, "flag_labels": [FLAG_LABELS.get(f, f.replace("_", " ")) for f in flags],
         "note": str((join or {}).get("note", "") or "") if flags else "",
         "why": str((join or {}).get("why", "") or "") if flags else "",
-        "state": state, "before": before, "removed": removed, "after": after,
+        "state": state, "before": before, "removed": removed, "after": after, "rating": None,
     }
+
+
+def _rating_of(rid: str, start: float, end: float, ratings: list[dict[str, Any]]) -> str | None:
+    """``good`` or ``bad`` when the creator rated this cut, else None.
+
+    A rating is found by its row id, else by the span it was made on: row ids
+    come from placed edges, which move when the word times do.
+    """
+    for r in ratings:
+        if r.get("row") == rid and r.get("rating") in edits.RATINGS:
+            return r["rating"]
+    for r in ratings:
+        try:
+            if r.get("rating") in edits.RATINGS and r.get("source") == edits.BY_CLAUDE and _overlaps(start, end, float(r["start"]), float(r["end"])):
+                return r["rating"]
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
 
 
 def _rows(ctx: Context, made: MadeEdit, joined: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -995,15 +1022,16 @@ def _rows(ctx: Context, made: MadeEdit, joined: list[dict[str, Any]]) -> list[di
     """
     rows = []
     seen: set[str] = set()
+    ratings = saved_ratings(ctx.edit)
     for p in made.outcome.placed:
         rid = claude_row_id(p)
         if rid in seen:
             continue
         seen.add(rid)
-        rows.append(_row(
+        rows.append({**_row(
             ctx, joined, rid, p["start"], p["end"], by=edits.BY_CLAUDE, group=p["kind"],
             reason=p["reason"], state=PUT_BACK if p["put_back"] else KEPT_OUT,
-        ))
+        ), "rating": _rating_of(rid, p["start"], p["end"], ratings)})
     for c in made.outcome.creator_placed:
         rows.append(_row(
             ctx, joined, c["id"], c["start"], c["end"], by=edits.BY_CREATOR, group=edits.CREATOR_KIND,
@@ -1411,6 +1439,11 @@ def set_cut_state(ctx: Context, body: Any) -> dict[str, Any]:
     state = body.get("state")
     if state not in CUT_STATES:
         raise StudioError(f"state must be {KEPT_OUT!r} or {PUT_BACK!r}.")
+    return _set_cut_state(ctx, rid, state)
+
+
+def _set_cut_state(ctx: Context, rid: str, state: str, *, ratings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Put the cut ``rid`` back or keep it out, and save ``ratings`` with it when given. Answers the new state."""
     treatment = saved_treatment(ctx.edit)
     made = _remake(ctx, treatment)
     placed = next((p for p in made.outcome.placed if claude_row_id(p) == rid), None)
@@ -1448,7 +1481,46 @@ def set_cut_state(ctx: Context, body: Any) -> dict[str, Any]:
             if _origin(k) == ORIGIN_FLAGGED:
                 raise StudioError(f"This cut sits inside a part you flagged to keep ({where}). Remove that keep first.")
             raise StudioError(f"This cut overlaps another cut you put back ({where}). Keep that one out first.")
-    _rebuild(ctx, treatment, requested=requested, keep=keep)
+    _rebuild(ctx, treatment, requested=requested, keep=keep, ratings=ratings)
+    return _answer(ctx, before)
+
+
+def rate_cut(ctx: Context, body: Any) -> dict[str, Any]:
+    """Rate one of Claude's cuts good or wrong, or clear the rating. Answers the new state.
+
+    ``rating`` is ``good``, ``bad`` or null to clear. Good leaves the cut as
+    it is. Bad also puts the cut back, the way Put back does, so the edit,
+    the joins and the counts follow. Clearing a bad rating does not cut it
+    again; the creator does that with Leave out. The rating is saved with the
+    cut's kind and reason as they are now, so what it teaches needs no
+    matching later.
+    """
+    example = '{"id": "c99.61-107.37", "rating": "good"}'
+    body = _need_object(body, {"id", "rating"}, example)
+    if "rating" not in body:
+        raise StudioError(f"Send a rating: good, bad, or null to clear it, like {example}.")
+    if isinstance(body.get("id"), str) and body["id"].startswith(CREATOR_ROW_PREFIX):
+        raise StudioError("That cut is one of yours. Only Claude's cuts can be rated.")
+    rid = _need_id(body, CLAUDE_ROW_PREFIX)
+    rating = body["rating"]
+    if rating is not None and rating not in edits.RATINGS:
+        raise StudioError(f"rating must be {' or '.join(repr(r) for r in edits.RATINGS)}, or null to clear it.")
+    treatment = saved_treatment(ctx.edit)
+    made = _remake(ctx, treatment)
+    placed = next((p for p in made.outcome.placed if claude_row_id(p) == rid), None)
+    if placed is None:
+        raise StudioError("That cut is not one of Claude's cuts in this edit any more. The edit may have changed; reload the page.")
+    start, end = placed["start"], placed["end"]
+    others = [r for r in saved_ratings(ctx.edit)
+              if not (r.get("row") == rid or r.get("id") == f"{edits.RATING_PREFIX}{start:.2f}-{end:.2f}")]
+    ratings = others if rating is None else [*others, {
+        "id": f"{edits.RATING_PREFIX}{start:.2f}-{end:.2f}", "row": rid, "rating": rating,
+        "source": edits.BY_CLAUDE, "kind": placed["kind"], "start": start, "end": end, "reason": placed["reason"],
+    }]
+    if rating == "bad":
+        return _set_cut_state(ctx, rid, PUT_BACK, ratings=ratings)
+    before = snapshot(ctx)
+    _rebuild(ctx, treatment, ratings=ratings)
     return _answer(ctx, before)
 
 
@@ -1843,7 +1915,9 @@ def creator_changes(edit: dict[str, Any]) -> dict[str, Any] | None:
     creator's own. ``put_back`` lists Claude's cuts the creator put back,
     ``kept`` the parts they flagged to keep, ``brought_back`` the words they
     brought back one by one, ``cuts`` the cuts they made by hand, and
-    ``cut_words`` what those cuts say, counted.
+    ``cut_words`` what those cuts say, counted. ``rated`` lists the cuts and
+    picks of Claude's the creator rated, under ``good`` and ``bad``, each with
+    its reason and kind.
     """
     out: dict[str, Any] = {}
     now = saved_treatment(edit)
@@ -1876,4 +1950,8 @@ def creator_changes(edit: dict[str, Any]) -> dict[str, Any] | None:
     if cuts:
         out["cuts"] = [_shown(c, text=c.get("text", "")) for c in cuts]
         out["cut_words"] = cut_word_counts(cuts)
+    rated = [r for r in saved_ratings(edit) if r.get("rating") in edits.RATINGS and _finite(r.get("start")) and _finite(r.get("end"))]
+    if rated:
+        out["rated"] = {side: [_shown(r, reason=str(r.get("reason", "")), kind=str(r.get("kind", edits.DEFAULT_CUT_KIND)))
+                               for r in rated if r["rating"] == side] for side in edits.RATINGS}
     return out or None

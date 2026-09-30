@@ -284,6 +284,8 @@ h2 .count .mine{color:var(--user)}
 .cutacts{display:flex; align-items:center; gap:var(--s2); margin-top:var(--s2); flex-wrap:wrap}
 .cuterr{margin-top:6px; font-size:12px; color:var(--red-soft)}
 .cut .btn.hear[aria-pressed="true"]{border-color:var(--gold); color:var(--gold)}
+.rateacts{display:flex; align-items:center; gap:var(--s2); margin-top:var(--s2)}
+.rateacts .seg button[aria-pressed="true"]{color:var(--text)}
 .cut[aria-busy="true"] .seg{opacity:.6; cursor:progress}
 .cut[aria-busy="true"] .cuthead .st{color:var(--text)}
 
@@ -1696,6 +1698,13 @@ const Core = (function(){
       if(keep) throw new Error('This cut sits inside a part you flagged to keep (' + keep.clock + '). Remove that keep first.');
       setRow(r, body.state);
       s.undo = null;
+    } else if(path === 'api/rate'){
+      const r = s.rows.find(x => x.id === body.id);
+      if(r && r.by === 'you') throw new Error('That cut is one of yours. Only Claude’s cuts can be rated.');
+      if(!r) throw new Error('That cut is not in this edit any more. Reload the page.');
+      r.rating = body.rating;
+      if(body.rating === 'bad') setRow(r, 'put_back');
+      s.undo = null;
     } else if(path === 'api/cut/add'){
       /* exactly the words picked. One that touches a cut of hers joins it. The newer wins over a kept part, which gets shorter or splits. */
       const list = picked(), a = list[0], b = list[list.length - 1];
@@ -1805,7 +1814,7 @@ const FINE_OPEN_KEY = 'lumr-studio.fine-tune-open';   /* where the browser keeps
 const LABEL_GAP_PX = 6;                /* the names under the pace stops need this much room between them to all show */
 const PICK_BAR_GAP_PX = 6;             /* Cut and Keep sit this far from the words she picked */
 /* the changes that alter the edit, so an export already running holds the edit from before them */
-const EDIT_ROUTES = ['api/treatment', 'api/cut', 'api/cut/add', 'api/cut/remove', 'api/keep', 'api/keep/remove', 'api/undo'];
+const EDIT_ROUTES = ['api/treatment', 'api/cut', 'api/rate', 'api/cut/add', 'api/cut/remove', 'api/keep', 'api/keep/remove', 'api/undo'];
 const WORD_TIMES_ESTIMATED = 'The word times are estimates, so the harder paces find less to cut. Ask Claude to measure them.';
 const CANT_CUT = 'This page can’t cut words yet.';
 const CANT_BRING_BACK = 'This page can’t bring words back yet.';
@@ -2209,6 +2218,11 @@ function cutHTML(r){
     : '<div class="seg" role="group" aria-label="' + esc('Cut at ' + startClock) + '">' +
         '<button type="button" id="cut-' + esc(r.id) + '-kept_out" data-set="kept_out" aria-pressed="' + !out + '">Leave out</button>' +
         '<button type="button" id="cut-' + esc(r.id) + '-put_back" data-set="put_back" aria-pressed="' + out + '">Put back</button></div>';
+  /* only Claude's cuts are rated: the creator's own are hers */
+  const rate = mine ? '' :
+    '<div class="rateacts"><div class="seg rate" role="group" aria-label="' + esc('Rate the cut at ' + startClock) + '">' +
+      '<button type="button" id="cut-' + esc(r.id) + '-good" data-rate="good" aria-pressed="' + (r.rating === 'good') + '" title="Claude was right to cut this. Press again to clear.">Good cut</button>' +
+      '<button type="button" id="cut-' + esc(r.id) + '-bad" data-rate="bad" aria-pressed="' + (r.rating === 'bad') + '" title="This should not have been cut. It goes back in. Press again to clear.">Wrong cut</button></div></div>';
   return '<li class="cut" id="cut-' + esc(r.id) + '" data-id="' + esc(r.id) + '" data-state="' + esc(r.state) + '" data-by="' + (mine ? 'you' : 'claude') + '" aria-label="' + esc((mine ? 'Your cut at ' : 'Cut at ') + startClock) + '">' +
     '<div class="cuthead"><button type="button" class="timebtn" id="cut-' + esc(r.id) + '-go" data-go="' + r.start + '" title="Go to ' + startClock + '">' + esc(r.clock || startClock) + '</button>' +
       (mine ? '' : '<span class="len">' + C.length(r.seconds) + '</span>') + (flags.length ? lookMark(1) : '') +
@@ -2218,7 +2232,7 @@ function cutHTML(r){
     '<div class="cutacts">' +
       '<button type="button" class="btn hear" id="cut-' + esc(r.id) + '-hear" data-id="' + esc(r.id) + '" aria-pressed="false" title="Plays 2 seconds before and 2 after, skipping the cut">' +
         '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z" fill="currentColor"/></svg>Hear it cut</button>' + choice +
-    '</div><p class="cuterr" role="alert" hidden></p></li>';
+    '</div>' + rate + '<p class="cuterr" role="alert" hidden></p></li>';
 }
 $('groups').addEventListener('click', e => {
   const head = e.target.closest('.ghead');
@@ -2230,6 +2244,8 @@ $('groups').addEventListener('click', e => {
   if(e.target.closest('.hear')){ hearJoin(r); return; }
   const back = e.target.closest('[data-back]');
   if(back && r){ takeBack(r, back); return; }
+  const rate = e.target.closest('[data-rate]');
+  if(rate && r){ rateCut(r, rate.dataset.rate, li); return; }
   const set = e.target.closest('[data-set]');
   if(set && r && set.dataset.set !== r.state){
     const err = li.querySelector('.cuterr'); err.hidden = true;
@@ -2242,6 +2258,17 @@ $('groups').addEventListener('click', e => {
     }).then(ok => { if(ok) announce(set.dataset.set === 'put_back' ? 'Put back. Those words play now.' : 'Left out again.'); });
   }
 });
+/** Rate one of Claude's cuts. Pressing the rating she gave again clears it. A wrong cut goes back in, so the words play. */
+function rateCut(r, side, li){
+  const rating = r.rating === side ? null : side, id = r.id;
+  const err = li.querySelector('.cuterr'); err.hidden = true;
+  li.querySelectorAll('[data-rate]').forEach(b => b.setAttribute('aria-pressed', b.dataset.rate === rating));
+  li.setAttribute('aria-busy', 'true');
+  send('api/rate', { id, rating }, {
+    onError: msg => { const el = $('cut-' + id); if(el){ const x = el.querySelector('.cuterr'); x.textContent = msg; x.hidden = false; } },
+    revert: () => { const el = $('cut-' + id); if(!el) return; el.removeAttribute('aria-busy'); el.querySelectorAll('[data-rate]').forEach(b => b.setAttribute('aria-pressed', b.dataset.rate === r.rating)); },
+  }).then(ok => { if(ok) announce(rating === 'bad' ? 'Marked wrong. It is back in, so those words play now.' : rating === 'good' ? 'Marked good.' : 'Rating cleared.'); });
+}
 /** Take back one cut of her own, from its row. The keyboard goes to the next of her cuts, or to the words. */
 function takeBack(r, btn){
   if(btn.getAttribute('aria-busy') === 'true') return;
