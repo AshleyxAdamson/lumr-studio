@@ -261,6 +261,17 @@ def _kind_of(kept: dict[str, Any], requested: list[dict[str, Any]]) -> str:
     return kind
 
 
+def _marked_wrong(kept: dict[str, Any], wrong: list[dict[str, Any]]) -> bool:
+    """Whether the creator rated the cut ``kept`` put back as wrong: a bad rating whose span overlaps it."""
+    for rating in wrong:
+        try:
+            if _span_overlap(kept, rating) > 0:
+                return True
+        except (KeyError, TypeError, ValueError):
+            continue
+    return False
+
+
 def _said(text: Any) -> str:
     """The words of ``text`` as said, lower case and without punctuation: ``"Actually,"`` reads ``actually``."""
     return " ".join(w for w in (plain_text(t) for t in str(text).split()) if w)
@@ -293,7 +304,8 @@ def learn(exclude: Path | None = None) -> dict[str, Any] | None:
 
     ``videos`` counts the projects with at least one change. ``put_back`` maps
     each kind of Claude's cuts to how many were put back and how many Claude
-    proposed in those projects. ``cut_by_hand`` and ``brought_back`` are
+    proposed in those projects. A cut the creator rated wrong was put back
+    too, and counts only as a bad rating here. ``cut_by_hand`` and ``brought_back`` are
     ``[word, count]`` lists, most first. ``ratings`` maps each kind (Claude's
     cut kinds, or ``likes`` for its picked filler words) to how many the
     creator marked ``good`` and ``bad``. ``lessons`` are plain sentences
@@ -322,7 +334,10 @@ def learn(exclude: Path | None = None) -> dict[str, Any] | None:
         for r in requested:
             kind = r.get("kind") if r.get("kind") in edits.CUT_KINDS else edits.DEFAULT_CUT_KIND
             put_back.setdefault(kind, {"put_back": 0, "proposed": 0})["proposed"] += 1
+        marked_wrong = changes.get("rated", {}).get("bad", [])
         for k in changes.get("put_back", []):
+            if _marked_wrong(k, marked_wrong):
+                continue  # a "Wrong cut" also puts the cut back; it counts once, as a bad rating
             kind = _kind_of(k, requested)
             put_back.setdefault(kind, {"put_back": 0, "proposed": 0})["put_back"] += 1
             put_back_in.setdefault(kind, set()).add(name)

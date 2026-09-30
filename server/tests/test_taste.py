@@ -698,6 +698,25 @@ def test_learn_reads_ratings_made_through_the_page(video):
     assert "Marked 2 restated-point cuts (repeat) good across 2 videos." in got["lessons"]
 
 
+def test_a_wrong_cut_counts_once_as_a_bad_rating_and_not_as_a_put_back(video):
+    rated(video, "one", {"repeat": "bad"})
+    taught(video, "two", cut=())  # a plain put-back of the same kind still counts
+    got = taste.learn()
+    assert got["ratings"] == {"repeat": {"good": 0, "bad": 1}}
+    assert got["put_back"] == {"repeat": {"put_back": 1, "proposed": 2}}, "only the plain put-back"
+
+
+def test_a_put_back_over_a_bad_rating_is_not_counted_but_a_neighbour_is():
+    edit = planted(put_back=[(5.0, 7.0), (7.0, 8.0), (12.0, 13.0)],
+                   requested=[(5.0, 7.0, "repeat"), (7.0, 8.0, "repeat"), (12.0, 13.0, "other")])
+    wrong = {"id": "r5.50-6.50", "row": "c5.00-7.00", "rating": "bad", "source": "claude", "kind": "repeat",
+             "start": 5.5, "end": 6.5, "reason": "why"}
+    plant("a", {**edit, "ratings": [wrong]})
+    got = taste.learn()
+    assert got["put_back"] == {"repeat": {"put_back": 1, "proposed": 2}, "other": {"put_back": 1, "proposed": 1}}
+    assert got["ratings"] == {"repeat": {"good": 0, "bad": 1}}, "the edges that only touch do not match"
+
+
 def test_forgotten_ratings_drop_out_and_new_ones_count(video):
     first = rated(video, "one", {"repeat": "good"})
     rated(video, "two", {"repeat": "good"})
