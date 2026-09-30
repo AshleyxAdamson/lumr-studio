@@ -418,11 +418,13 @@ h2 .count .mine{color:var(--user)}
 #pickBar.tight .btn{min-height:24px; padding:1px 12px}
 #keepBtn{border-color:var(--user); color:var(--user); background:none}
 #keepBtn:hover:not(:disabled){background:rgba(55,185,196,.1); border-color:var(--user)}
-/* One quiet line right above the words: how to cut and pick, or the part she picked, and what she kept.
-   It takes the words less than one line of their height. */
-#wordsHead{display:flex; align-items:baseline; gap:2px var(--s4); flex-wrap:wrap; min-height:18px; margin-bottom:var(--s1); font-size:12px; line-height:18px; color:var(--text2)}
-#wordsHead p{flex:1 1 auto; min-width:0}
-#keptBtn{min-height:18px; padding:0; margin-left:auto}
+/* One line right above the words: how to cut and pick, or the part she picked, and what she kept.
+   It takes the words less than one line of their height. Her part shows in the how-to's own cell,
+   and the how-to keeps its room while hidden, so the words never move under a drag. */
+#wordsHead{display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:baseline; gap:2px var(--s4); min-height:22px; margin-bottom:var(--s1); font-size:12px; line-height:22px; color:var(--text2)}
+#wordsHead p{grid-area:1 / 1; min-width:0}
+#pickHint[hidden]{display:block!important; visibility:hidden}
+#keptBtn{grid-area:1 / 2; min-height:18px; padding:0}
 /* what the marks on the words mean: in the "?" list, beside the bar's own key */
 .wordkey{display:flex; align-items:baseline; gap:var(--s1) var(--s4); flex-wrap:wrap; margin-top:var(--s2); font-size:12px; color:var(--text2)}
 .wordkey li{display:inline-flex; align-items:baseline; gap:6px; white-space:nowrap}
@@ -433,7 +435,12 @@ h2 .count .mine{color:var(--user)}
 .wordkey .mark.kept{text-decoration:underline solid var(--user) 2px; text-underline-offset:4px}
 #selInfo{font-size:12px; color:var(--text); font-variant-numeric:tabular-nums}
 #selInfo:empty{display:none}
-#pickHint{font-size:12px; color:var(--text3); text-wrap:pretty}
+/* the how-to at the words' own size, its two halves paired by color: cutting in the red of a cut
+   word, and picking a part in her teal, the color of Keep. */
+#pickHint{font-size:16px; color:var(--text3); text-wrap:pretty}
+#pickHint .dbl, #pickHint .drag{white-space:nowrap; text-decoration:underline solid 2px; text-underline-offset:4px}
+#pickHint .dbl{text-decoration-color:var(--red-soft)}
+#pickHint .drag{text-decoration-color:var(--user)}
 #keptBtn{color:var(--user); text-decoration-color:rgba(55,185,196,.4)}
 #keptBtn:hover{color:var(--user); text-decoration-color:var(--user)}
 
@@ -631,7 +638,7 @@ h2 .count .mine{color:var(--user)}
       <div id="wordsSec">
         <div id="wordsHead">
           <p id="selInfo"></p>
-          <p id="pickHint">Double-click a word to cut it. Drag to cut or keep a part.</p>
+          <p id="pickHint"><span class="dbl">Double-click a word to cut it.</span> <span class="drag">Drag to cut or keep a part.</span></p>
           <button id="keptBtn" class="link" type="button" hidden popovertarget="keptList" aria-controls="keptList" title="The parts you flagged to keep"></button>
         </div>
         <div id="words" tabindex="0" role="group" aria-label="Every word of the take" aria-describedby="wordsHint"></div>
