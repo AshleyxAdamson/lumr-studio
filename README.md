@@ -78,6 +78,8 @@ It runs in Claude Code, and in Cowork when the session runs on your Mac. Chat on
 - **Feedback, only when you press Submit:** the review page's Send feedback button sends your message to the Lumr Studio team's server (`feedback.lumr-studio.workers.dev`), and your name and email only if you enter them. The page itself never calls the internet; your Mac's local server makes the one request.
 - **Help improve Lumr, only when you press Send:** the review page's Help improve Lumr button shows a list of what would be sent, and you can remove any line. Send then posts the shape of your changes to the same server (`feedback.lumr-studio.workers.dev`): how long each cut was, what kind, what you did to it and what the words beside it sound like. It never holds your words or your video. Nothing is sent until you press Send. `PRIVACY.md` has the detail.
 
+**Privacy:** Your video, transcript and edits stay on your Mac. Nothing leaves it unless you press Send or Submit, and you see what's sent first. [Privacy policy](https://github.com/AshleyxAdamson/lumr-studio/blob/main/PRIVACY.md).
+
 PolyForm Noncommercial 1.0.0. You can sell the videos you make with it. You can't resell the tool.
 
 ## To do
