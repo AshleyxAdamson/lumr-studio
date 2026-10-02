@@ -132,7 +132,7 @@ The plugin never uploads your video or audio file.
 
 ## Helping improve Lumr
 
-When the Lumr Studio team's server is set up, the review page shows a small Help improve Lumr button. It opens a list of what would be sent: how long each cut was, what kind it was, and what you did to it, such as putting it back or marking it wrong. It never sends your words or your video. Remove any line you'd rather keep, press "Show exactly what's sent" to see the data itself, and press Send only when you're happy. Nothing goes before that. After a send, you get an ID to quote if you ever want it deleted, and `shares.jsonl` in the video's project folder keeps it. `PRIVACY.md` has the detail.
+The review page shows a small Help improve Lumr button. It opens a list of what would be sent: how long each cut was, what kind it was, and what you did to it, such as putting it back or marking it wrong. It never sends your words or your video. Remove any line you'd rather keep, press "Show exactly what's sent" to see the data itself, and press Send only when you're happy. Nothing goes before that. After a send, you get an ID to quote if you ever want it deleted, and `shares.jsonl` in the video's project folder keeps it. `PRIVACY.md` has the detail.
 
 ## What is saved, and where
 

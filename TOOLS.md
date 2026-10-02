@@ -143,10 +143,10 @@ counts again, even on an old video. A second forget adds to the first.
 missing or can't be read forgets nothing.
 
 `LUMR_SHARE_URL` is the address of the Lumr Studio team's server, for the review
-page's Send feedback form and its Help improve Lumr button. There is no default
-yet (`share.DEFAULT_SHARE_URL` is `None`); a trailing slash is stripped. With it
-unset, the feedback form opens a public GitHub issue instead, and the page shows
-nothing about Help improve Lumr. See `POST api/feedback` and `POST
+page's Send feedback form and its Help improve Lumr button. Unset, it is
+`share.DEFAULT_SHARE_URL`, `https://feedback.lumr-studio.workers.dev`; a trailing
+slash is stripped. Set to an empty value, sharing is off: the feedback form opens
+a public GitHub issue instead, and the page shows nothing about Help improve Lumr. See `POST api/feedback` and `POST
 api/share/preview` under `review`.
 
 `LUMR_HOME` resolves the way ClipForge resolves it. The environment variable
