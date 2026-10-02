@@ -83,8 +83,9 @@ def isolated_home(tmp_path, monkeypatch):
     for name in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME"):
         monkeypatch.delenv(name, raising=False)
     # No test sends feedback to a real server, or reads a plugin folder Claude Code named: each sets its own.
-    for name in ("LUMR_SHARE_URL", "CLAUDE_PLUGIN_ROOT"):
-        monkeypatch.delenv(name, raising=False)
+    # An empty LUMR_SHARE_URL turns sharing off, so the team's real server is never the default here.
+    monkeypatch.setenv("LUMR_SHARE_URL", "")
+    monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
     monkeypatch.setenv("HF_HOME", str(tmp_path / "hf-home"))
     monkeypatch.setenv("TORCH_HOME", str(tmp_path / "torch-home"))
 

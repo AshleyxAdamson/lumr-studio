@@ -67,18 +67,24 @@ def team(monkeypatch):
 # ── where feedback goes ───────────────────────────────────────────────────────
 
 
-def test_there_is_no_team_server_yet_and_the_environment_names_one(monkeypatch):
-    assert share.DEFAULT_SHARE_URL is None
-    assert share.share_url() is None
+def test_the_team_server_is_the_default_and_the_environment_overrides_it(monkeypatch):
+    monkeypatch.delenv("LUMR_SHARE_URL")
+    assert share.DEFAULT_SHARE_URL == "https://feedback.lumr-studio.workers.dev"
+    assert share.share_url() == "https://feedback.lumr-studio.workers.dev"
     monkeypatch.setenv("LUMR_SHARE_URL", "https://share.example.test/")
     assert share.share_url() == "https://share.example.test"
     monkeypatch.setenv("LUMR_SHARE_URL", "https://share.example.test///")
     assert share.share_url() == "https://share.example.test"
-    monkeypatch.setenv("LUMR_SHARE_URL", "   ")
-    assert share.share_url() is None
 
 
-def test_the_module_constant_is_the_fallback_when_the_environment_is_empty(monkeypatch):
+def test_an_empty_environment_value_turns_sharing_off(monkeypatch):
+    for off in ("", "   "):
+        monkeypatch.setenv("LUMR_SHARE_URL", off)
+        assert share.share_url() is None
+
+
+def test_the_module_constant_is_the_fallback_when_the_environment_says_nothing(monkeypatch):
+    monkeypatch.delenv("LUMR_SHARE_URL")
     monkeypatch.setattr(share, "DEFAULT_SHARE_URL", "https://team.example.test/")
     assert share.share_url() == "https://team.example.test"
     monkeypatch.setenv("LUMR_SHARE_URL", "https://mine.example.test")
