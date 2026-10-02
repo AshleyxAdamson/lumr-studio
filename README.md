@@ -75,6 +75,8 @@ It runs in Claude Code, and in Cowork when the session runs on your Mac. Chat on
 - **Downloads, once:** the locked Python packages from PyPI through `uv`, plus a Python build from `github.com/astral-sh/python-build-standalone` if your Mac has none. Parakeet from `huggingface.co` and wav2vec 2.0 from `download.pytorch.org`, only after you say yes. Each model file is checked against a pinned size and sha256.
 - **What leaves your Mac:** nothing of yours, except what Claude reads in the conversation. That's the transcript text, the cut lists, and a small picture of a join when Claude checks one. Your video and audio never upload.
 
+**Privacy:** Lumr Studio collects nothing. Your video, transcript and edits stay on your Mac. [Privacy policy](https://github.com/AshleyxAdamson/lumr-studio/blob/main/PRIVACY.md).
+
 PolyForm Noncommercial 1.0.0. You can sell the videos you make with it. You can't resell the tool.
 
 ## To do

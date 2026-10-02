@@ -1,13 +1,14 @@
 {
   "name": "lumr-studio",
   "displayName": "Lumr Studio",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Cuts the gaps out of talking-head videos and helps you tweak the cut. Claude gives a reason for every cut, you fix any of them on a review page, and your footage stays on your machine.",
   "author": {
     "name": "Ashley"
   },
   "homepage": "https://github.com/AshleyxAdamson/lumr-studio",
   "repository": "https://github.com/AshleyxAdamson/lumr-studio",
+  "privacyPolicyUrl": "https://github.com/AshleyxAdamson/lumr-studio/blob/main/PRIVACY.md",
   "license": "PolyForm-Noncommercial-1.0.0",
   "keywords": [
     "video",
