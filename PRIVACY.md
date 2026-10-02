@@ -58,7 +58,7 @@ The review page has a Send feedback button. Nothing is sent until you press Subm
 
 - What goes: your message, the plugin version, and a random ID for that one message. Your name and email go only if you type them, and both are optional. No video, audio, transcript or file goes with it. Please don't paste anything you'd rather keep private into the message.
 - Where it goes: the Lumr Studio team's server at `feedback.lumr-studio.workers.dev`, a Cloudflare Worker that stores it in Cloudflare R2. The local server on your Mac sends it when you press Submit. The page itself never calls the internet. Setting `LUMR_SHARE_URL` to an empty value turns sending off; then the form opens a public GitHub issue in your browser instead, and nothing is sent until you submit it there. GitHub's own privacy policy covers that.
-- How long it's kept: up to 2 years, then deleted. To have it deleted sooner, email ashleyxadamson@gmail.com and quote the ID you were given.
+- How long it's kept: up to 6 months, then deleted. To have it deleted sooner, email ashleyxadamson@gmail.com and quote the ID you were given.
 
 ## What you can choose to send
 
@@ -67,7 +67,7 @@ The review page has a Help improve Lumr button. It shows unless sending is turne
 - What a record holds: one record for each thing you did to Claude's edit (a cut you put back, a cut you marked good or wrong, words you brought back, words you cut by hand, a part you kept, or a cut of Claude's you left in place). Each holds the pace, how long the cut was and how many words it held, what kind of cut it was and who made it, what you did to it, and the shape of up to three words on each side: what sort of word it is, how long it lasts, the pause after it, and which filler it is if it is one. It also holds whether the cut sat at the start or end of a sentence, how far a laugh was, the silence left at the join, and any warnings the join check gave. Each send carries the plugin version and a random ID.
 - What it never holds: your words, your transcript, your video or audio, file names, your name or email, or a time in your video. The words beside a cut are sent as shapes, not text. The only words that can appear are a fixed list of filler words, such as "um", "uh" and "you know". The button shows the list, and "Show exactly what's sent" shows the data itself.
 - Where it goes: the Lumr Studio team's server at `feedback.lumr-studio.workers.dev`, the same as feedback, which stores it in Cloudflare R2. The local server on your Mac sends it when you press Send. The page itself never calls the internet. With an empty `LUMR_SHARE_URL`, the button doesn't show. The server keeps the day it received the send, not the time. It stores and logs no IP address and no details of your Mac. It uses your IP address only to limit how fast one Mac can send, and doesn't keep it.
-- How long it's kept: up to 2 years, then deleted.
+- How long it's kept: up to 6 months, then deleted.
 - How to ask for deletion: email ashleyxadamson@gmail.com and quote the ID you were given.
 - What stays on your Mac: `shares.jsonl` in the video's project folder keeps the ID of each send, the date and how many records it held, so you have the ID to quote. It holds nothing else. Delete the file and nothing else changes.
 
