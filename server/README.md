@@ -13,16 +13,26 @@ stdio transport.
 The server has its own locked environment: `pyproject.toml` and `uv.lock`,
 about 950 MB installed, Apple Silicon only (the lock refuses other platforms).
 Nothing here needs a checkout of the repo, ClipForge or the `hammy` command.
-The plugin starts it with the line in `../.mcp.json`:
+The plugin starts it through `../.mcp.json`, which runs a small script and hands
+it the plugin folder and the plugin data folder:
 
 ```sh
-uv run --active --locked --project ${CLAUDE_PLUGIN_ROOT}/server lumr-studio-server
+sh ${CLAUDE_PLUGIN_ROOT}/hooks/start-server.sh ${CLAUDE_PLUGIN_ROOT} ${CLAUDE_PLUGIN_DATA}
 ```
 
-`.mcp.json` also sets `VIRTUAL_ENV=${CLAUDE_PLUGIN_DATA}/venv`, and `--active` tells uv to use it, so
+`../hooks/start-server.sh` sets `VIRTUAL_ENV=<data folder>/venv`, then runs:
+
+```sh
+uv run --active --locked --project <plugin folder>/server lumr-studio-server
+```
+
+`--active` tells uv to use that `VIRTUAL_ENV`, so
 the environment is built once, outside the plugin's versioned folder, and
 survives an update (an update re-points the project at the new folder and
-installs nothing). The first session builds it. The plugin's SessionStart hook
+installs nothing). `.mcp.json` has no `env` block. The script takes the two
+folders as arguments because the server's process may not get
+`CLAUDE_PLUGIN_ROOT` or `CLAUDE_PLUGIN_DATA` as environment variables. The first
+session builds the environment. The plugin's SessionStart hook
 (`../hooks/doctor.sh`) runs `uv sync --active --locked` for this folder in the
 background, detached, because Claude Code stops a server that hasn't started
 after 30 seconds (`MCP_TIMEOUT`) and a cold build takes longer. A build inside
@@ -107,8 +117,9 @@ test loads a model or reaches the network: a test that aligns passes a fake
 aligner or a fake model (`tests/test_aligner.py`), and a test that downloads
 passes a fake opener and tiny models (`tests/tiny_models.py`). The model
 caches (`HF_HOME`, `TORCH_HOME`) are temp folders too. The MCP smoke
-test starts the server with the command in `.mcp.json`, with the path
-variable filled in and the environment folder left at `.venv`.
+test starts the server with the command in `.mcp.json`, through
+`hooks/start-server.sh`, with both plugin folders filled in. The data folder is a
+temp folder whose `venv` is a link to `.venv`, so the server still runs in `.venv`.
 
 The drift and closure tests (`tests/test_engine_copy.py`) run
 `sync-engine.sh --check` only where the repo's `clipforge/` and `hammy/` sit

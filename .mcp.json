@@ -1,19 +1,12 @@
 {
   "mcpServers": {
     "lumr-studio": {
-      "command": "uv",
+      "command": "sh",
       "args": [
-        "run",
-        "--active",
-        "--locked",
-        "--project",
-        "${CLAUDE_PLUGIN_ROOT}/server",
-        "lumr-studio-server"
-      ],
-      "env": {
-        "VIRTUAL_ENV": "${CLAUDE_PLUGIN_DATA}/venv",
-        "HF_HUB_DISABLE_TELEMETRY": "1"
-      }
+        "${CLAUDE_PLUGIN_ROOT}/hooks/start-server.sh",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "${CLAUDE_PLUGIN_DATA}"
+      ]
     }
   }
 }

@@ -7,6 +7,7 @@ stub programs, so the result doesn't depend on this machine's ffmpeg, uv or CPU.
 
 import json
 import os
+import shlex
 import signal
 import subprocess
 import time
@@ -189,8 +190,10 @@ def test_first_start_starts_the_build_and_says_so_in_exactly_these_words(tmp_pat
 
 
 def test_the_build_is_the_servers_launch_line_minus_the_server(tmp_path):
-    # .mcp.json says how the server starts. The build must run the same project
-    # with the same locked file and environment, or the server would rebuild.
+    # hooks/start-server.sh says how the server starts and .mcp.json hands it the
+    # two folders. The build must run the same project with the same locked file
+    # and environment, or the server would rebuild.
+    launcher = (PLUGIN_DIR / "hooks" / "start-server.sh").read_text()
     server = json.loads((PLUGIN_DIR / ".mcp.json").read_text())["mcpServers"]["lumr-studio"]
     data = tmp_path / "data"
     run_doctor(tmp_path / "run", plugin_data=data)
@@ -199,16 +202,44 @@ def test_the_build_is_the_servers_launch_line_minus_the_server(tmp_path):
         return text.replace("${CLAUDE_PLUGIN_ROOT}", str(PLUGIN_DIR)).replace(
             "${CLAUDE_PLUGIN_DATA}", str(data))
 
-    launch = [resolved(a) for a in server["args"]]
-    assert launch[0] == "run" and launch[-1] == "lumr-studio-server"
+    # The launcher runs `sh start-server.sh <root> <data>`: the folders are $1 and $2.
+    assert server["command"] == "sh" and "env" not in server
+    script, root, folder = (resolved(a) for a in server["args"])
+    assert script == str(PLUGIN_DIR / "hooks" / "start-server.sh")
+    assert (root, folder) == (str(PLUGIN_DIR), str(data))
+
+    def fill(word: str) -> str:
+        return word.replace("$1", root).replace("$2", folder)
+
+    (exec_line,) = [ln for ln in launcher.splitlines() if ln.startswith("exec ")]
+    launch = [fill(word) for word in shlex.split(exec_line)[1:]]
+    assert launch[0] == "uv" and launch[1] == "run" and launch[-1] == "lumr-studio-server"
+    (virtual_env,) = [ln for ln in launcher.splitlines() if ln.startswith("VIRTUAL_ENV=")]
+    (telemetry_line,) = [ln for ln in launcher.splitlines() if ln.startswith("HF_HUB_DISABLE_TELEMETRY=")]
+
     (call,) = uv_calls(tmp_path / "run")
     args, project_env, telemetry = call.split("|")
-    assert args.split() == ["sync", *launch[1:-1]]
-    assert "--locked" in args.split()
+    assert args.split() == ["sync", *launch[2:-1]]
+    assert "--locked" in args.split() and "--active" in args.split()
     # No dev group: no flag asks for one, and the server's own launch doesn't either.
     assert "group" not in args and "dev" not in args
-    assert project_env == resolved(server["env"]["VIRTUAL_ENV"])
-    assert telemetry == server["env"]["HF_HUB_DISABLE_TELEMETRY"]
+    assert project_env == fill(shlex.split(virtual_env)[0].split("=", 1)[1])
+    assert project_env == f"{data}/venv"
+    assert telemetry == telemetry_line.split("=", 1)[1]
+
+
+def test_the_launch_has_no_env_block_and_every_path_is_under_the_plugin():
+    # The validator flags any variable in the env block that steers uv, so the
+    # launcher script sets them instead. Every path the launch names is under
+    # the plugin's own folders, written the way Claude Code fills in.
+    server = json.loads((PLUGIN_DIR / ".mcp.json").read_text())["mcpServers"]["lumr-studio"]
+    assert "env" not in server
+    assert server["command"] == "sh"
+    for arg in server["args"]:
+        assert arg == "${CLAUDE_PLUGIN_DATA}" or arg.startswith("${CLAUDE_PLUGIN_ROOT}"), arg
+    script = server["args"][0]
+    assert script.startswith("${CLAUDE_PLUGIN_ROOT}/") and ".." not in script
+    assert (PLUGIN_DIR / script.removeprefix("${CLAUDE_PLUGIN_ROOT}/")).is_file()
 
 
 def test_no_build_and_no_words_once_the_launcher_exists(tmp_path):

@@ -4,8 +4,8 @@
 #   build-env.sh <lock-dir>
 #
 # doctor.sh starts this detached, at SessionStart, when the environment isn't
-# built yet. It does what `uv run --locked` does when the server starts, minus
-# the server, so a kill of the server can't cut the build short. Claude Code
+# built yet. It does what `uv run --locked` does when the server starts
+# (hooks/start-server.sh), minus the server, so a kill of the server can't cut the build short. Claude Code
 # waits 30 seconds for a server and then kills it, and a cold build takes
 # longer than that. The wheels a killed try had finished stay in uv's cache, but
 # a slow connection may never finish the largest one inside 30 seconds.
@@ -48,8 +48,8 @@ trap 'rm -rf "$lock"' EXIT
 trap 'stop 130' INT
 trap 'stop 143' TERM
 
-# The same two variables .mcp.json gives the server. test_doctor.py checks the
-# two stay in step.
+# The same two variables hooks/start-server.sh gives the server. test_doctor.py
+# checks the two stay in step.
 VIRTUAL_ENV="$CLAUDE_PLUGIN_DATA/venv"
 HF_HUB_DISABLE_TELEMETRY=1
 export VIRTUAL_ENV HF_HUB_DISABLE_TELEMETRY

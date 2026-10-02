@@ -35,21 +35,40 @@ EXPORT_WORDS = {
 }
 
 
-def server_params(extras: str = "") -> StdioServerParameters:
-    """The launch ``.mcp.json`` declares, with ${CLAUDE_PLUGIN_ROOT} filled in the way Claude Code fills it.
+@pytest.fixture
+def plugin_data(tmp_path):
+    """A stand-in for ${CLAUDE_PLUGIN_DATA} whose ``venv`` is the server's own ``.venv``.
 
-    The test reads the shipped command, so it can't drift from it. The one
-    change: the environment folder. The plugin keeps it in ${CLAUDE_PLUGIN_DATA};
-    here it is the server's own ``.venv``, the one this suite already runs in.
+    The plugin keeps its environment in ${CLAUDE_PLUGIN_DATA}/venv. Here that name
+    is a link to ``.venv``, the environment this suite already runs in, so the
+    launcher sets VIRTUAL_ENV exactly as it ships and uv still finds the packages
+    in ``.venv``. Nothing is built in a second place.
+    """
+    data = tmp_path / "plugin-data"
+    data.mkdir()
+    (data / "venv").symlink_to(SERVER_DIR / ".venv", target_is_directory=True)
+    return data
+
+
+def server_params(data_dir: Path, extras: str = "") -> StdioServerParameters:
+    """The launch ``.mcp.json`` declares, with the two plugin folders filled in the way Claude Code fills them.
+
+    The test reads the shipped command and runs the shipped launcher script, so
+    it can't drift from either. The plugin folder is this checkout, and
+    ``data_dir`` stands in for ${CLAUDE_PLUGIN_DATA} (see ``plugin_data``).
     """
     declared = json.loads((PLUGIN_DIR / ".mcp.json").read_text())["mcpServers"]["lumr-studio"]
-    root = str(PLUGIN_DIR)
-    env = {k: v for k, v in declared.get("env", {}).items() if k != "VIRTUAL_ENV"}
+    fill = {"${CLAUDE_PLUGIN_ROOT}": str(PLUGIN_DIR), "${CLAUDE_PLUGIN_DATA}": str(data_dir)}
+
+    def resolved(arg: str) -> str:
+        for name, value in fill.items():
+            arg = arg.replace(name, value)
+        return arg
+
     return StdioServerParameters(
         command=declared["command"],
-        args=[arg.replace("${CLAUDE_PLUGIN_ROOT}", root) for arg in declared["args"]],
+        args=[resolved(arg) for arg in declared["args"]],
         env={
-            **env,
             **({"LUMR_STUDIO_EXTRAS": extras} if extras else {}),
             "LUMR_STUDIO_PROJECTS_DIR": os.environ["LUMR_STUDIO_PROJECTS_DIR"],
             "LUMR_HOME": os.environ["LUMR_HOME"],
@@ -70,9 +89,9 @@ def check_tools(by_name, contract):
 
 
 @pytest.mark.skipif(not shutil.which("uv"), reason="uv not installed")
-def test_server_lists_tools_and_answers_get_edit(video):
+def test_server_lists_tools_and_answers_get_edit(video, plugin_data):
     async def talk():
-        async with Client(server_params(), read_timeout_seconds=120) as client:
+        async with Client(server_params(plugin_data), read_timeout_seconds=120) as client:
             listed = (await client.list_tools()).tools
             edit = await client.call_tool("get_edit", {"video_path": str(video)})
             bad = await client.call_tool("get_edit", {"video_path": "relative.mp4"})
@@ -117,9 +136,9 @@ def test_server_lists_tools_and_answers_get_edit(video):
 
 
 @pytest.mark.skipif(not shutil.which("uv"), reason="uv not installed")
-def test_the_server_offers_only_the_editor_slice_by_default(video):
+def test_the_server_offers_only_the_editor_slice_by_default(video, plugin_data):
     async def talk():
-        async with Client(server_params(), read_timeout_seconds=120) as client:
+        async with Client(server_params(plugin_data), read_timeout_seconds=120) as client:
             listed = (await client.list_tools()).tools
             hidden = await client.call_tool("set_overlays", {"video_path": str(video), "overlays": []})
             return listed, client.instructions, hidden
@@ -132,9 +151,9 @@ def test_the_server_offers_only_the_editor_slice_by_default(video):
 
 
 @pytest.mark.skipif(not shutil.which("uv"), reason="uv not installed")
-def test_the_extras_flag_brings_back_the_publish_kit_and_the_overlays():
+def test_the_extras_flag_brings_back_the_publish_kit_and_the_overlays(plugin_data):
     async def talk():
-        async with Client(server_params(EXTRAS_ON), read_timeout_seconds=120) as client:
+        async with Client(server_params(plugin_data, EXTRAS_ON), read_timeout_seconds=120) as client:
             return (await client.list_tools()).tools, client.instructions
 
     listed, instructions = asyncio.run(talk())
