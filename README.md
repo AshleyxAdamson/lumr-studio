@@ -62,6 +62,20 @@ curl -X DELETE https://<worker-url>/v1/feedback/<feedback_id> \
 
 Rate limit: 20 requests per 60 seconds per IP address.
 
+## Delete everything after 6 months
+
+The plugin's privacy policy promises that feedback and sends are kept up to 6 months. An R2 lifecycle rule makes that automatic. Set it once:
+
+1. In the Cloudflare dashboard, open **R2 Object Storage**, then **lumr-feedback-sends**, then **Settings**.
+2. Under **Object lifecycle rules**, add a rule for the whole bucket (no prefix) that deletes objects **183 days** after they're created.
+
+Or from Terminal, checking the flags first with `npx wrangler@latest r2 bucket lifecycle add --help`:
+
+```sh
+npx wrangler@latest r2 bucket lifecycle add lumr-feedback-sends expire-after-6-months --expire-days 183
+npx wrangler@latest r2 bucket lifecycle list lumr-feedback-sends
+```
+
 ## Run the tests
 
 ```sh
