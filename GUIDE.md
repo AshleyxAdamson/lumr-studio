@@ -96,7 +96,7 @@ The overlay code stays linked and dormant. With no saved overlays, nothing is dr
 
 To turn them on, edit two files inside the plugin's folder.
 
-1. In `.mcp.json`, add `"LUMR_STUDIO_EXTRAS": "publish_kit,overlays"` to `env`. Name one or both. A name that isn't an extra stops the server at start.
+1. In `.mcp.json`, add `"env": {"LUMR_STUDIO_EXTRAS": "publish_kit,overlays"}` to the `lumr-studio` server. The file ships with no `env` block. The launcher passes it through. Name one or both. A name that isn't an extra stops the server at start.
 2. In `.claude-plugin/plugin.json`, add `"skills": ["./extras/skills/publish-kit/", "./extras/skills/add-visuals/"]`. The key adds to the default `skills/` folder.
 
 Then restart Claude Code, or run `/reload-plugins`. A plugin update replaces those files, so you'd make the edit again.
@@ -107,7 +107,7 @@ Everything runs on your Mac. The one exception is Claude, which runs wherever yo
 
 | What | How it runs |
 |---|---|
-| The server | Claude Code starts it over stdio with `uv run --active --locked --project ${CLAUDE_PLUGIN_ROOT}/server lumr-studio-server` (from `.mcp.json`). It's the only long-running process. |
+| The server | Claude Code starts it over stdio with `sh ${CLAUDE_PLUGIN_ROOT}/hooks/start-server.sh ${CLAUDE_PLUGIN_ROOT} ${CLAUDE_PLUGIN_DATA}` (from `.mcp.json`). That short script sets `VIRTUAL_ENV` to the plugin's environment in the data folder, then runs `uv run --active --locked --project <plugin folder>/server lumr-studio-server`. It's the only long-running process. |
 | The speech model | `python -m lumr_studio.speech <video>`, in a process of its own, once per video, reading the downloaded model from disk with Hugging Face set offline. |
 | Cutting and rendering | `ffmpeg` and `ffprobe`, from your PATH. |
 | The review page | A small web server on `127.0.0.1`, on a port the operating system picks, with a private token in the address. The plugin opens it in your default browser. It makes no outside requests. The Send feedback button sends a message only when you press Submit, and Help improve Lumr sends the shape of your changes only when you press Send. Your Mac's local server sends both. |

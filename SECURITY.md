@@ -23,7 +23,7 @@ Anything in this repo that runs on your Mac:
 - The local MCP server, and the files it reads and writes.
 - The review page and the web server behind it. It listens on `127.0.0.1` only, behind a private token, and refuses requests from other sites.
 - The model download: the pinned hosts, the size and sha256 checks, and where files land.
-- The session-start hook and the environment build script.
+- The session-start hook, the environment build script and the server launcher script.
 - The locked Python packages in `server/uv.lock`. A report about a package that the lock pins is welcome. The fix is a new lock.
 
 ## Not in scope
