@@ -21,7 +21,7 @@ The transcript with per-word times already exists in Lumr Studio
 
 ## Decisions already made
 
-Ashley can override these. Ask her before you change them.
+Ashley confirmed both on 2026-10-05. Build to them without asking again.
 
 - **`frames` is on by default.** It goes in `EDITOR_TOOLS` in
   `offering.py`, not behind `LUMR_STUDIO_EXTRAS`. The default tool count goes
