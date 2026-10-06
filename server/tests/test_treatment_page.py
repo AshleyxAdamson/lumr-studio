@@ -1396,7 +1396,7 @@ def test_with_no_team_server_the_form_hides_name_and_email_and_opens_a_github_is
     assert FEEDBACK_ISSUES in html
     assert "const feedbackDirect = () => !!(S && S.feedback && S.feedback.direct)" in html
     assert "$('fbWho').hidden = !direct" in html, "Name and Email leave the form"
-    assert "This opens a public GitHub issue in your browser. Nothing is sent until you submit it there." in html
+    assert "This opens a public GitHub issue in your browser with your message filled in. It isn't posted until you submit it there." in html
     assert "window.open(url, '_blank', 'noopener,noreferrer')" in html
     assert "encodeURIComponent('Feedback')" in html
     assert "message + '\\n\\nLumr Studio' + version" in html, "the body is the message, a blank line, then the version"
@@ -1408,9 +1408,9 @@ def test_with_no_team_server_the_form_hides_name_and_email_and_opens_a_github_is
 def test_the_feedback_words_read_plainly():
     said = ["Send feedback", "What's on your mind?", "Only if you'd like a reply", "Name (optional)", "Email (optional)",
             "Sent privately to the Lumr Studio team with the plugin version. Please don't paste anything you'd rather keep private.",
-            "This opens a public GitHub issue in your browser. Nothing is sent until you submit it there.",
+            "This opens a public GitHub issue in your browser with your message filled in. It isn't posted until you submit it there.",
             "Thanks. We got it.", "Write a few words first.", "That's too long for a GitHub issue. Shorten it a bit.",
-            "GitHub is open in a new tab. Nothing is sent until you submit it there.", "Cancel", "Submit"]
+            "GitHub is open in a new tab with your message filled in. It isn't posted until you submit it there.", "Cancel", "Submit"]
     for line in said:
         assert not banned_in(line) and not decimal_times_in(line) and "—" not in line, line
     screen = words_on_screen()

@@ -45,7 +45,7 @@ The plugin keeps files on your Mac until you delete them. The author holds nothi
 | What | Where | To remove it |
 |---|---|---|
 | Project files: `edit.json`, `words-aligned.json`, `plans.json`, `exports/`, `frames/` | `~/Lumr/studio/projects/<video name>-<id>/`. The `~/Lumr` part follows `LUMR_HOME`, or the folder named in `~/.config/lumr/home.txt`. | Delete the project folder |
-| What Lumr learned from your changes | Nothing extra is stored. It's worked out from the project files above each time, and `taste.json` in `~/Lumr/studio/projects/` only lists what you asked it to forget. | Ask Claude to forget it, or delete a project folder to drop what that video taught |
+| What Lumr learned from your changes | Nothing extra is stored. It's worked out from the project files above each time, and `taste.json` in `~/Lumr/studio/projects/` holds only what you asked it to forget: the words and kinds you named, and after "forget everything" a copy of each project's settings and change ids at that moment, so those stop counting. It names the project folders, which carry your video names. | Ask Claude to forget it, or delete a project folder to drop what that video taught |
 | The transcript | `<video>.words.json`, beside your video. It's the only file the plugin puts in your video's folder. | Delete the file |
 | Measured silences | `~/Lumr/media_cache/` | Delete the folder |
 | The Python environment and `build.log` | The plugin's data folder, under `~/.claude/plugins/data/` | Uninstalling the plugin removes it |

@@ -3313,7 +3313,7 @@ $('copyPath').addEventListener('click', async () => {
    message to the Lumr Studio team. With no team server set up, Submit opens a GitHub issue, and the creator sends it there. */
 const FEEDBACK_ISSUES = 'https://github.com/AshleyxAdamson/lumr-studio/issues/new';
 const FEEDBACK_NOTE_DIRECT = "Sent privately to the Lumr Studio team with the plugin version. Please don't paste anything you'd rather keep private.";
-const FEEDBACK_NOTE_GITHUB = "This opens a public GitHub issue in your browser. Nothing is sent until you submit it there.";
+const FEEDBACK_NOTE_GITHUB = "This opens a public GitHub issue in your browser with your message filled in. It isn't posted until you submit it there.";
 const FEEDBACK_URL_MOST = 7000;         /* a longer address is one GitHub turns away */
 const feedbackDirect = () => !!(S && S.feedback && S.feedback.direct);
 function feedbackError(msg){ const p = $('fbErr'); p.textContent = msg || ''; p.hidden = !msg; }
@@ -3356,7 +3356,7 @@ $('feedbackForm').addEventListener('submit', async e => {
     if(!url){ feedbackError("That's too long for a GitHub issue. Shorten it a bit."); $('fbMessage').focus(); return; }
     window.open(url, '_blank', 'noopener,noreferrer');
     closeFeedback();
-    announce('GitHub is open in a new tab. Nothing is sent until you submit it there.');
+    announce('GitHub is open in a new tab with your message filled in. It isn\'t posted until you submit it there.');
     return;
   }
   feedbackBusy(true);

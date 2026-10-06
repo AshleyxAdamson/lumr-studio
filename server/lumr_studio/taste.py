@@ -219,7 +219,11 @@ def _changed_projects(exclude: Path | None) -> list[tuple[str, dict[str, Any], d
     marker = _marker()
     skip = exclude.resolve() if exclude is not None else None
     found = []
-    for folder in sorted(root.iterdir()):
+    try:
+        folders = sorted(root.iterdir())
+    except OSError:
+        return []  # an unreadable projects folder costs the profile line, never the page or get_edit
+    for folder in folders:
         path = folder / EDIT_FILE
         try:
             if not path.is_file() or (skip is not None and folder.resolve() == skip):

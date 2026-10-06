@@ -8,6 +8,7 @@ with the plugin version. Nothing else leaves this Mac.
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
@@ -110,7 +111,7 @@ def send_feedback(body: dict[str, Any]) -> dict[str, str]:
     except urllib.error.HTTPError as err:
         log.info("feedback refused: HTTP %s", err.code)
         raise StudioError(sorry.format(code=f" ({err.code})")) from None
-    except (urllib.error.URLError, OSError, ValueError) as err:
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as err:
         log.info("feedback not sent: %s", type(err).__name__)
         raise StudioError("Couldn't reach the feedback server. Check your connection and try again.") from None
     if not isinstance(status, int) or not 200 <= status < 300:

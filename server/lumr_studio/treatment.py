@@ -1528,7 +1528,8 @@ def rate_cut(ctx: Context, body: Any) -> dict[str, Any]:
     if rating == "bad":
         return _set_cut_state(ctx, rid, PUT_BACK, ratings=ratings)
     before = snapshot(ctx)
-    _rebuild(ctx, treatment, ratings=ratings)
+    # A rating changes no words, so the one-step undo stays armed.
+    _rebuild(ctx, treatment, ratings=ratings, undo=ctx.edit.get("undo"))
     return _answer(ctx, before)
 
 

@@ -19,6 +19,7 @@ to be deleted.
 
 from __future__ import annotations
 
+import http.client
 import bisect
 import json
 import logging
@@ -642,7 +643,7 @@ def send(project: Project, payload: dict[str, Any], removed_indexes: Any = None)
     except urllib.error.HTTPError as err:
         log.info("send refused: HTTP %s", err.code)
         raise StudioError(sorry.format(code=f" ({err.code})")) from None
-    except (urllib.error.URLError, OSError, ValueError) as err:
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as err:
         log.info("send not made: %s", type(err).__name__)
         raise StudioError("Couldn't reach the Lumr Studio server. Check your connection and try again.") from None
     if not isinstance(status, int) or not 200 <= status < 300:
