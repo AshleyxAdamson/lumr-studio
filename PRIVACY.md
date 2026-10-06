@@ -1,6 +1,6 @@
 # Privacy
 
-Last updated 2026-09-28.
+Last updated 2026-10-05.
 
 Lumr Studio doesn't collect your data. It has no server, no accounts, no analytics and no telemetry. Nothing on your Mac is ever sent to the person who wrote it.
 
@@ -18,7 +18,8 @@ Lumr Studio runs inside Claude Code, so Claude is part of the conversation. The 
 
 - The transcript text, in short packed lines.
 - Cut lists with their reasons, and the results of each tool.
-- When Claude checks a join with `look`, one small picture: a few still frames from your video, the sound wave drawn as a line, and the words around the cut. That's the only time an image from your video goes to Claude.
+- When Claude checks a join with `look`, one small picture: a few still frames from your video, the sound wave drawn as a line, and the words around the cut.
+- When you ask for UI feedback on a screen recording, the screenshots Claude takes with `frames`. They're whole frames from your video, at the times Claude picks. In a screen recording that means anything that was visible on screen then, such as emails, names or keys. If something on screen is private, tell Claude which parts to skip.
 
 That goes wherever your Claude Code sends its requests, under your Claude plan's terms. Anthropic's policy is at https://www.anthropic.com/legal/privacy. The plugin doesn't add a second copy, and its author doesn't get one.
 
@@ -43,7 +44,7 @@ The plugin keeps files on your Mac until you delete them. The author holds nothi
 
 | What | Where | To remove it |
 |---|---|---|
-| Project files: `edit.json`, `words-aligned.json`, `plans.json`, `exports/` | `~/Lumr/studio/projects/<video name>-<id>/`. The `~/Lumr` part follows `LUMR_HOME`, or the folder named in `~/.config/lumr/home.txt`. | Delete the project folder |
+| Project files: `edit.json`, `words-aligned.json`, `plans.json`, `exports/`, `frames/` | `~/Lumr/studio/projects/<video name>-<id>/`. The `~/Lumr` part follows `LUMR_HOME`, or the folder named in `~/.config/lumr/home.txt`. | Delete the project folder |
 | The transcript | `<video>.words.json`, beside your video. It's the only file the plugin puts in your video's folder. | Delete the file |
 | Measured silences | `~/Lumr/media_cache/` | Delete the folder |
 | The Python environment and `build.log` | The plugin's data folder, under `~/.claude/plugins/data/` | Uninstalling the plugin removes it |
