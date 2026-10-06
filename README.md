@@ -33,6 +33,7 @@ On a 21:47 test take, measured word times took out more than twice as much at ev
 - **Switches** for long pauses, filler words, stutters and filler likes.
 - **A review page** in your browser. Double-click any word to cut it or bring it back, hear any cut, flip between the original and the edit, and export.
 - **Cuts you can tell apart.** Dim for the pace, red for Claude, teal for you.
+- **UI feedback sessions.** Record your screen while you scroll through an app or a website and talk through what you'd change. Claude turns it into numbered notes, each with a time and screenshots of what was on screen. It shows them in chat, saves them to a file if you say yes, and can work through the fixes in your code. Nothing is cut, and the video isn't changed.
 - **Extras**, off by default: a publish kit (titles, description, chapters, tags) and overlays of your own photos and clips.
 
 ## Start
@@ -69,11 +70,13 @@ It runs in Claude Code, and in Cowork when the session runs on your Mac. Chat on
 
 > Find the filler likes in ~/Movies/vlog.mov and take them out. Then open the review page.
 
+> Use ui-feedback on ~/Movies/app-walkthrough.mov
+
 ## What it runs and fetches
 
 - **On your Mac:** a local MCP server, `ffmpeg` and `ffprobe` for cutting and rendering, the two models, and the review page on `127.0.0.1`. A check at the start of each session looks for `uv` and `ffmpeg`, and the first time it builds the plugin's Python environment.
 - **Downloads, once:** the locked Python packages from PyPI through `uv`, plus a Python build from `github.com/astral-sh/python-build-standalone` if your Mac has none. Parakeet from `huggingface.co` and wav2vec 2.0 from `download.pytorch.org`, only after you say yes. Each model file is checked against a pinned size and sha256.
-- **What leaves your Mac:** nothing of yours, except what Claude reads in the conversation. That's the transcript text, the cut lists, and a small picture of a join when Claude checks one. Your video and audio never upload.
+- **What leaves your Mac:** nothing of yours, except what Claude reads in the conversation. That's the transcript text, the cut lists, a small picture of a join when Claude checks one, and the screenshots Claude takes of your video with `frames`. Your video and audio never upload.
 
 **Privacy:** Lumr Studio collects nothing. Your video, transcript and edits stay on your Mac. [Privacy policy](https://github.com/AshleyxAdamson/lumr-studio/blob/main/PRIVACY.md).
 

@@ -4,9 +4,10 @@ The details behind the [README](README.md): the review page, what you need, the 
 
 ## The review page and tools
 
-The plugin gives Claude 11 tools and one skill, `tight-cut`. `TOOLS.md` is the contract for each tool. None of them deletes a file of yours, and none uploads your video.
+The plugin gives Claude 12 tools and two skills, `tight-cut` and `ui-feedback`. `TOOLS.md` is the contract for each tool. None of them deletes a file of yours, and none uploads your video.
 
 - `tight-cut` reads a whole recording, proposes a cut list with plain-language reasons, and only saves or renders once you say go.
+- `ui-feedback` reads a screen recording where you talk through your feedback, and turns it into numbered notes. Each note has a time and screenshots from that moment (`frames`). It saves a notes file or changes your code only once you say yes.
 - Every saved edit comes back with a read of each join, the way a viewer hears it, and a fix for the ones likely to sound wrong. Claude repairs those before showing you the plan.
 - Likely laughs are marked in the transcript, and Claude keeps them in its own cuts. The automatic pause trims can still clip a laugh at the harder paces. On the test take, 10 places at Standard and 23 at Max. The join check flags those, and Claude tells you which stretch to keep on the page.
 - Six pace stops, from Natural to Max, set how much of each pause comes out. Each leaves a pause at every join, the most between sentences. Fine tune holds two sliders for a setting between the stops.
@@ -126,7 +127,8 @@ What Claude sees is the conversation. The plugin adds to it in three ways.
 
 - The transcript text, in short packed lines, as Claude reads it.
 - Cut lists with their reasons, and the results of each tool.
-- One small picture when Claude checks a join with `look`: a few still frames, the sound wave drawn as a line, and the words around the cut. That's the only time an image from your video goes to Claude.
+- One small picture when Claude checks a join with `look`: a few still frames, the sound wave drawn as a line, and the words around the cut.
+- The screenshots Claude takes with `frames` in a UI feedback session. These are whole frames of your video, so in a screen recording they show everything that was on screen at that moment.
 
 The plugin never uploads your video or audio file.
 
@@ -140,6 +142,7 @@ Each video gets one project folder at `~/Lumr/studio/projects/<video name>-<id>/
 | `words-aligned.json` | your transcript's words with times measured from the sound. Made once per video. If the transcript changes, it's made again. |
 | `plans.json` | the automatic removals planned for each of the six stops and for the last 12 slider settings you tried, so the page answers fast |
 | `exports/` | the videos and previews you render |
+| `frames/` | the screenshots `frames` takes of your video |
 
 The transcript itself stays beside your video, as `<video>.words.json`. It's the only file the plugin puts in your video's folder. Measured silences are cached under `~/Lumr/media_cache/`. The Python environment lives in the plugin's data folder, and Claude Code deletes it when you uninstall the plugin. The models stay in the shared caches (`~/.cache/huggingface` and `~/.cache/torch`) and survive an uninstall.
 
@@ -148,7 +151,7 @@ The transcript itself stays beside your video, as `<video>.words.json`. It's the
 Lumr Studio collects nothing. It has no server, no accounts and no telemetry, and the author never receives your files, your transcript or a usage count.
 
 - On your Mac. Your video, audio, transcript, word times, edits and exports. The plugin reads a video only when you name it to Claude, and only on your own Mac. It never browses your folders, and it never uploads your video or audio.
-- What Claude sees. The transcript text, cut lists with reasons, and the results of each tool. When Claude checks a join with `look`, a few still frames go with it. That goes wherever your Claude Code sends its requests.
+- What Claude sees. The transcript text, cut lists with reasons, and the results of each tool. When Claude checks a join with `look`, a few still frames go with it, and `frames` sends the screenshots Claude asks for. In a screen recording that includes anything visible on screen. That goes wherever your Claude Code sends its requests.
 - The network. Downloads only, and nothing of yours goes out in them. `huggingface.co` and `download.pytorch.org` for the two models, only after you say yes. PyPI (`pypi.org` and `files.pythonhosted.org`) through `uv` for the plugin's Python environment. `uv` also fetches a Python build from `github.com/astral-sh/python-build-standalone` if your Mac has none, and Hugging Face sends its large files through its own download hosts. Hugging Face's telemetry is switched off.
 
 The [privacy policy](https://github.com/AshleyxAdamson/lumr-studio/blob/main/PRIVACY.md) has the rest: what's stored where, how long it stays, and how to delete it.
