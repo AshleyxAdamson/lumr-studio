@@ -1,0 +1,17 @@
+name = "feedback"
+main = "src/index.js"
+compatibility_date = "2024-12-16"
+
+[[r2_buckets]]
+binding = "SENDS"
+bucket_name = "lumr-feedback-sends"
+
+# Rate limiting: 20 requests per 60 seconds per IP, counted in memory by Cloudflare.
+# Needs wrangler 4.36.0 or newer. namespace_id is any number unique in your account.
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 20
+  period = 60
