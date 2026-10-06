@@ -25,15 +25,15 @@ def names_in_backticks(path: Path) -> set[str]:
     return set(re.findall(r"`([a-z_]+)`", path.read_text()))
 
 
-def test_by_default_the_plugin_offers_the_twelve_editor_tools():
-    assert len(offering.EDITOR_TOOLS) == 12
+def test_by_default_the_plugin_offers_the_thirteen_editor_tools():
+    assert len(offering.EDITOR_TOOLS) == 13
     assert offering.offered_tools(frozenset()) == offering.EDITOR_TOOLS
 
 
 def test_each_extra_adds_its_own_tools_and_nothing_else():
     assert offering.offered_tools(frozenset({"publish_kit"})) - offering.EDITOR_TOOLS == {"chapter_times", "save_publish_kit"}
     assert offering.offered_tools(frozenset({"overlays"})) - offering.EDITOR_TOOLS == {"set_overlays", "get_overlays"}
-    assert len(offering.offered_tools(ALL_ON)) == 16
+    assert len(offering.offered_tools(ALL_ON)) == 17
 
 
 def test_no_tool_is_on_two_lists():
@@ -79,8 +79,8 @@ def test_an_offered_skill_names_only_tools_that_are_offered(extras):
 
 
 def test_the_skill_tests_read_the_skills_they_mean_to():
-    assert [p.parent.name for p in offered_skills(frozenset())] == ["tight-cut"]
-    assert [p.parent.name for p in offered_skills(ALL_ON)] == ["tight-cut", "add-visuals", "publish-kit"]
+    assert [p.parent.name for p in offered_skills(frozenset())] == ["tight-cut", "ui-feedback"]
+    assert [p.parent.name for p in offered_skills(ALL_ON)] == ["tight-cut", "ui-feedback", "add-visuals", "publish-kit"]
     assert all(p.is_file() for p in offered_skills(ALL_ON))
 
 

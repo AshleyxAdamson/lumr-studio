@@ -19,7 +19,7 @@ PLUGIN_DIR = SERVER_DIR.parent
 EDITOR_TOOLS = {
     "transcribe": False, "read_transcript": True, "analyze_take": True, "get_edit": True,
     "set_edit": False, "preview": False, "render": False, "job_status": True,
-    "look": False, "review": False, "find_words": True, "forget_taste": False,
+    "look": False, "frames": False, "review": False, "find_words": True, "forget_taste": False,
 }
 # What LUMR_STUDIO_EXTRAS=publish_kit,overlays adds.
 EXTRA_TOOLS = {
@@ -101,12 +101,13 @@ def test_server_lists_tools_and_answers_get_edit(video, plugin_data):
             bad = await client.call_tool("get_edit", {"video_path": "relative.mp4"})
             text = await client.call_tool("read_transcript", {"video_path": str(video)})
             found = await client.call_tool("find_words", {"video_path": str(video), "words": ["we"]})
-            return listed, edit, bad, text, found, client.instructions
+            shots = await client.call_tool("frames", {"video_path": str(video), "times": [5.0]})
+            return listed, edit, bad, text, found, shots, client.instructions
 
-    listed, edit, bad, text, found, client_instructions = asyncio.run(talk())
+    listed, edit, bad, text, found, shots, client_instructions = asyncio.run(talk())
 
     by_name = {t.name: t for t in listed}
-    assert len(listed) == len(by_name) == 12, sorted(by_name)
+    assert len(listed) == len(by_name) == 13, sorted(by_name)
     assert set(by_name) == set(EDITOR_TOOLS)
     check_tools(by_name, EDITOR_TOOLS)
     for name, words in EXPORT_WORDS.items():
@@ -140,6 +141,14 @@ def test_server_lists_tools_and_answers_get_edit(video, plugin_data):
     picks = by_name["set_edit"].input_schema["properties"]["picks"]
     assert "find_words" in picks["description"] and "one switch" in picks["description"]
 
+    assert not shots.is_error
+    assert [block.type for block in shots.content] == ["text", "image", "text"]
+    assert shots.content[0].text == "Frame 1 of 1 at 0:05 (5.00 s)"
+    assert shots.content[1].mime_type == "image/png" and shots.content[1].data
+    assert json.loads(shots.content[2].text) == shots.structured_content
+    assert shots.structured_content["source_size"] == [320, 240]
+    assert shots.structured_content["frames"][0]["shown"] <= 5.0
+
     assert bad.is_error
     message = bad.content[0].text
     assert "relative" in message and "Traceback" not in message
@@ -169,7 +178,7 @@ def test_the_extras_flag_brings_back_the_publish_kit_and_the_overlays(plugin_dat
     listed, instructions = asyncio.run(talk())
 
     by_name = {t.name: t for t in listed}
-    assert len(listed) == len(by_name) == 16, sorted(by_name)
+    assert len(listed) == len(by_name) == 17, sorted(by_name)
     assert set(by_name) == set(EDITOR_TOOLS) | set(EXTRA_TOOLS)
     check_tools(by_name, {**EDITOR_TOOLS, **EXTRA_TOOLS})
     assert "set_overlays shows the creator's own photos and clips" in instructions

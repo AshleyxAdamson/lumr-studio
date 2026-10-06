@@ -16,9 +16,11 @@ import threading
 import webbrowser
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from lumr_studio import edit as edits
+from lumr_studio import frames as screenshots
 from lumr_studio import models, taste
 from lumr_studio import treatment as treatments
 from lumr_studio import word_times
@@ -698,6 +700,44 @@ def look(
         raise
     append_receipt(project, "look", at=at, path=picture["path"])
     return picture
+
+
+def frames(
+    video_path: str,
+    times: list[float],
+    region: list[float] | None = None,
+    *,
+    footage: screenshots.ScreenFootage | None = None,
+) -> dict[str, Any]:
+    """Save a screenshot of the source video at each of ``times`` into ``frames/`` and describe them.
+
+    Needs no transcript and no saved edit. Each picture is the frame on screen
+    at that time, cropped to ``region`` when there is one. Nothing is written
+    unless every frame was read.
+    """
+    project = open_project(video_path)
+    shots, info, box = screenshots.capture(project.video, times, region, footage=footage)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    described: list[dict[str, Any]] = []
+    reserved: list[Path] = []
+    try:
+        for shot in shots:
+            cs = round(shot.at * 100)
+            base = f"frame-{cs // 6000}m{(cs % 6000) / 100:05.2f}s-{stamp}"
+            out = reserve_unique_path(project.frames_dir, base, shot.suffix)
+            reserved.append(out)
+            out.write_bytes(shot.data)
+            described.append(shot.describe(out))
+    except BaseException:
+        for out in reserved:
+            out.unlink(missing_ok=True)
+        raise
+    append_receipt(project, "frames", times=[s.at for s in shots], paths=[d["path"] for d in described])
+    return {
+        "frames": described,
+        "source_size": [info.width, info.height],
+        "region": list(box) if box else None,
+    }
 
 
 BrowserOpener = Callable[[str], Any]

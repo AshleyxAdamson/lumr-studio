@@ -8,7 +8,7 @@ Results: every tool returns a ``CallToolResult`` built by mcp_results, the one
 place that decides how a tool answers and fails: compact JSON (or, for
 read_transcript, the packed transcript as plain text) with the full dict as
 ``structured_content``. ``look`` also returns the picture itself as an image
-block, so the model sees it. The overlay tools live in overlay_mcp and are
+block, so the model sees it, and ``frames`` returns one image block per time. The overlay tools live in overlay_mcp and are
 added by ``overlay_mcp.register``. Which tools exist at all is ``offering``'s
 call: the editor slice by default, the publish kit and the overlays with
 ``LUMR_STUDIO_EXTRAS``.
@@ -21,7 +21,7 @@ from collections.abc import Callable
 from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import MCPServer
-from mcp.types import CallToolResult, ImageContent
+from mcp.types import CallToolResult, ImageContent, TextContent
 from pydantic import BaseModel, Field
 
 from lumr_studio import offering, overlay_mcp, tools
@@ -43,6 +43,7 @@ _INSTRUCTIONS_START = (
     "needs_models, ask the creator before you pass download_models; nothing downloads without a yes. find_words lists every "
     "place a word is said, so you can pick the filler ones by reading. set_edit saves a draft and returns joins, a check of how every "
     "cut will sound; read it and fix what it flags. "
+    "frames shows the source video at any times you pass, for screen recordings with spoken feedback. "
 )
 _INSTRUCTIONS_OVERLAYS = (
     "set_overlays shows the creator's own photos and clips over the talk, and render and "
@@ -227,6 +228,37 @@ def look(
         ],
         structured_content=data,
     )
+
+
+@_tool(title="Screenshots from the video", annotations=_annotations("Screenshots from the video", read_only=False))
+def frames(
+    video_path: VideoPath,
+    times: Annotated[
+        list[float],
+        Field(description="Source seconds, 1 to 6 of them, each from 0 to the video's length."),
+    ],
+    region: Annotated[
+        list[float] | None,
+        Field(
+            description=(
+                "[left, top, right, bottom] as fractions of the frame, 0 to 1, to zoom in on part of the screen, "
+                "such as [0.5, 0.5, 1, 1] for the bottom right quarter. Applies to every time. Leave out for the whole screen."
+            )
+        ),
+    ] = None,
+) -> CallToolResult:
+    """Screenshots of the source video, as images you can see, one per time, saved in the project's frames folder. Each is the frame that was on screen at that moment, not the next one: a screen recording only writes a frame when the picture changes. Times are source seconds, never edited times. At most 6 a call. In a screen recording with spoken feedback, find the cursor in each image first: the creator points while they talk, so the element under the cursor is the one they mean. Pass region to zoom in on small text or a button. Each image comes with a line giving its time as m:ss; the last block is JSON with at, shown (the time of the frame actually on screen), clock, path, width and height for each frame, and source_size. Works with no transcript and no edit."""
+    data = _run(tools.frames, video_path, times, region)
+    content: list[TextContent | ImageContent] = []
+    total = len(data["frames"])
+    for i, frame in enumerate(data["frames"], start=1):
+        content.append(TextContent(type="text", text=f"Frame {i} of {total} at {frame['clock']} ({frame['at']:.2f} s)"))
+        mime = "image/png" if frame["path"].endswith(".png") else "image/jpeg"
+        with open(frame["path"], "rb") as fh:
+            picture = base64.b64encode(fh.read()).decode("ascii")
+        content.append(ImageContent(type="image", data=picture, mime_type=mime))
+    content.append(json_text(data))
+    return CallToolResult(content=content, structured_content=data)
 
 
 @_tool(title="Open the edit page", annotations=_annotations("Open the edit page", read_only=False))

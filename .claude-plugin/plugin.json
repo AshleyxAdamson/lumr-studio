@@ -2,7 +2,7 @@
   "name": "lumr-studio",
   "displayName": "Lumr Studio",
   "version": "0.2.0",
-  "description": "Cuts the gaps out of talking-head videos and helps you tweak the cut. Claude gives a reason for every cut, you fix any of them on a review page, and your footage stays on your machine.",
+  "description": "Cuts the gaps out of talking-head videos and helps you tweak the cut. Claude gives a reason for every cut, you fix any of them on a review page, and your footage stays on your machine. It can also turn a screen recording of spoken feedback into notes with screenshots.",
   "author": {
     "name": "Ashley"
   },
@@ -18,6 +18,8 @@
     "silence-removal",
     "transcription",
     "local",
-    "apple-silicon"
+    "apple-silicon",
+    "screen-recording",
+    "ui-feedback"
   ]
 }
