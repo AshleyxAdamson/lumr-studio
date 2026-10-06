@@ -247,7 +247,7 @@ def frames(
         ),
     ] = None,
 ) -> CallToolResult:
-    """Screenshots of the source video, as images you can see, one per time, saved in the project's frames folder. Each is the frame that was on screen at that moment, not the next one: a screen recording only writes a frame when the picture changes. Times are source seconds, never edited times. At most 6 a call. Pass region to zoom in on small text or a button. Each image comes with a line giving its time as m:ss; the last block is JSON with at, shown (the time of the frame actually on screen), clock, path, width and height for each frame, and source_size. Works with no transcript and no edit."""
+    """Screenshots of the source video, as images you can see, one per time, saved in the project's frames folder. Each is the frame that was on screen at that moment, not the next one: a screen recording only writes a frame when the picture changes. Times are source seconds, never edited times. At most 6 a call. In a screen recording with spoken feedback, find the cursor in each image first: the creator points while they talk, so the element under the cursor is the one they mean. Pass region to zoom in on small text or a button. Each image comes with a line giving its time as m:ss; the last block is JSON with at, shown (the time of the frame actually on screen), clock, path, width and height for each frame, and source_size. Works with no transcript and no edit."""
     data = _run(tools.frames, video_path, times, region)
     content: list[TextContent | ImageContent] = []
     total = len(data["frames"])
