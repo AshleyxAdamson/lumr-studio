@@ -19,7 +19,7 @@ PLUGIN_DIR = SERVER_DIR.parent
 EDITOR_TOOLS = {
     "transcribe": False, "read_transcript": True, "analyze_take": True, "get_edit": True,
     "set_edit": False, "preview": False, "render": False, "job_status": True,
-    "look": False, "frames": False, "review": False, "find_words": True,
+    "look": False, "frames": False, "review": False, "find_words": True, "forget_taste": False,
 }
 # What LUMR_STUDIO_EXTRAS=publish_kit,overlays adds.
 EXTRA_TOOLS = {
@@ -33,6 +33,8 @@ EXPORT_WORDS = {
     "get_edit": ("export", "job_id"),
     "review": ("export", "ask the creator"),
 }
+# What Claude must read to forget safely: ask before everything, and it takes no video.
+FORGET_WORDS = ("everything", "word", "kind", "ask the creator")
 
 
 @pytest.fixture
@@ -86,6 +88,8 @@ def check_tools(by_name, contract):
         assert ann is not None and ann.title, name
         assert ann.read_only_hint is read_only, name
         assert ann.destructive_hint is False, name
+        if name == "forget_taste":
+            assert ann.idempotent_hint is True, name
 
 
 @pytest.mark.skipif(not shutil.which("uv"), reason="uv not installed")
@@ -98,12 +102,12 @@ def test_server_lists_tools_and_answers_get_edit(video, plugin_data):
             text = await client.call_tool("read_transcript", {"video_path": str(video)})
             found = await client.call_tool("find_words", {"video_path": str(video), "words": ["we"]})
             shots = await client.call_tool("frames", {"video_path": str(video), "times": [5.0]})
-            return listed, edit, bad, text, found, shots
+            return listed, edit, bad, text, found, shots, client.instructions
 
-    listed, edit, bad, text, found, shots = asyncio.run(talk())
+    listed, edit, bad, text, found, shots, client_instructions = asyncio.run(talk())
 
     by_name = {t.name: t for t in listed}
-    assert len(listed) == len(by_name) == 12, sorted(by_name)
+    assert len(listed) == len(by_name) == 13, sorted(by_name)
     assert set(by_name) == set(EDITOR_TOOLS)
     check_tools(by_name, EDITOR_TOOLS)
     for name, words in EXPORT_WORDS.items():
@@ -112,6 +116,12 @@ def test_server_lists_tools_and_answers_get_edit(video, plugin_data):
     # job_status says where an export's id comes from on the input itself.
     job_id = by_name["job_status"].input_schema["properties"]["job_id"]["description"]
     assert "export" in job_id and "get_edit" in job_id, job_id
+    # forget_taste takes no video, and says to ask before everything.
+    forget = by_name["forget_taste"]
+    assert set(forget.input_schema["properties"]) == {"everything", "word", "kind"}
+    assert not forget.input_schema.get("required")
+    assert all(word in forget.description.lower() for word in FORGET_WORDS), forget.description
+    assert "except job_status and forget_taste" in client_instructions
 
     assert not edit.is_error
     assert edit.structured_content["cuts"] == []
@@ -168,7 +178,7 @@ def test_the_extras_flag_brings_back_the_publish_kit_and_the_overlays(plugin_dat
     listed, instructions = asyncio.run(talk())
 
     by_name = {t.name: t for t in listed}
-    assert len(listed) == len(by_name) == 16, sorted(by_name)
+    assert len(listed) == len(by_name) == 17, sorted(by_name)
     assert set(by_name) == set(EDITOR_TOOLS) | set(EXTRA_TOOLS)
     check_tools(by_name, {**EDITOR_TOOLS, **EXTRA_TOOLS})
     assert "set_overlays shows the creator's own photos and clips" in instructions

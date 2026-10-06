@@ -42,8 +42,9 @@ BAR_MIN_HEIGHT_PX = 44
 PACES = ["Natural", "Standard", "Fast", "Tight", "Hard", "Max"]
 # Every route the page may ask for. One more here is one more thing the server must answer.
 # The samples left the page in the layout round, so it no longer asks for new ones.
-ROUTES = {"api/treatment", "api/export", "api/cut", "api/cut/add", "api/cut/remove", "api/keep", "api/keep/remove",
-          "api/undo", "api/usual"}
+FEEDBACK_ISSUES = "https://github.com/AshleyxAdamson/lumr-studio/issues/new"
+ROUTES = {"api/feedback", "api/treatment", "api/export", "api/cut", "api/cut/add", "api/cut/remove", "api/keep", "api/keep/remove",
+          "api/undo", "api/usual", "api/rate", "api/share/preview", "api/share/send"}
 
 needs_node = pytest.mark.skipif(NODE is None, reason="node is not installed")
 
@@ -1130,7 +1131,10 @@ def test_page_is_one_self_contained_file_with_no_outside_requests():
     assert not re.search(r"url\(\s*['\"]?(?:https?:)?//", html)
     assert "@import" not in html
     assert not re.search(r"fetch\(\s*['\"]https?:", html)
-    assert not re.search(r"https?://|\bwww\.", html), "the page holds no address outside itself"
+    # The one address it holds is the GitHub issue the feedback form opens in a new tab on the creator's click.
+    # It is a string the page opens and never fetches (the fetch check above), and the form's own send goes to this machine.
+    assert re.findall(r"https?://[^\s'\"?]+", html) == [FEEDBACK_ISSUES], "the page holds no address but the feedback fallback"
+    assert not re.search(r"\bwww\.", html)
 
 
 def test_page_forces_media_muted_when_asked():
@@ -1276,7 +1280,206 @@ def test_the_page_asks_for_nothing_it_no_longer_shows():
     asked = set(re.findall(r"fetch\(\s*'([^']+)'", html)) | set(re.findall(r"send\(\s*'([^']+)'", html))
     # a change built as {path, body} and sent later is a request too
     asked |= set(re.findall(r"\bpath: '([^']+)'", html))
+    asked |= set(re.findall(r"postJSON\(\s*'([^']+)'", html))
     assert asked == ROUTES
+
+
+def test_the_taste_line_sits_under_the_usual_button_and_sends_her_to_claude_to_forget():
+    html = page()
+    settings = part(markup(), "aside", "settings")
+    assert settings.index('id="usualBtn"') < settings.index('id="tasteLine"') < settings.index('id="h-cuts"')
+    assert re.search(r'<p\b[^>]*id="tasteLine"[^>]*\bhidden\b', settings), "the line shows only when something was learned"
+    assert "tasteForget" not in html and "window.confirm" not in html and "api/taste" not in html, "forgetting is not on the page"
+    said = "'Learning from your changes on ' + n + (n === 1 ? ' video' : ' videos') + '. Ask Claude to forget any of it.'"
+    assert said in html
+    line = "Learning from your changes on 3 videos. Ask Claude to forget any of it."
+    assert not banned_in(line) and not decimal_times_in(line) and "—" not in line
+
+
+RATE_WORDS = ("Good cut", "Wrong cut",
+              "Claude was right to cut this. Press again to clear.",
+              "This should not have been cut. It goes back in. Press again to clear.",
+              "Marked wrong. It is back in, so those words play now.", "Marked good.", "Rating cleared.")
+
+
+def test_each_of_claudes_cuts_has_good_cut_and_wrong_cut_buttons():
+    html = page()
+    row = html[html.index("function cutHTML(r){"):html.index("$('groups').addEventListener('click'")]
+    assert re.search(r"""data-rate="good" aria-pressed="' \+ \(r\.rating === 'good'\) \+ '" title="[^"]+">Good cut</button>""", row)
+    assert re.search(r"""data-rate="bad" aria-pressed="' \+ \(r\.rating === 'bad'\) \+ '" title="[^"]+">Wrong cut</button>""", row)
+    assert "role=\"group\" aria-label=\"' + esc('Rate the cut at '" in row, "the two buttons are one named group"
+    assert "const rate = mine ? ''" in row, "her own cuts are not rated"
+    assert "send('api/rate', { id, rating }" in html
+    assert "r.rating === side ? null : side" in html, "pressing the active one again clears it"
+    for said in RATE_WORDS:
+        assert said in html, said
+        assert not banned_in(said) and not decimal_times_in(said) and "—" not in said, said
+    assert "👍" not in html and "👎" not in html, "the page uses no emoji, so the buttons are words"
+    assert "'api/rate'" in re.search(r"const EDIT_ROUTES = \[[^\]]*\]", html).group(0)
+
+
+@needs_node
+def test_rating_a_cut_in_the_example_answers_like_the_server():
+    out = js("""
+      const s = Core.exampleState(), row = s.rows.find(r => r.by === 'claude');
+      const good = Core.exampleChange(s, 'api/rate', { id: row.id, rating: 'good' });
+      const bad = Core.exampleChange(good, 'api/rate', { id: row.id, rating: 'bad' });
+      const clear = Core.exampleChange(bad, 'api/rate', { id: row.id, rating: null });
+      const refuse = (state, body) => { try { Core.exampleChange(state, 'api/rate', body); return null; } catch(err){ return err.message; } };
+      const at = x => x.rows.find(r => r.id === row.id);
+      return {
+        good: [at(good).rating, at(good).state], bad: [at(bad).rating, at(bad).state, bad.durations.edited > good.durations.edited],
+        clear: [at(clear).rating, at(clear).state],
+        yours: refuse(s, { id: s.rows.find(r => r.by === 'you').id, rating: 'good' }),
+      };
+    """)
+    assert out["good"] == ["good", "kept_out"]
+    assert out["bad"] == ["bad", "put_back", True]
+    assert out["clear"] == [None, "put_back"], "clearing a wrong cut does not cut it again"
+    assert "one of yours" in out["yours"]
+
+
+def test_send_feedback_is_a_secondary_button_left_of_export_in_the_upper_right():
+    top = part(markup(), "header", "top")
+    right = top[top.index('class="topright"'):]
+    assert re.search(r'<button\b[^>]*id="feedbackBtn"[^>]*class="btn"[^>]*>Send feedback</button>', right)
+    assert right.index('id="feedbackBtn"') < right.index('id="exportBtn"'), "to the left of Export"
+    assert right.index('id="feedbackBtn"') > right.index('id="shortcutsBtn"')
+    assert not re.search(r'id="feedbackBtn"[^>]*class="[^"]*primary', right), "Export stays the one filled button"
+    assert re.search(r'id="exportBtn" class="btn primary"', right)
+    assert top.count("btn primary") == 1, "in the top line, Export is the one filled button"
+
+
+def test_the_feedback_form_is_a_modal_with_the_asked_for_fields_and_words():
+    dialog = re.search(r'<dialog\b[^>]*id="feedback"[^>]*>(.*?)</dialog>', markup(), re.S)
+    assert dialog, "the form is a <dialog>, which the browser makes modal"
+    inside = dialog.group(1)
+    assert re.search(r'<dialog\b[^>]*aria-labelledby="h-feedback"', markup())
+    assert re.search(r'<h2 id="h-feedback">Send feedback</h2>', inside)
+    assert re.search(r'<label for="fbMessage">What\'s on your mind\?</label>\s*<textarea id="fbMessage"[^>]*\brequired\b', inside)
+    assert re.search(r'<label for="fbName">Name <span class="opt">\(optional\)</span></label>\s*<input id="fbName"', inside)
+    assert re.search(r'<label for="fbEmail">Email <span class="opt">\(optional\)</span></label>\s*<input id="fbEmail"[^>]*type="email"', inside)
+    assert "Only if you'd like a reply" in inside
+    assert ("Sent privately to the Lumr Studio team with the plugin version. "
+            "Please don't paste anything you'd rather keep private.") in inside
+    assert re.search(r'<p id="fbErr" role="alert" hidden>', inside), "an error shows inside the form"
+    buttons = re.findall(r'<button\b[^>]*id="(fb\w+)"[^>]*class="([^"]*)"[^>]*type="(\w+)"[^>]*>(\w+)</button>', inside)
+    assert buttons == [("fbCancel", "btn", "button", "Cancel"), ("fbSubmit", "btn primary", "submit", "Submit")], \
+        "Cancel then Submit, Submit primary"
+    assert re.search(r"\.modalacts\{[^}]*justify-content:flex-end", page()), "at the lower right of the form"
+    assert inside.rindex('class="modalacts"') > inside.rindex('id="fbNote"'), "the buttons close the form"
+
+
+def test_the_feedback_form_opens_focused_closes_on_escape_and_holds_focus():
+    html = page()
+    opening = html[html.index("function openFeedback(){"):html.index("function closeFeedback(){")]
+    assert "d.showModal()" in opening, "modal: the page behind it is inert and focus stays in the form"
+    assert "$('fbMessage').focus()" in opening, "the textarea has focus on open"
+    assert "keydown" not in html[html.index("/* ══ feedback"):html.index("/* ══ keyboard")], "Esc is the dialog's own"
+    keys = html[html.index("document.addEventListener('keydown', e => {"):html.index("document.addEventListener('keyup'")]
+    assert "dialog[open]" in keys.split("\n")[2], "the page's shortcuts (Space, X, K, Esc) leave the open form alone"
+    assert "dialog[open]" in html[html.index("document.addEventListener('keyup'"):html.index("/* ══ boot")]
+
+
+def test_a_failed_send_keeps_what_was_typed_and_a_good_one_says_thanks():
+    html = page()
+    sending = html[html.index("$('feedbackForm').addEventListener('submit'"):html.index("/* ══ keyboard")]
+    assert "postJSON('api/feedback', { message, name: $('fbName').value.trim(), email: $('fbEmail').value.trim() })" in sending
+    caught = sending[sending.index("}catch(err){"):sending.index("feedbackBusy(false);\n  ['fbMessage'")]
+    assert "feedbackError(err.message)" in caught and "value = ''" not in caught, "the typed text stays"
+    assert "'Thanks. We got it.'" in html
+    assert sending.index("closeFeedback();\n  thanksForFeedback()") > sending.index("value = ''")
+
+
+def test_with_no_team_server_the_form_hides_name_and_email_and_opens_a_github_issue():
+    html = page()
+    assert FEEDBACK_ISSUES in html
+    assert "const feedbackDirect = () => !!(S && S.feedback && S.feedback.direct)" in html
+    assert "$('fbWho').hidden = !direct" in html, "Name and Email leave the form"
+    assert "This opens a public GitHub issue in your browser with your message filled in. It isn't posted until you submit it there." in html
+    assert "window.open(url, '_blank', 'noopener,noreferrer')" in html
+    assert "encodeURIComponent('Feedback')" in html
+    assert "message + '\\n\\nLumr Studio' + version" in html, "the body is the message, a blank line, then the version"
+    assert "S.version" in html
+    fetched = re.findall(r"fetch\(\s*'([^']+)'", html)
+    assert all(not path.startswith("http") for path in fetched), "the page itself never calls the internet"
+
+
+def test_the_feedback_words_read_plainly():
+    said = ["Send feedback", "What's on your mind?", "Only if you'd like a reply", "Name (optional)", "Email (optional)",
+            "Sent privately to the Lumr Studio team with the plugin version. Please don't paste anything you'd rather keep private.",
+            "This opens a public GitHub issue in your browser with your message filled in. It isn't posted until you submit it there.",
+            "Thanks. We got it.", "Write a few words first.", "That's too long for a GitHub issue. Shorten it a bit.",
+            "GitHub is open in a new tab with your message filled in. It isn't posted until you submit it there.", "Cancel", "Submit"]
+    for line in said:
+        assert not banned_in(line) and not decimal_times_in(line) and "—" not in line, line
+    screen = words_on_screen()
+    assert "Send feedback" in screen and "What's on your mind?" in screen
+    assert not banned_in(screen)
+
+
+# ── help improve Lumr: send the shape of what she changed ────────────────────
+
+SHARE_PARAGRAPH = ("This sends the shape of your changes, like cut lengths, pauses and what you put back. "
+                   "It never sends your words or your video. Remove anything you'd rather keep.")
+
+
+def test_help_improve_lumr_is_a_quiet_button_that_shows_only_when_sharing_is_on():
+    top = part(markup(), "header", "top")
+    right = top[top.index('class="topright"'):]
+    assert re.search(r'<button\b[^>]*id="shareBtn"[^>]*class="btn"[^>]*\bhidden\b[^>]*>Help improve Lumr</button>', right)
+    assert not re.search(r'id="shareBtn"[^>]*class="[^"]*primary', right), "Export stays the one filled button"
+    assert right.index('id="feedbackBtn"') < right.index('id="shareBtn"') < right.index('id="exportBtn"')
+    assert top.count("btn primary") == 1
+    html = page()
+    assert "function renderShare(){ $('shareBtn').hidden = !(S && S.share && S.share.on); }" in html
+    assert "renderShare();" in html[html.index("renderTaste();"):][:80], "it follows every new state"
+
+
+def test_the_share_panel_is_a_modal_with_the_asked_for_words_and_controls():
+    dialog = re.search(r'<dialog\b[^>]*id="share"[^>]*>(.*?)</dialog>', markup(), re.S)
+    assert dialog and re.search(r'<dialog\b[^>]*aria-labelledby="h-share"', markup())
+    inside = dialog.group(1)
+    assert '<h2 id="h-share">Send what you changed</h2>' in inside
+    assert SHARE_PARAGRAPH in inside
+    assert inside.index("<h2") < inside.index(SHARE_PARAGRAPH) < inside.index('id="shareLines"') < inside.index('id="shareShow"')
+    assert re.search(r'<button id="shareShow"[^>]*aria-expanded="false"[^>]*>Show exactly what\'s sent</button>', inside)
+    assert re.search(r'<pre id="shareJson"[^>]*\bhidden\b', inside), "the raw JSON waits behind the toggle"
+    buttons = re.findall(r'<button\b[^>]*id="(share(?:Cancel|Send))"[^>]*class="([^"]*)"[^>]*>(\w+)</button>', inside)
+    assert buttons == [("shareCancel", "btn", "Cancel"), ("shareSend", "btn primary", "Send")], "Cancel then Send, Send primary"
+    assert re.search(r'<p id="shareErr" role="alert" hidden>', inside)
+    assert re.search(r'<div id="shareDone" hidden>', inside)
+    assert "Sent. Thank you. If you ever want it deleted, send us this ID:" in inside
+    assert re.search(r'<button id="shareCopy"[^>]*>Copy</button>', inside)
+
+
+def test_the_share_panel_lists_each_line_with_a_remove_and_sends_only_what_was_previewed():
+    html = page()
+    body = html[html.index("/* ══ share"):html.index("/* ══ keyboard")]
+    assert "postJSON('api/share/preview', {})" in body
+    assert "postJSON('api/share/send', { send_id: share.send.send_id, removed:" in body
+    assert 'data-remove="' in body and ">Remove</button>" in body, "each line has a Remove"
+    assert "JSON.stringify(kept, null, 2)" in body and "records.filter((_, i) => !share.removed.has(i))" in body, \
+        "the raw JSON is what remains"
+    assert "d.showModal()" in body
+    assert "keydown" not in body, "Esc is the dialog's own"
+    assert "fetch(" not in body and "XMLHttpRequest" not in body and "sendBeacon" not in body, "the page itself never calls the internet"
+    caught = body[body.index("}catch(err){\n    shareBusy(false);"):]
+    assert caught.index("shareError(err.message)") < caught.index("return;"), "an error shows its plain message"
+    assert "shareDone" in body and "navigator.clipboard.writeText(id)" in body
+
+
+def test_the_share_words_read_plainly():
+    said = ["Help improve Lumr", "Send what you changed", SHARE_PARAGRAPH, "Show exactly what's sent", "Remove", "Send", "Cancel",
+            "Sent. Thank you. If you ever want it deleted, send us this ID:", "Copy", "Copied", "Getting it ready",
+            "Nothing to send.", "Could not copy. The ID is on the page.", "ID copied.",
+            "Send the shape of what you changed, after you've seen it"]
+    for line in said:
+        assert not banned_in(line) and not decimal_times_in(line) and "—" not in line, line
+        assert not WORDS_GONE.search(line) and not re.search(r"\bedits\b", line), line
+    screen = words_on_screen()
+    assert "Send what you changed" in screen and SHARE_PARAGRAPH in " ".join(screen.split())
+    assert not banned_in(screen)
 
 
 def test_what_the_creator_asked_to_remove_is_gone():
@@ -1395,8 +1598,10 @@ def test_the_words_she_never_has_to_learn_are_not_on_screen():
     sentences = [s for s in said if " " in s.strip() and "<" not in s and re.search(r"[a-z]{3}", s)]
     jargon = {s: banned_in(s) for s in sentences if banned_in(s)}
     assert not jargon, f"editor jargon a script can put on screen: {jargon}"
-    # the approved words: a count ("11 edits"), the legend, and the finished length in the top line
-    approved = (" edits", " after edits")
+    # the approved words: a count ("11 edits"), the legend, the finished length in the top line, and the
+    # question before she forgets what Lumr learned, which says her edits stay
+    approved = (" edits", " after edits",
+                "Forget what Lumr learned from your changes? Your videos and edits stay as they are.")
     elsewhere = [s for s in sentences if re.search(r"\bedits\b", s) and s not in approved]
     assert not elsewhere, f"'edits' shows only where she approved it: {elsewhere}"
 

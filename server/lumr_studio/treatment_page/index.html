@@ -126,6 +126,52 @@ h2 .count .mine{color:var(--user)}
 #exportText{min-width:0; max-width:min(340px, 38vw); line-height:1.3; overflow-wrap:anywhere; text-wrap:pretty}
 #exportNote[data-warn="true"] #exportText{color:var(--red-soft)}
 
+#feedbackThanks{font-size:12px; color:var(--text2); white-space:nowrap}
+#feedbackBtn, #shareBtn{min-height:32px; padding:4px 14px}
+
+/* the feedback form: a modal, so the page behind it waits */
+#feedback{
+  width:min(480px, calc(100vw - 32px)); max-height:calc(100vh - 32px); overflow-y:auto; padding:var(--s5);
+  border:1px solid var(--line2); border-radius:8px; background:var(--ink2); color:var(--text);
+  box-shadow:0 12px 32px rgba(0,0,0,.5);
+}
+#feedback::backdrop{background:rgba(0,0,0,.6)}
+#feedback h2{font-size:15px; margin-bottom:var(--s3)}
+#feedback label{display:block; margin-top:var(--s3); margin-bottom:var(--s1); font-size:12px; color:var(--text)}
+#feedback h2 + label{margin-top:0}
+#feedback .opt{color:var(--text2)}
+#feedback textarea, #feedback input{
+  display:block; width:100%; padding:8px 10px; border:1px solid var(--line2); border-radius:var(--r);
+  background:var(--ink3); color:var(--text); font:inherit; font-size:13px;
+}
+#feedback textarea{min-height:120px; resize:vertical}
+#feedback textarea:focus-visible, #feedback input:focus-visible{outline-offset:0; border-radius:var(--r)}
+#feedback .hint{margin-top:var(--s1); font-size:12px; color:var(--text2)}
+#feedback .note{margin-top:var(--s4); font-size:12px; color:var(--text2); text-wrap:pretty}
+#fbErr{margin-top:var(--s3); font-size:12px; color:var(--red-soft)}
+.modalacts{display:flex; justify-content:flex-end; gap:var(--s2); margin-top:var(--s4)}
+
+/* Help improve Lumr: a modal that shows exactly what would be sent, line by line, before anything is */
+#share{
+  width:min(520px, calc(100vw - 32px)); max-height:calc(100vh - 32px); overflow-y:auto; padding:var(--s5);
+  border:1px solid var(--line2); border-radius:8px; background:var(--ink2); color:var(--text);
+  box-shadow:0 12px 32px rgba(0,0,0,.5);
+}
+#share::backdrop{background:rgba(0,0,0,.6)}
+#share h2{font-size:15px; margin-bottom:var(--s3)}
+#share .note{font-size:12px; color:var(--text2); text-wrap:pretty}
+#shareLines{list-style:none; margin:var(--s3) 0; max-height:min(280px, 40vh); overflow-y:auto; border:1px solid var(--line); border-radius:var(--r)}
+#shareLines li{display:flex; align-items:center; gap:var(--s2); padding:4px 4px 4px var(--s3); font-size:13px}
+#shareLines li + li{border-top:1px solid var(--line)}
+#shareLines li span{flex:1; min-width:0; text-wrap:pretty}
+#shareJson{
+  margin-top:var(--s2); max-height:min(220px, 30vh); overflow:auto; padding:var(--s2) var(--s3); border:1px solid var(--line);
+  border-radius:var(--r); background:var(--ink3); color:var(--text2); font:11px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space:pre;
+}
+#shareErr{margin-top:var(--s3); font-size:12px; color:var(--red-soft)}
+#shareId{display:block; margin-top:var(--s2); padding:var(--s2) var(--s3); border:1px solid var(--line); border-radius:var(--r);
+  background:var(--ink3); font:13px ui-monospace, Menlo, Consolas, monospace; user-select:all; overflow-wrap:anywhere}
+
 #errbar{
   grid-column:1 / -1;   /* across both columns, so an error never pushes the video out of its place */
   display:flex; align-items:center; gap:var(--s3); padding:8px var(--s5);
@@ -284,11 +330,14 @@ h2 .count .mine{color:var(--user)}
 .cutacts{display:flex; align-items:center; gap:var(--s2); margin-top:var(--s2); flex-wrap:wrap}
 .cuterr{margin-top:6px; font-size:12px; color:var(--red-soft)}
 .cut .btn.hear[aria-pressed="true"]{border-color:var(--gold); color:var(--gold)}
+.rateacts{display:flex; align-items:center; gap:var(--s2); margin-top:var(--s2)}
+.rateacts .seg button[aria-pressed="true"]{color:var(--text)}
 .cut[aria-busy="true"] .seg{opacity:.6; cursor:progress}
 .cut[aria-busy="true"] .cuthead .st{color:var(--text)}
 
 .usualrow{display:flex; align-items:center; gap:var(--s3); flex-wrap:wrap; margin-top:var(--s3)}
 #usualNote{font-size:12px; color:var(--text2)}
+.tasteline{display:flex; align-items:center; gap:var(--s2); flex-wrap:wrap; margin-top:var(--s2); font-size:12px; color:var(--text2)}
 .empty{font-size:12px; color:var(--text2); margin-top:var(--s2); text-wrap:pretty}
 
 /* ── right: the preview ──────────────────────────────────────────
@@ -530,6 +579,9 @@ h2 .count .mine{color:var(--user)}
     <div class="topright">
       <span id="exportNote" hidden><span id="exportText"></span><button id="copyPath" class="link" type="button" hidden>Copy path</button></span>
       <button id="shortcutsBtn" class="helpbtn" type="button" popovertarget="shortcuts" aria-controls="shortcuts" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+      <span id="feedbackThanks" role="status"></span>
+      <button id="feedbackBtn" class="btn" type="button" aria-haspopup="dialog" title="Tell the Lumr Studio team what's working and what isn't">Send feedback</button>
+      <button id="shareBtn" class="btn" type="button" aria-haspopup="dialog" hidden title="Send the shape of what you changed, after you've seen it">Help improve Lumr</button>
       <button id="exportBtn" class="btn primary" type="button" title="Make the finished video file">Export video</button>
     </div>
   </header>
@@ -557,6 +609,7 @@ h2 .count .mine{color:var(--user)}
           <button id="usualBtn" class="btn" type="button" hidden title="New videos start with this pace and these switches">Make this my usual</button>
           <span id="usualNote" role="status"></span>
         </div>
+        <p class="tasteline" id="tasteLine" hidden><span id="tasteText"></span></p>
       </section>
 
       <section aria-labelledby="h-cuts">
@@ -659,6 +712,51 @@ h2 .count .mine{color:var(--user)}
     <li><span class="mark kept" aria-hidden="true">word</span>kept by you</li>
   </ul>
 </div>
+<dialog id="feedback" aria-labelledby="h-feedback">
+  <form id="feedbackForm" method="dialog" novalidate>
+    <h2 id="h-feedback">Send feedback</h2>
+    <label for="fbMessage">What's on your mind?</label>
+    <textarea id="fbMessage" name="message" rows="6" maxlength="5000" required aria-required="true"></textarea>
+    <div id="fbWho">
+      <label for="fbName">Name <span class="opt">(optional)</span></label>
+      <input id="fbName" name="name" type="text" maxlength="100" autocomplete="name">
+      <label for="fbEmail">Email <span class="opt">(optional)</span></label>
+      <input id="fbEmail" name="email" type="email" maxlength="200" autocomplete="email" aria-describedby="fbEmailHint">
+      <p class="hint" id="fbEmailHint">Only if you'd like a reply</p>
+    </div>
+    <p class="note" id="fbNote">Sent privately to the Lumr Studio team with the plugin version. Please don't paste anything you'd rather keep private.</p>
+    <p id="fbErr" role="alert" hidden></p>
+    <div class="modalacts">
+      <button id="fbCancel" class="btn" type="button">Cancel</button>
+      <button id="fbSubmit" class="btn primary" type="submit">Submit</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="share" aria-labelledby="h-share">
+  <div id="sharePanel">
+    <h2 id="h-share">Send what you changed</h2>
+    <p class="note">This sends the shape of your changes, like cut lengths, pauses and what you put back. It never sends your words or your video. Remove anything you'd rather keep.</p>
+    <p class="note" id="shareWait" role="status" hidden>Getting it ready</p>
+    <ul id="shareLines" aria-label="What would be sent"></ul>
+    <p class="note" id="shareNone" hidden>Nothing to send.</p>
+    <button id="shareShow" class="link" type="button" aria-expanded="false" aria-controls="shareJson">Show exactly what's sent</button>
+    <pre id="shareJson" tabindex="0" hidden></pre>
+    <p id="shareErr" role="alert" hidden></p>
+    <div class="modalacts">
+      <button id="shareCancel" class="btn" type="button">Cancel</button>
+      <button id="shareSend" class="btn primary" type="button">Send</button>
+    </div>
+  </div>
+  <div id="shareDone" hidden>
+    <h2 id="h-shared">Sent</h2>
+    <p class="note" id="shareThanks">Sent. Thank you. If you ever want it deleted, send us this ID:</p>
+    <code id="shareId"></code>
+    <div class="modalacts">
+      <button id="shareCopy" class="btn" type="button">Copy</button>
+      <button id="shareClose" class="btn primary" type="button">Done</button>
+    </div>
+  </div>
+</dialog>
 <div id="announce" class="sr-only" aria-live="polite"></div>
 
 <script id="core">
@@ -1701,6 +1799,13 @@ const Core = (function(){
       if(keep) throw new Error('This cut sits inside a part you flagged to keep (' + keep.clock + '). Remove that keep first.');
       setRow(r, body.state);
       s.undo = null;
+    } else if(path === 'api/rate'){
+      const r = s.rows.find(x => x.id === body.id);
+      if(r && r.by === 'you') throw new Error('That cut is one of yours. Only Claude’s cuts can be rated.');
+      if(!r) throw new Error('That cut is not in this edit any more. Reload the page.');
+      r.rating = body.rating;
+      if(body.rating === 'bad') setRow(r, 'put_back');
+      s.undo = null;
     } else if(path === 'api/cut/add'){
       /* exactly the words picked. One that touches a cut of hers joins it. The newer wins over a kept part, which gets shorter or splits. */
       const list = picked(), a = list[0], b = list[list.length - 1];
@@ -1810,7 +1915,7 @@ const FINE_OPEN_KEY = 'lumr-studio.fine-tune-open';   /* where the browser keeps
 const LABEL_GAP_PX = 6;                /* the names under the pace stops need this much room between them to all show */
 const PICK_BAR_GAP_PX = 6;             /* Cut and Keep sit this far from the words she picked */
 /* the changes that alter the edit, so an export already running holds the edit from before them */
-const EDIT_ROUTES = ['api/treatment', 'api/cut', 'api/cut/add', 'api/cut/remove', 'api/keep', 'api/keep/remove', 'api/undo'];
+const EDIT_ROUTES = ['api/treatment', 'api/cut', 'api/rate', 'api/cut/add', 'api/cut/remove', 'api/keep', 'api/keep/remove', 'api/undo'];
 const WORD_TIMES_ESTIMATED = 'The word times are estimates, so the harder paces find less to cut. Ask Claude to measure them.';
 const CANT_CUT = 'This page can’t cut words yet.';
 const CANT_BRING_BACK = 'This page can’t bring words back yet.';
@@ -1955,6 +2060,8 @@ function applyState(state, how){
   renderFine();
   renderTakeOut();
   renderUsual();
+  renderTaste();
+  renderShare();
   renderGroups();
   renderKeeps();
   renderBar();
@@ -2213,6 +2320,11 @@ function cutHTML(r){
     : '<div class="seg" role="group" aria-label="' + esc('Cut at ' + startClock) + '">' +
         '<button type="button" id="cut-' + esc(r.id) + '-kept_out" data-set="kept_out" aria-pressed="' + !out + '">Leave out</button>' +
         '<button type="button" id="cut-' + esc(r.id) + '-put_back" data-set="put_back" aria-pressed="' + out + '">Put back</button></div>';
+  /* only Claude's cuts are rated: the creator's own are hers */
+  const rate = mine ? '' :
+    '<div class="rateacts"><div class="seg rate" role="group" aria-label="' + esc('Rate the cut at ' + startClock) + '">' +
+      '<button type="button" id="cut-' + esc(r.id) + '-good" data-rate="good" aria-pressed="' + (r.rating === 'good') + '" title="Claude was right to cut this. Press again to clear.">Good cut</button>' +
+      '<button type="button" id="cut-' + esc(r.id) + '-bad" data-rate="bad" aria-pressed="' + (r.rating === 'bad') + '" title="This should not have been cut. It goes back in. Press again to clear.">Wrong cut</button></div></div>';
   return '<li class="cut" id="cut-' + esc(r.id) + '" data-id="' + esc(r.id) + '" data-state="' + esc(r.state) + '" data-by="' + (mine ? 'you' : 'claude') + '" aria-label="' + esc((mine ? 'Your cut at ' : 'Cut at ') + startClock) + '">' +
     '<div class="cuthead"><button type="button" class="timebtn" id="cut-' + esc(r.id) + '-go" data-go="' + r.start + '" title="Go to ' + startClock + '">' + esc(r.clock || startClock) + '</button>' +
       (mine ? '' : '<span class="len">' + C.length(r.seconds) + '</span>') + (flags.length ? lookMark(1) : '') +
@@ -2222,7 +2334,7 @@ function cutHTML(r){
     '<div class="cutacts">' +
       '<button type="button" class="btn hear" id="cut-' + esc(r.id) + '-hear" data-id="' + esc(r.id) + '" aria-pressed="false" title="Plays 2 seconds before and 2 after, skipping the cut">' +
         '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z" fill="currentColor"/></svg>Hear it cut</button>' + choice +
-    '</div><p class="cuterr" role="alert" hidden></p></li>';
+    '</div>' + rate + '<p class="cuterr" role="alert" hidden></p></li>';
 }
 $('groups').addEventListener('click', e => {
   const head = e.target.closest('.ghead');
@@ -2234,6 +2346,8 @@ $('groups').addEventListener('click', e => {
   if(e.target.closest('.hear')){ hearJoin(r); return; }
   const back = e.target.closest('[data-back]');
   if(back && r){ takeBack(r, back); return; }
+  const rate = e.target.closest('[data-rate]');
+  if(rate && r){ rateCut(r, rate.dataset.rate, li); return; }
   const set = e.target.closest('[data-set]');
   if(set && r && set.dataset.set !== r.state){
     const err = li.querySelector('.cuterr'); err.hidden = true;
@@ -2246,6 +2360,17 @@ $('groups').addEventListener('click', e => {
     }).then(ok => { if(ok) announce(set.dataset.set === 'put_back' ? 'Put back. Those words play now.' : 'Left out again.'); });
   }
 });
+/** Rate one of Claude's cuts. Pressing the rating she gave again clears it. A wrong cut goes back in, so the words play. */
+function rateCut(r, side, li){
+  const rating = r.rating === side ? null : side, id = r.id;
+  const err = li.querySelector('.cuterr'); err.hidden = true;
+  li.querySelectorAll('[data-rate]').forEach(b => b.setAttribute('aria-pressed', b.dataset.rate === rating));
+  li.setAttribute('aria-busy', 'true');
+  send('api/rate', { id, rating }, {
+    onError: msg => { const el = $('cut-' + id); if(el){ const x = el.querySelector('.cuterr'); x.textContent = msg; x.hidden = false; } },
+    revert: () => { const el = $('cut-' + id); if(!el) return; el.removeAttribute('aria-busy'); el.querySelectorAll('[data-rate]').forEach(b => b.setAttribute('aria-pressed', b.dataset.rate === r.rating)); },
+  }).then(ok => { if(ok) announce(rating === 'bad' ? 'Marked wrong. It is back in, so those words play now.' : rating === 'good' ? 'Marked good.' : 'Rating cleared.'); });
+}
 /** Take back one cut of her own, from its row. The keyboard goes to the next of her cuts, or to the words. */
 function takeBack(r, btn){
   if(btn.getAttribute('aria-busy') === 'true') return;
@@ -2295,6 +2420,16 @@ $('usualBtn').addEventListener('click', () => {
     setTimeout(() => setText('usualNote', ''), BRIEF_NOTE_MS);
   });
 });
+
+/* ── what Lumr learned from her other videos: one quiet line. Forgetting goes through Claude. ── */
+function renderTaste(){
+  const t = S.taste, n = t ? t.videos : 0;
+  $('tasteLine').hidden = !n;
+  if(n) setText('tasteText', 'Learning from your changes on ' + n + (n === 1 ? ' video' : ' videos') + '. Ask Claude to forget any of it.');
+}
+
+/* ── Help improve Lumr: a quiet button, there only when there is somewhere to send ── */
+function renderShare(){ $('shareBtn').hidden = !(S && S.share && S.share.on); }
 
 /* ── kept no matter what: a link under the words that opens the list ── */
 function renderKeeps(){
@@ -3173,10 +3308,167 @@ $('copyPath').addEventListener('click', async () => {
   setTimeout(() => setText('copyPath', 'Copy path'), COPIED_MS);
 });
 
+/* ══ feedback ═════════════════════════════════════════════════
+   A form in a modal. The page never calls the internet: Submit posts to this machine's server, which sends the
+   message to the Lumr Studio team. With no team server set up, Submit opens a GitHub issue, and the creator sends it there. */
+const FEEDBACK_ISSUES = 'https://github.com/AshleyxAdamson/lumr-studio/issues/new';
+const FEEDBACK_NOTE_DIRECT = "Sent privately to the Lumr Studio team with the plugin version. Please don't paste anything you'd rather keep private.";
+const FEEDBACK_NOTE_GITHUB = "This opens a public GitHub issue in your browser with your message filled in. It isn't posted until you submit it there.";
+const FEEDBACK_URL_MOST = 7000;         /* a longer address is one GitHub turns away */
+const feedbackDirect = () => !!(S && S.feedback && S.feedback.direct);
+function feedbackError(msg){ const p = $('fbErr'); p.textContent = msg || ''; p.hidden = !msg; }
+function feedbackBusy(on){
+  ['fbSubmit', 'fbCancel'].forEach(id => { $(id).disabled = on; });
+  if(on) $('fbSubmit').setAttribute('aria-busy', 'true'); else $('fbSubmit').removeAttribute('aria-busy');
+}
+function openFeedback(){
+  const d = $('feedback'), direct = feedbackDirect();
+  $('fbWho').hidden = !direct;
+  setText('fbNote', direct ? FEEDBACK_NOTE_DIRECT : FEEDBACK_NOTE_GITHUB);
+  feedbackError('');
+  if(!d.open){ if(d.showModal) d.showModal(); else d.setAttribute('open', ''); }
+  $('fbMessage').focus();
+}
+function closeFeedback(){
+  const d = $('feedback');
+  if(d.close) d.close(); else d.removeAttribute('open');
+}
+/** The GitHub issue with the message and the plugin version filled in, or null when it is too long for one. */
+function feedbackIssueUrl(message){
+  const version = S && S.version ? ' ' + S.version : '';
+  const url = FEEDBACK_ISSUES + '?title=' + encodeURIComponent('Feedback') + '&body=' + encodeURIComponent(message + '\n\nLumr Studio' + version);
+  return url.length > FEEDBACK_URL_MOST ? null : url;
+}
+function thanksForFeedback(){
+  setText('feedbackThanks', 'Thanks. We got it.');
+  announce('Thanks. We got it.');
+  setTimeout(() => setText('feedbackThanks', ''), BRIEF_NOTE_MS);
+}
+$('feedbackBtn').addEventListener('click', openFeedback);
+$('fbCancel').addEventListener('click', closeFeedback);
+$('feedbackForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const message = $('fbMessage').value.trim();
+  feedbackError('');
+  if(!message){ feedbackError('Write a few words first.'); $('fbMessage').focus(); return; }
+  if(!feedbackDirect()){
+    const url = feedbackIssueUrl(message);
+    if(!url){ feedbackError("That's too long for a GitHub issue. Shorten it a bit."); $('fbMessage').focus(); return; }
+    window.open(url, '_blank', 'noopener,noreferrer');
+    closeFeedback();
+    announce('GitHub is open in a new tab with your message filled in. It isn\'t posted until you submit it there.');
+    return;
+  }
+  feedbackBusy(true);
+  try{
+    await postJSON('api/feedback', { message, name: $('fbName').value.trim(), email: $('fbEmail').value.trim() });
+  }catch(err){
+    feedbackBusy(false);
+    feedbackError(err.message);   /* what she typed stays where it is */
+    return;
+  }
+  feedbackBusy(false);
+  ['fbMessage', 'fbName', 'fbEmail'].forEach(id => { $(id).value = ''; });
+  closeFeedback();
+  thanksForFeedback();
+});
+
+/* ══ share ═════════════════════════════════════════════════
+   "Help improve Lumr". The page asks this machine's server for a preview, shows each line with a Remove, and on Send
+   tells the server which lines to leave out. The server posts the preview it made; the page never calls the internet
+   and never builds the record itself. */
+const SHARE_MSG_DONE = 'Sent. Thank you. If you ever want it deleted, send us this ID:';
+const share = { send: null, lines: [], removed: new Set(), busy: false };
+function shareError(msg){ const p = $('shareErr'); p.textContent = msg || ''; p.hidden = !msg; }
+function shareBusy(on){
+  share.busy = on;
+  ['shareSend', 'shareCancel'].forEach(id => { $(id).disabled = on; });
+  if(on) $('shareSend').setAttribute('aria-busy', 'true'); else $('shareSend').removeAttribute('aria-busy');
+}
+/** What is left to send: the preview without the lines she removed. */
+function shareKept(){ return share.send ? Object.assign({}, share.send, { records: share.send.records.filter((_, i) => !share.removed.has(i)) }) : null; }
+function renderShareLines(){
+  const list = $('shareLines'), left = share.lines.map((line, i) => ({ line, i })).filter(x => !share.removed.has(x.i));
+  list.innerHTML = left.map(x => '<li><span>' + esc(x.line) + '</span><button type="button" class="btn quiet" data-remove="' + x.i +
+    '" aria-label="' + esc('Remove: ' + x.line) + '">Remove</button></li>').join('');
+  list.hidden = !left.length;
+  $('shareNone').hidden = !!left.length || !share.send;
+  $('shareSend').disabled = !left.length || share.busy;
+  const kept = shareKept();
+  $('shareJson').textContent = kept ? JSON.stringify(kept, null, 2) : '';
+}
+function showShareJson(on){
+  $('shareJson').hidden = !on;
+  $('shareShow').setAttribute('aria-expanded', on ? 'true' : 'false');
+}
+async function openShare(){
+  const d = $('share');
+  share.send = null; share.lines = []; share.removed = new Set();
+  $('sharePanel').hidden = false; $('shareDone').hidden = true;
+  shareError(''); showShareJson(false); renderShareLines();
+  $('shareWait').hidden = false; $('shareSend').disabled = true;
+  if(!d.open){ if(d.showModal) d.showModal(); else d.setAttribute('open', ''); }
+  $('shareCancel').focus();
+  try{
+    const got = await postJSON('api/share/preview', {});
+    share.send = got.send; share.lines = got.lines; share.removed = new Set();
+  }catch(err){
+    $('shareWait').hidden = true;
+    shareError(err.message);
+    return;
+  }
+  $('shareWait').hidden = true;
+  renderShareLines();
+}
+function closeShare(){
+  const d = $('share');
+  if(d.close) d.close(); else d.removeAttribute('open');
+}
+$('shareBtn').addEventListener('click', openShare);
+$('shareCancel').addEventListener('click', closeShare);
+$('shareClose').addEventListener('click', closeShare);
+$('shareShow').addEventListener('click', () => showShareJson($('shareJson').hidden));
+$('shareLines').addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('button[data-remove]');
+  if(!b || share.busy) return;
+  const next = b.closest('li').nextElementSibling || b.closest('li').previousElementSibling;
+  share.removed.add(+b.dataset.remove);
+  renderShareLines();
+  const again = next && next.querySelector('button');
+  (again || $('shareCancel')).focus();
+});
+$('shareSend').addEventListener('click', async () => {
+  if(!share.send || share.busy) return;
+  shareError(''); shareBusy(true);
+  let done;
+  try{
+    done = await postJSON('api/share/send', { send_id: share.send.send_id, removed: Array.from(share.removed).sort((a, b) => a - b) });
+  }catch(err){
+    shareBusy(false);
+    shareError(err.message);
+    renderShareLines();
+    return;
+  }
+  shareBusy(false);
+  setText('shareThanks', SHARE_MSG_DONE);
+  setText('shareId', done.send_id);
+  $('sharePanel').hidden = true; $('shareDone').hidden = false;
+  announce(SHARE_MSG_DONE + ' ' + done.send_id);
+  $('shareCopy').focus();
+});
+$('shareCopy').addEventListener('click', async () => {
+  const id = $('shareId').textContent;
+  let ok = true;
+  try{ await navigator.clipboard.writeText(id); }catch(err){ ok = false; }
+  if(!ok){ announce('Could not copy. The ID is on the page.'); return; }
+  setText('shareCopy', 'Copied'); announce('ID copied.');
+  setTimeout(() => setText('shareCopy', 'Copy'), COPIED_MS);
+});
+
 /* ══ keyboard ═════════════════════════════════════════════════ */
 document.addEventListener('keydown', e => {
   const tgt = e.target;
-  if(tgt.closest && tgt.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if(tgt.closest && tgt.closest('input, textarea, select, [contenteditable="true"], dialog[open]')) return;   /* the feedback form keeps its own keys, Space and Esc included */
   /* the undo every app has: Command or Control with Z. It is left alone when there is nothing of hers to undo. */
   if((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && S && S.can_undo){ e.preventDefault(); undoLast(); return; }
   if(e.metaKey || e.ctrlKey || e.altKey) return;
@@ -3207,7 +3499,7 @@ document.addEventListener('keydown', e => {
 /* a focused button would also take Space as a press on key-up; Space belongs to play */
 document.addEventListener('keyup', e => {
   if(e.key !== ' ' || e.metaKey || e.ctrlKey || e.altKey) return;
-  if(e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if(e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"], dialog[open]')) return;
   e.preventDefault();
 }, true);
 

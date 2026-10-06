@@ -4,7 +4,7 @@ The details behind the [README](README.md): the review page, what you need, the 
 
 ## The review page and tools
 
-The plugin gives Claude 12 tools and two skills, `tight-cut` and `ui-feedback`. `TOOLS.md` is the contract for each tool. None of them deletes a file of yours, and none uploads your video.
+The plugin gives Claude 13 tools and two skills, `tight-cut` and `ui-feedback`. `TOOLS.md` is the contract for each tool. None of them deletes a file of yours, and none uploads your video.
 
 - `tight-cut` reads a whole recording, proposes a cut list with plain-language reasons, and only saves or renders once you say go.
 - `ui-feedback` reads a screen recording where you talk through your feedback, and turns it into numbered notes. Each note has a time and screenshots from that moment (`frames`). It saves a notes file or changes your code only once you say yes.
@@ -111,7 +111,7 @@ Everything runs on your Mac. The one exception is Claude, which runs wherever yo
 | The server | Claude Code starts it over stdio with `sh ${CLAUDE_PLUGIN_ROOT}/hooks/start-server.sh ${CLAUDE_PLUGIN_ROOT} ${CLAUDE_PLUGIN_DATA}` (from `.mcp.json`). That short script sets `VIRTUAL_ENV` to the plugin's environment in the data folder, then runs `uv run --active --locked --project <plugin folder>/server lumr-studio-server`. It's the only long-running process. |
 | The speech model | `python -m lumr_studio.speech <video>`, in a process of its own, once per video, reading the downloaded model from disk with Hugging Face set offline. |
 | Cutting and rendering | `ffmpeg` and `ffprobe`, from your PATH. |
-| The review page | A small web server on `127.0.0.1`, on a port the operating system picks, with a private token in the address. The plugin opens it in your default browser. It makes no outside requests. |
+| The review page | A small web server on `127.0.0.1`, on a port the operating system picks, with a private token in the address. The plugin opens it in your default browser. It makes no outside requests. The Send feedback button sends a message only when you press Submit, and Help improve Lumr sends the shape of your changes only when you press Send. Your Mac's local server sends both. |
 | The first-run check | `sh "${CLAUDE_PLUGIN_ROOT}/hooks/doctor.sh"`, at the start of each session. It reads your PATH and prints. |
 
 The plugin reaches the network on first use only. It fetches these. Nothing you own goes out in any of them.
@@ -132,6 +132,10 @@ What Claude sees is the conversation. The plugin adds to it in three ways.
 
 The plugin never uploads your video or audio file.
 
+## Helping improve Lumr
+
+The review page shows a small Help improve Lumr button. It opens a list of what would be sent: how long each cut was, what kind it was, and what you did to it, such as putting it back or marking it wrong. It never sends your words or your video. Remove any line you'd rather keep, press "Show exactly what's sent" to see the data itself, and press Send only when you're happy. Nothing goes before that. After a send, you get an ID to quote if you ever want it deleted, and `shares.jsonl` in the video's project folder keeps it. `PRIVACY.md` has the detail.
+
 ## What is saved, and where
 
 Each video gets one project folder at `~/Lumr/studio/projects/<video name>-<id>/`. The `~/Lumr` part follows `LUMR_HOME`, or the folder named in `~/.config/lumr/home.txt` if that file exists. `TOOLS.md` lists every file in the project folder. The main ones:
@@ -144,11 +148,13 @@ Each video gets one project folder at `~/Lumr/studio/projects/<video name>-<id>/
 | `exports/` | the videos and previews you render |
 | `frames/` | the screenshots `frames` takes of your video |
 
+Lumr learns from the cuts you put back, the cuts you mark "Good cut" or "Wrong cut" on the review page, and the words you cut or bring back. It works that out from your saved edits, on your Mac, and keeps only a note in `taste.json` of what you asked it to forget. To forget something, ask Claude: one word, one kind of cut, or everything. Your videos and edits don't change.
+
 The transcript itself stays beside your video, as `<video>.words.json`. It's the only file the plugin puts in your video's folder. Measured silences are cached under `~/Lumr/media_cache/`. The Python environment lives in the plugin's data folder, and Claude Code deletes it when you uninstall the plugin. The models stay in the shared caches (`~/.cache/huggingface` and `~/.cache/torch`) and survive an uninstall.
 
 ## Privacy
 
-Lumr Studio collects nothing. It has no server, no accounts and no telemetry, and the author never receives your files, your transcript or a usage count.
+Lumr Studio collects nothing. It has no server, no accounts and no telemetry, and the author never receives your files, your transcript or a usage count. The two exceptions are feedback you write in the review page's Send feedback form and submit, and the shape of your changes if you press Send in Help improve Lumr. `PRIVACY.md` says what each sends.
 
 - On your Mac. Your video, audio, transcript, word times, edits and exports. The plugin reads a video only when you name it to Claude, and only on your own Mac. It never browses your folders, and it never uploads your video or audio.
 - What Claude sees. The transcript text, cut lists with reasons, and the results of each tool. When Claude checks a join with `look`, a few still frames go with it, and `frames` sends the screenshots Claude asks for. In a screen recording that includes anything visible on screen. That goes wherever your Claude Code sends its requests.

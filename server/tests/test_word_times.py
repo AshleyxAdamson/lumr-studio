@@ -869,3 +869,16 @@ def test_an_edit_is_loaded_with_its_spans_on_the_word_times_the_project_has(vide
     by_hand["word_times_made_as"] = word_times.ALIGNED_VERSION
     project.edit_path.write_text(json.dumps(by_hand))
     assert edits_module.load_edit(project, DURATION) == by_hand
+
+
+def test_a_rating_moves_with_its_words_like_her_other_marks(video):
+    project = short_word.on_video(video)
+    rating = {"id": "r1.94-1.94", "row": "c1.94-1.94", "rating": "good", "source": "claude", "kind": "other",
+              "start": 1.941, "end": 1.942, "reason": "why"}
+    project.edit_path.write_text(json.dumps({
+        "version": 1, "video": str(video), "duration": DURATION, "word_times": MEASURED, "cuts": [],
+        "ratings": [rating],
+    }))
+    (loaded,) = edits_module.load_edit(project, DURATION)["ratings"]
+    assert (loaded["id"], loaded["start"], loaded["end"]) == ("r1.93-2.16", 1.932, 2.162)
+    assert loaded["rating"] == "good" and loaded["reason"] == "why"

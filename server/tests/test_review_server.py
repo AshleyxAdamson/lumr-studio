@@ -3,6 +3,7 @@
 import base64
 import http.client
 import json
+import shutil
 import urllib.error
 import urllib.request
 
@@ -114,7 +115,9 @@ def test_page_is_served_with_a_policy_that_blocks_outside_requests(base):
     csp = headers["Content-Security-Policy"]
     assert "default-src 'none'" in csp and "connect-src 'self'" in csp
     page = body.decode()
-    assert "http://" not in page and "https://" not in page
+    assert "http://" not in page
+    # The only address in the page is the GitHub issue that Send feedback opens in a new tab on a click.
+    assert page.count("https://") == 1 and "https://github.com/AshleyxAdamson/lumr-studio/issues/new" in page
     assert "New York" not in page
     assert '<video id="vid" src="video"' in page
 
@@ -575,6 +578,33 @@ def test_samples_and_usual_over_http(treated):
     status, _h, body = post_json(treated + "api/usual", {})
     assert status == 200 and state_of(body)["usual"]["pace"] == "natural"
     assert json.loads((projects_root() / treatment.USUAL_FILE).read_text())["pace"] == "natural"
+
+
+def test_rating_a_cut_over_http(treated, video):
+    state = state_of(call(treated + "api/treatment")[2])
+    row = next(r for r in state["rows"] if r["by"] == "claude")
+    assert row["rating"] is None
+    status, _h, body = post_json(treated + "api/rate", {"id": row["id"], "rating": "good"})
+    got = next(r for r in state_of(body)["rows"] if r["id"] == row["id"])
+    assert status == 200 and got["rating"] == "good" and got["state"] == row["state"]
+    status, _h, body = post_json(treated + "api/rate", {"id": row["id"], "rating": "bad"})
+    got = next(r for r in state_of(body)["rows"] if r["id"] == row["id"])
+    assert status == 200 and got["rating"] == "bad" and got["state"] == "put_back"
+    saved = json.loads(open_project(str(video)).edit_path.read_text())["ratings"]
+    assert [(r["row"], r["rating"], r["source"]) for r in saved] == [(row["id"], "bad", "claude")]
+    status, _h, body = post_json(treated + "api/rate", {"id": row["id"], "rating": None})
+    got = next(r for r in state_of(body)["rows"] if r["id"] == row["id"])
+    assert status == 200 and got["rating"] is None and got["state"] == "put_back"
+    status, _h, raw = post_json(treated + "api/rate", {"id": row["id"], "rating": "meh"})
+    assert status == 400 and "rating must be" in error_of(raw)
+    status, _h, raw = post_json(treated + "api/rate", {"id": "c1.00-2.00", "rating": "good"})
+    assert status == 400 and "not one of Claude's cuts" in error_of(raw)
+
+
+def test_the_page_has_no_route_to_forget_what_was_learned(treated):
+    assert "api/taste/forget" not in review_server.TREATMENT_ACTIONS
+    status, _h, _b = post_json(treated + "api/taste/forget", {})
+    assert status == 404
 
 
 @pytest.mark.parametrize("route", sorted(review_server.TREATMENT_ACTIONS))

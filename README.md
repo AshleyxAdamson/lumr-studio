@@ -22,7 +22,7 @@ Lumr Studio is built around the join, where one kept word lands next to the next
 - **Never cuts inside a word.** A second model measures each word against your voice instead of trusting the transcript's guess, and any cut edge that would land in a word gets moved out.
 - **Checks every join.** Each edit comes back with a read of every join, from clipped laughs to unfinished sentences to gaps that are too tight. Claude fixes the flagged ones before you see the plan, and can look at any join as a picture of the frames, the sound wave and the words.
 - **No clicks.** Cuts land on the exact sample, with a 20 ms fade either side.
-- **Private and yours.** Nothing uploads, nothing renders until you say go, and there's no account or telemetry.
+- **Private and yours.** Nothing leaves your Mac unless you press Send, and you see exactly what's sent first. It never sends your words or your video.
 - **Free, with nothing else to pay for.** Most tools like this charge a monthly subscription, and some add per-minute fees or need a paid transcription API. Lumr Studio's transcription and word timing run on your Mac, so there's no subscription, no usage bill and no API key beyond your Claude Code.
 
 On a 21:47 test take, measured word times took out more than twice as much at every pace (3:26 vs 1:25 at Standard) and cut 94 of 112 "likes" cleanly, against 28 without them.
@@ -33,6 +33,7 @@ On a 21:47 test take, measured word times took out more than twice as much at ev
 - **Switches** for long pauses, filler words, stutters and filler likes.
 - **A review page** in your browser. Double-click any word to cut it or bring it back, hear any cut, flip between the original and the edit, and export.
 - **Cuts you can tell apart.** Dim for the pace, red for Claude, teal for you.
+- **Learns from your fixes.** Every cut you put back or mark good or wrong, and every word you bring back, teaches it, and your next video starts from what you taught it. It stays on your Mac.
 - **UI feedback sessions.** Record your screen while you scroll through an app or a website and talk through what you'd change. Claude turns it into numbered notes, each with a time and screenshots of what was on screen. It shows them in chat, saves them to a file if you say yes, and can work through the fixes in your code. Nothing is cut, and the video isn't changed.
 - **Extras**, off by default: a publish kit (titles, description, chapters, tags) and overlays of your own photos and clips.
 
@@ -77,8 +78,10 @@ It runs in Claude Code, and in Cowork when the session runs on your Mac. Chat on
 - **On your Mac:** a local MCP server, `ffmpeg` and `ffprobe` for cutting and rendering, the two models, and the review page on `127.0.0.1`. A check at the start of each session looks for `uv` and `ffmpeg`, and the first time it builds the plugin's Python environment.
 - **Downloads, once:** the locked Python packages from PyPI through `uv`, plus a Python build from `github.com/astral-sh/python-build-standalone` if your Mac has none. Parakeet from `huggingface.co` and wav2vec 2.0 from `download.pytorch.org`, only after you say yes. Each model file is checked against a pinned size and sha256.
 - **What leaves your Mac:** nothing of yours, except what Claude reads in the conversation. That's the transcript text, the cut lists, a small picture of a join when Claude checks one, and the screenshots Claude takes of your video with `frames`. Your video and audio never upload.
+- **Feedback, only when you press Submit:** the review page's Send feedback button sends your message to the Lumr Studio team's server (`feedback.lumr-studio.workers.dev`), and your name and email only if you enter them. The page itself never calls the internet; your Mac's local server makes the one request.
+- **Help improve Lumr, only when you press Send:** the review page's Help improve Lumr button shows a list of what would be sent, and you can remove any line. Send then posts the shape of your changes to the same server (`feedback.lumr-studio.workers.dev`): how long each cut was, what kind, what you did to it and what the words beside it sound like. It never holds your words or your video. Nothing is sent until you press Send. `PRIVACY.md` has the detail.
 
-**Privacy:** Lumr Studio collects nothing. Your video, transcript and edits stay on your Mac. [Privacy policy](https://github.com/AshleyxAdamson/lumr-studio/blob/main/PRIVACY.md).
+**Privacy:** Your video, transcript and edits stay on your Mac. Nothing leaves it unless you press Send or Submit, and you see what's sent first. [Privacy policy](https://github.com/AshleyxAdamson/lumr-studio/blob/main/PRIVACY.md).
 
 PolyForm Noncommercial 1.0.0. You can sell the videos you make with it. You can't resell the tool.
 

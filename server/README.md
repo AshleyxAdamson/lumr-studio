@@ -71,8 +71,8 @@ Environment:
   `<LUMR_HOME>/studio/projects`, with `LUMR_HOME` resolved the way ClipForge
   resolves it (`engine/paths.py`), at call time.
 - `LUMR_STUDIO_EXTRAS` is a comma list of extras to switch on, `publish_kit`
-  and `overlays`. Empty by default: the server lists 11 tools. With both it
-  lists 15. An unknown name stops the server at start. Their skills come back
+  and `overlays`. Empty by default: the server lists 12 tools. With both it
+  lists 16. An unknown name stops the server at start. Their skills come back
   with an entry in `plugin.json` (`../GUIDE.md`, "Turning the extras on").
 - `ffmpeg` and `ffprobe` must be on `PATH`. There is no `hammy` command.
 - Transcribing runs `python -m lumr_studio.speech` in a process of its own,
@@ -134,7 +134,7 @@ by `../hooks/hooks.json` at session start) against stub programs on a trimmed
 | Module | Job |
 |---|---|
 | `server.py` | MCP wiring only: tool names, annotations, input models, error mapping. Registers a tool only when `offering.py` offers it |
-| `offering.py` | The one list of tool names: the 11 editor tools, and the extras (publish kit, overlays) behind `LUMR_STUDIO_EXTRAS` |
+| `offering.py` | The one list of tool names: the 12 editor tools, and the extras (publish kit, overlays) behind `LUMR_STUDIO_EXTRAS` |
 | `tools.py` | One plain function per tool; what the tests call |
 | `project.py` | Project folder, atomic writes, receipts, new export names |
 | `transcript.py` | Load and validate `words.json`; pack it into phrase lines |

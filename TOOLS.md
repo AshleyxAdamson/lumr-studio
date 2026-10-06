@@ -44,9 +44,9 @@ reads. To the creator, name what goes: long pauses, filler words, stutters.
 
 ## What the plugin offers
 
-By default the server lists 12 tools: `transcribe`, `read_transcript`,
+By default the server lists 13 tools: `transcribe`, `read_transcript`,
 `analyze_take`, `find_words`, `get_edit`, `set_edit`, `preview`, `render`,
-`look`, `frames`, `review` and `job_status`. Four more are extras, off unless the
+`look`, `frames`, `review`, `job_status` and `forget_taste`. Four more are extras, off unless the
 environment variable `LUMR_STUDIO_EXTRAS` names them, as a comma list:
 
 | Extra | Adds | Skill that goes with it |
@@ -54,7 +54,7 @@ environment variable `LUMR_STUDIO_EXTRAS` names them, as a comma list:
 | `publish_kit` | `chapter_times`, `save_publish_kit` | `publish-kit` |
 | `overlays` | `set_overlays`, `get_overlays` | `add-visuals` |
 
-With `LUMR_STUDIO_EXTRAS=publish_kit,overlays` the server lists all 16. A name
+With `LUMR_STUDIO_EXTRAS=publish_kit,overlays` the server lists all 17. A name
 that is not an extra stops the server at start. An extra's skill folder sits
 in `extras/skills/`, outside the folder Claude Code scans, and comes back with
 an entry in `plugin.json` (`GUIDE.md`, "Turning the extras on"). The overlay
@@ -67,7 +67,7 @@ extras too, for when they are on.
 ## Rules for every tool
 
 - Every tool takes `video_path`, an absolute path to the source video, except
-  `job_status`.
+  `job_status` and `forget_taste`.
 - The source video is never modified or overwritten.
 - Results are short. A tool returns a summary and file paths. It never returns
   a whole transcript.
@@ -97,6 +97,8 @@ One per video, created on first use:
   review.json        the creator's decisions from the round 2 review page, if any
   sounds.json        which sounds in the transcript are likely laughs
   receipts.jsonl     one line per completed step
+  shares.jsonl       one line per send the creator made with Help improve Lumr:
+                     {send_id, sent_at (a date), records}. Nothing else.
   exports/           rendered videos and previews
   work/              the edit's encode while overlays are drawn over it; emptied after
   looks/             pictures of joins made by `look`, and the stills `set_overlays` draws
@@ -105,11 +107,48 @@ One per video, created on first use:
   publish-kit/       title, description, chapters, tags
 ```
 
+`edit.json` also holds `ratings`, the creator's "Good cut" and "Wrong cut" marks:
+a list of `{id: "r<start>-<end>", row, rating: "good" | "bad", source:
+"claude" | "pick", kind, start, end, reason}`. `row` is the page's row id, and
+`kind` and `reason` are saved at rating time, so nothing has to be matched
+later. Like `keep` and `creator_cuts`, ratings outlive every `set_edit` and
+move with their words when the word times change. The key is missing when
+nothing is rated.
+
 `overlays.json` sits beside `edit.json` and is independent of it. `set_edit`
 never touches it, and `set_overlays` never touches the cuts.
 
 The projects root also holds `usual.json`, the creator's usual pace and
 switches, one file for every video.
+
+It also holds `taste.json`, what the creator asked Lumr to forget, and nothing
+else. The profile itself is never stored. `get_edit` works it out from the
+other projects' `edit.json` files each time, leaving out what `taste.json`
+lists:
+
+```
+{"version": 2,
+ "forgotten": {"<project folder name>": {"keep": [ids], "creator_cuts": [ids], "ratings": [ids],
+                                          "treatment": {...} or null}},
+ "ignored_words": ["so"],
+ "ignored_kinds": ["repeat"]}
+```
+
+`forgotten` is a snapshot, taken when the creator forgets everything, of the
+ids of each project's changes and of its treatment. A change with one of those
+ids is left out, and so are the project's pace, switches and slider values
+while its treatment is still the snapshot. A change made later has a new id and
+counts again, even on an old video. A second forget adds to the first.
+`ignored_words` and `ignored_kinds` are lower-case words and kinds of cut
+(`repeat`, `false_start`, `off_topic`, `other`, `likes`). A file that is
+missing or can't be read forgets nothing.
+
+`LUMR_SHARE_URL` is the address of the Lumr Studio team's server, for the review
+page's Send feedback form and its Help improve Lumr button. Unset, it is
+`share.DEFAULT_SHARE_URL`, `https://feedback.lumr-studio.workers.dev`; a trailing
+slash is stripped. Set to an empty value, sharing is off: the feedback form opens
+a public GitHub issue instead, and the page shows nothing about Help improve Lumr. See `POST api/feedback` and `POST
+api/share/preview` under `review`.
 
 `LUMR_HOME` resolves the way ClipForge resolves it. The environment variable
 `LUMR_STUDIO_PROJECTS_DIR` overrides the projects root. Tests must set it.
@@ -406,6 +445,7 @@ When the creator changed something on the page, the result carries `creator`:
  brought_back: [{clock, start, end, text}],
  cuts: [{clock, start, end, text}],
  cut_words: [["like", 11], ["so", 3], ["you know", 2]],
+ rated: {good: [{clock, start, end, reason, kind}], bad: [{clock, start, end, reason, kind}]},
  fine: {gap_length: 0.35, rhythm: 3.5, speech_kept_between_cuts: 0.85, note}}
 ```
 
@@ -420,6 +460,7 @@ Each key is there only when it applies.
 | `brought_back` | brought back exactly these words, one by one, from a cut of Claude's or an automatic trim |
 | `cuts` | cut these words by hand |
 | `cut_words` | what her cuts say, counted, most first. A cut of one or two words counts as what it says; a longer cut counts each word. |
+| `rated` | marked some of Claude's cuts with "Good cut" or "Wrong cut" on the page. `good` and `bad` each list the cuts with Claude's `reason` and `kind`. A wrong cut was also put back, so it is in `put_back` too. Never propose a `bad` cut again on this video. Ratings outlive every `set_edit`. |
 
 Read it before proposing anything new: every entry is the creator saying what
 they want. Once Claude calls `set_edit` with their pace and switches, those
@@ -429,6 +470,40 @@ Her cuts are settled. Never send one as a cut of Claude's, never offer to
 undo one, and never count its time as Claude's saving. Learn from
 `cut_words`: eleven "like"s cut by hand says she wants fewer of them, so say
 what you noticed and offer what would take more of them.
+
+When the creator changed things on other videos, the result also carries
+`taste`: what those corrections teach. It is read from the `edit.json` of
+every other project in the projects folder, with the same `creator` summary
+this video gets. This video is never counted. A project that can't be read is
+skipped. It stays on this Mac. The creator can make Lumr forget it by asking
+Claude, which calls `forget_taste`. That writes `taste.json`; nothing else is
+touched or deleted.
+
+```
+{videos: 3,
+ put_back: {repeat: {put_back: 5, proposed: 7}},
+ cut_by_hand: [["like", 14], ["so", 5]],
+ brought_back: [["actually", 3]],
+ kept_parts: 2,
+ ratings: {repeat: {good: 4, bad: 0}, likes: {good: 0, bad: 3}},
+ pace: {claude: {standard: 2}, creator: {fast: 3}},
+ take_out: {fillers: {off: 2, on: 0}},
+ lessons: ["Put back 5 of 7 restated-point cuts (repeat) across 3 videos.", ...]}
+```
+
+`videos` counts the projects with at least one change. `ratings` counts, per
+kind of Claude's cuts (or `likes`, the filler words it picks), how many the
+creator marked good and how many wrong; lessons read like "Marked 4
+restated-point cuts (repeat) good across 2 videos." and "Marked 3 filler-word
+picks wrong across 2 videos." `put_back` counts, per
+kind of Claude's cuts, how many the creator put back against how many Claude
+proposed in those projects; a put-back gets its kind from the cut it overlaps
+most, else `unknown`. `cut_by_hand` and `brought_back` list the ten most
+counted words, most first; `brought_back` holds only entries of one or two
+words. `lessons` are plain sentences worked out from the numbers, written only
+for what at least two videos, or three events, back. They are facts, not
+advice. Let them shape the proposal, and let this video's own `creator`
+changes win.
 
 When Claude has picked filler words, the result carries `picks`:
 
@@ -1008,8 +1083,17 @@ word_times}`. On the page the creator:
   that stretch. Previous and Next go from cut to cut.
 - sees a name tag on the video while one of their photos or clips is on
   screen. The page only shows them; changes go through `set_overlays`.
+- marks any of Claude's cuts "Good cut" or "Wrong cut". Wrong puts the cut back, the way Put back does. Pressing the same button again clears the rating, and clearing "Wrong cut" does not cut it again.
 - saves the pace and switches as their usual for the next video
+- sees a quiet line, "Learning from your changes on N videos. Ask Claude to forget any of it.", when other videos taught Lumr something. Forgetting goes through Claude (`forget_taste`), not the page.
 - exports the finished video with Export video
+- sends feedback with the Send feedback button, left of Export video. It opens
+  a form: a message (required, 1 to 5000 characters), an optional name and an
+  optional email. See `POST api/feedback` below.
+- shows a quiet Help improve Lumr button beside it when `share.on` is true. It
+  opens "Send what you changed": one plain line for each record, each with a
+  Remove, a "Show exactly what's sent" toggle with the raw JSON of what
+  remains, and Send and Cancel. See `POST api/share/preview` below.
 
 Every change saves to the edit at once. The page plays the source video
 straight from disk. Nothing is uploaded. The address works until the Claude
@@ -1020,6 +1104,58 @@ page shows its progress, then the file's name and folder. The creator may
 export without telling Claude, so after they used the page, read `export` in
 `get_edit` before rendering. When an export fails, the page tells the creator
 to try again or ask Claude; `job_status` with that `job_id` has the error.
+
+`POST api/feedback` is the one route that isn't a change to the edit. The page
+sends `{message, name, email}` to it, and the local server does the rest, so
+the page itself never calls the internet:
+
+1. It checks the fields: `message` 1 to 5000 characters, `name` at most 100,
+   `email` at most 200 with a loose check (`a@b.c`). Other fields are dropped.
+   A bad field answers 400 with a plain sentence.
+2. It POSTs JSON to `<LUMR_SHARE_URL>/v1/feedback`, with a 15 second timeout,
+   `User-Agent: lumr-studio/<version>` and no retry:
+   `{"schema": 1, "feedback_id": <22 URL-safe characters>, "plugin_version":
+   <from .claude-plugin/plugin.json, else "0.0.0">, "message", "name" or null,
+   "email" or null}`.
+3. It answers `{"feedback_id"}`. A non-2xx answer, or a server it can't reach,
+   answers 400 with a plain sentence, and the page keeps what was typed.
+
+With `LUMR_SHARE_URL` unset the route refuses with 400. The page state says
+which case it is: `feedback: {direct: true | false}`, and `version` is the
+plugin's version, or `null` when it can't be read. With `direct: false` the
+form hides Name and Email and Submit opens a public GitHub issue in a new tab,
+prefilled with the message and the version. Nothing is sent from this Mac then.
+The message is never logged.
+
+`POST api/share/preview` and `POST api/share/send` are the other two routes that
+aren't a change to the edit. They hold the creator's choice to send the shape
+of their changes. The code is `server/lumr_studio/shapes.py`. Claude doesn't
+call either, and both refuse with 400 when `LUMR_SHARE_URL` is unset. The page state
+says which case it is: `share: {on: true | false}`.
+
+1. `POST api/share/preview` takes `{}` and answers `{lines, send}`. `send` is the
+   record set built from the saved `edit.json`, the words and the join check
+   (`shapes.build_send`): `{"schema": 1, "send_id": <22 URL-safe characters>,
+   "plugin_version", "records": [...]}`, at most 500 records and 256 KiB.
+   `lines` is one plain sentence for each record (`shapes.describe`), with no
+   word from the video. The server keeps that send in memory for the session.
+2. `POST api/share/send` takes `{send_id, removed: [record indexes]}`. It builds
+   nothing: it posts the kept preview minus the removed records, so exactly
+   what was shown is sent. A `send_id` that isn't the last preview answers 400.
+   It checks the records again (`shapes.validate_send`), POSTs JSON to
+   `<LUMR_SHARE_URL>/v1/sends` with a 15 second timeout,
+   `User-Agent: lumr-studio/<version>` and no retry, and answers `{send_id,
+   records}`. A non-2xx answer or a server it can't reach answers 400 with a
+   plain sentence and keeps the preview. On success it adds a line to
+   `shares.jsonl` and drops the preview.
+
+A record holds numbers and names from fixed lists, never a word from the video:
+`pace`, `proposed` (`source`, `kind`, `length_s`, `words`), `context` (up to
+three word shapes each side, each `{pos, dur, gap_after, pitch, filler}`,
+`sentence_position`, `laugh_within_s`), `creator.action` and `join` (`gap_left_s`,
+`flags`). Only a fixed list of filler words can appear as text. The team's
+server applies the same rules. `off_topic` is sent as `other` for now, because
+the server refuses any name that holds the text "topic".
 
 Ask the creator before calling this. It opens a window in their browser.
 
@@ -1044,6 +1180,33 @@ After the creator says they're done, call `get_edit` and read `creator` and
 Her cuts and keeps outlive every pace change, every switch and every
 `set_edit`. A word she cut beside a trimmed pause still leaves the pause the
 pace leaves.
+
+### forget_taste
+
+Read only: no. Destructive: no, since it deletes no file of the creator's. It
+only writes `taste.json`. Idempotent: yes.
+
+Takes no `video_path`: taste spans all the creator's videos. Send exactly one
+input; anything else is an error.
+
+| Input | Type | Note |
+|---|---|---|
+| `everything` | bool | must be `true`. Forgets every change made on all videos so far. Ask the creator first. |
+| `word` | string | stop learning from one word, such as `"so"`. Stored lower case, without punctuation. |
+| `kind` | string | stop learning from one kind of cut: `repeat`, `false_start`, `off_topic`, `other`, or `likes` (the filler words Claude picks) |
+
+Returns what was forgotten and what is left:
+
+```
+{forgot: "the word \"so\"", taste: {videos: 3, ...} or null}
+```
+
+`forgot` is `"everything"`, `the word "so"` or `the kind "repeat"`. `taste` is
+what `get_edit` would now carry, or `null` when nothing is left, so Claude can
+say in one line what is gone and what Lumr still uses. Videos and edits do not
+change. Changes the creator makes after forgetting everything count again.
+Calling it twice does the same as once. The format of `taste.json` is under
+"Project folder".
 
 ### job_status
 
