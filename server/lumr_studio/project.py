@@ -89,6 +89,10 @@ class Project:
         return self.root / "looks"
 
     @property
+    def frames_dir(self) -> Path:
+        return self.root / "frames"
+
+    @property
     def words_path(self) -> Path:
         return words_path_for(self.video)
 

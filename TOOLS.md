@@ -44,9 +44,9 @@ reads. To the creator, name what goes: long pauses, filler words, stutters.
 
 ## What the plugin offers
 
-By default the server lists 11 tools: `transcribe`, `read_transcript`,
+By default the server lists 12 tools: `transcribe`, `read_transcript`,
 `analyze_take`, `find_words`, `get_edit`, `set_edit`, `preview`, `render`,
-`look`, `review` and `job_status`. Four more are extras, off unless the
+`look`, `frames`, `review` and `job_status`. Four more are extras, off unless the
 environment variable `LUMR_STUDIO_EXTRAS` names them, as a comma list:
 
 | Extra | Adds | Skill that goes with it |
@@ -54,7 +54,7 @@ environment variable `LUMR_STUDIO_EXTRAS` names them, as a comma list:
 | `publish_kit` | `chapter_times`, `save_publish_kit` | `publish-kit` |
 | `overlays` | `set_overlays`, `get_overlays` | `add-visuals` |
 
-With `LUMR_STUDIO_EXTRAS=publish_kit,overlays` the server lists all 15. A name
+With `LUMR_STUDIO_EXTRAS=publish_kit,overlays` the server lists all 16. A name
 that is not an extra stops the server at start. An extra's skill folder sits
 in `extras/skills/`, outside the folder Claude Code scans, and comes back with
 an entry in `plugin.json` (`GUIDE.md`, "Turning the extras on"). The overlay
@@ -100,6 +100,7 @@ One per video, created on first use:
   exports/           rendered videos and previews
   work/              the edit's encode while overlays are drawn over it; emptied after
   looks/             pictures of joins made by `look`, and the stills `set_overlays` draws
+  frames/            screenshots of the source video made by `frames`
   review/            the page's cached sound envelope, and stills from its frame route
   publish-kit/       title, description, chapters, tags
 ```
@@ -812,6 +813,53 @@ the picture at the seam pair, and for the sound wave running through the
 line, which means the cut lands mid-word.
 
 With no cut near `at`, the picture shows the plain source around that time.
+
+### frames
+
+Read only: no. Destructive: no. Writes one picture per time into `frames/`.
+
+| Input | Type | Note |
+|---|---|---|
+| `video_path` | string | |
+| `times` | list of floats, 1 to 6 | source seconds, each from 0 to the video's length |
+| `region` | list of 4 floats, optional | `[left, top, right, bottom]` as fractions of the frame (0 to 1), to zoom in on part of the screen. Applies to every time in the call. |
+
+Returns screenshots of the source video, as images Claude can see. For each
+time, in the order given, a line such as `Frame 2 of 3 at 1:23 (83.40 s)`
+and then that frame. Last comes one compact JSON block:
+
+```json
+{"frames": [{"at": 83.4, "shown": 83.367, "clock": "1:23", "path": "...", "width": 1568, "height": 980}],
+ "source_size": [2880, 1800], "region": null}
+```
+
+`at` is the time asked for. `shown` is the time of the frame that is on
+screen then, in source seconds, and is never after `at`. `clock` is `at` as
+`m:ss`. The MCP result's `structured_content` is the same dict.
+
+Screen recordings (QuickTime, Cmd-Shift-5) only write a frame when the
+picture changes, so a still screen can go many seconds without one. The frame
+shown is the last one at or before `at`, not the next one after it. Times are
+always source times, never edited times, and the tool works whether or not
+the video has a transcript or a saved edit.
+
+Limits:
+
+- At most 6 times a call. More is an error that says to split the call.
+- The long edge is at most 1568 px, after the crop. A picture is never
+  scaled up.
+- PNG when the file is at most 1 MB, else JPEG at quality 90. A screenshot of
+  an app is mostly flat colour, so PNG usually fits and keeps small text
+  crisp.
+- `region` needs `0 <= left < right <= 1` and `0 <= top < bottom <= 1`, and
+  the crop must be at least 64 px on each side in source pixels. Otherwise
+  the error says what to pass.
+- A time below 0 or past the end is an error that names the video's length.
+
+Files are `frames/frame-<m>m<ss.ss>s-<YYYYmmdd-HHMMSS>.png` (or `.jpg`),
+named by `at`. A name that is taken gets `-2`, `-3`, so nothing is
+overwritten, and nothing is written beside the video. One line goes into
+`receipts.jsonl`.
 
 ### set_overlays
 

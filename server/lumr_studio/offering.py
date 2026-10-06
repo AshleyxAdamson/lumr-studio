@@ -18,7 +18,7 @@ EXTRAS_ENV = "LUMR_STUDIO_EXTRAS"
 
 EDITOR_TOOLS = frozenset({
     "transcribe", "read_transcript", "analyze_take", "find_words", "get_edit", "set_edit",
-    "preview", "render", "look", "review", "job_status",
+    "preview", "render", "look", "frames", "review", "job_status",
 })
 
 # extra name -> the tools it adds
