@@ -4,9 +4,10 @@ The agreement between the MCP server and the skills. The server implements
 these tools. The skills tell Claude how to use them. Change this file first,
 then the code.
 
-Scope: one video, from recording to export. The plugin offers the editor
-slice by default (see "What the plugin offers"); the publish kit and the
-overlays are extras, switched off.
+Scope: one video, from recording to export. That video can be one clip or
+several clips joined into one (a reel). The plugin offers the editor slice by
+default (see "What the plugin offers"); the publish kit and the overlays are
+extras, switched off.
 
 Round 2 adds ways for Claude to check its own cuts (`joins` on every saved
 edit, `look`) and one place for the creator to review them (`review`).
@@ -35,6 +36,13 @@ the pace `custom`. Filler likes: `find_words` lists every place a word is
 said, Claude picks the filler ones by reading and hands them to `set_edit` as
 `picks`, and the creator has one switch for all of them.
 
+Round 6 adds `assemble`, which joins several clips into one video, the reel.
+Every other tool takes the reel as the one video, so a creator who recorded a
+video as several clips with retakes can have it read, cut, checked and
+reviewed like any other. `get_edit` and `read_transcript` show where the clips
+sit inside a reel. Choosing which take to keep is the skill's job
+(`assemble-takes`), not the server's.
+
 Words. A **cut** is a choice with a reason, Claude's or the creator's own: the
 page and the chat both say "cut". A **trim** is one of the small automatic
 ones: a long pause, a filler word, a stutter. The tools and this file say
@@ -44,9 +52,10 @@ reads. To the creator, name what goes: long pauses, filler words, stutters.
 
 ## What the plugin offers
 
-By default the server lists 13 tools: `transcribe`, `read_transcript`,
-`analyze_take`, `find_words`, `get_edit`, `set_edit`, `preview`, `render`,
-`look`, `frames`, `review`, `job_status` and `forget_taste`. Four more are extras, off unless the
+By default the server lists 14 tools: `assemble`, `transcribe`,
+`read_transcript`, `analyze_take`, `find_words`, `get_edit`, `set_edit`,
+`preview`, `render`, `look`, `frames`, `review`, `job_status` and
+`forget_taste`. Four more are extras, off unless the
 environment variable `LUMR_STUDIO_EXTRAS` names them, as a comma list:
 
 | Extra | Adds | Skill that goes with it |
@@ -54,7 +63,7 @@ environment variable `LUMR_STUDIO_EXTRAS` names them, as a comma list:
 | `publish_kit` | `chapter_times`, `save_publish_kit` | `publish-kit` |
 | `overlays` | `set_overlays`, `get_overlays` | `add-visuals` |
 
-With `LUMR_STUDIO_EXTRAS=publish_kit,overlays` the server lists all 17. A name
+With `LUMR_STUDIO_EXTRAS=publish_kit,overlays` the server lists all 18. A name
 that is not an extra stops the server at start. An extra's skill folder sits
 in `extras/skills/`, outside the folder Claude Code scans, and comes back with
 an entry in `plugin.json` (`GUIDE.md`, "Turning the extras on"). The overlay
@@ -67,19 +76,21 @@ extras too, for when they are on.
 ## Rules for every tool
 
 - Every tool takes `video_path`, an absolute path to the source video, except
-  `job_status` and `forget_taste`.
-- The source video is never modified or overwritten.
+  `assemble`, `job_status` and `forget_taste`. A reel is a video path: the
+  `reel` that `assemble` answers with goes in `video_path` for every other tool.
+- The source video is never modified or overwritten. `assemble` never touches
+  the clips it joins.
 - Results are short. A tool returns a summary and file paths. It never returns
   a whole transcript.
 - Failures return an error that says what was wrong and how to fix it, so
   Claude can correct the call and retry.
 - Times are seconds in the SOURCE video, as floats, unless a field name says
-  otherwise.
+  otherwise. For a reel the source video is the reel.
 - Long work returns a `job_id` at once. `job_status` reports on it.
 - Every tool carries `title`, `readOnlyHint`, and `destructiveHint`.
 - No tool deletes a file of the creator's. The server removes only its own
-  files: a half-written render that failed, and the in-between encode in
-  `work/` once the overlays are drawn.
+  files: a half-written render that failed, a half-written reel that failed,
+  and the in-between encode in `work/` once the overlays are drawn.
 
 ## Project folder
 
@@ -157,6 +168,59 @@ The transcript stays where the speech model writes it, beside the video, as
 `<video>.words.json`. The measured word times are the plugin's own and stay
 in the project folder.
 
+### Reels folder
+
+`assemble` writes its files beside the projects root, not inside it:
+
+```
+<LUMR_HOME>/studio/reels/<slug>/
+  <slug>-<id>.mp4          the reel: the clips joined into one video
+  <slug>-<id>.reel.json    the sequence file: which reel seconds came from which clip
+```
+
+`slug` is the name the creator gave, lowercased, with each run of characters
+that are not letters or digits turned into one `-`. `id` is the first 8 hex
+characters of a sha1 over the name and, for each piece, the resolved clip
+path, the clip's size in bytes, its modified time in nanoseconds, and the
+piece's start and end. The same sequence of clips gives the same file name.
+A different sequence gives a different one. A reel is never overwritten, and Studio never deletes one. The folder holds a
+full copy of the footage, so it grows with every different sequence; the
+creator clears it by deleting the folder or a reel and its `.reel.json`.
+
+While a reel is being built, its file is `<slug>-<id>.<random>.partial.mp4`
+beside it, a name no other build uses. A finished build moves it to the reel's
+name. A build that fails removes its own. One left behind by a build that was
+killed (the server stopped while ffmpeg ran) is never touched by a later
+build and is never used as a reel: it is safe to delete by hand once no
+`ffmpeg` is still running for it.
+
+The sequence file is JSON:
+
+```json
+{
+  "version": 1,
+  "name": "Bread week 5",
+  "made_at": "2026-10-08T14:02:11+00:00",
+  "how": "copy",
+  "duration": 790.28,
+  "pieces": [
+    {"clip": "/Users/me/Movies/MVI_4627.MP4", "clip_duration": 378.28,
+     "start": 0, "end": 378.28, "reel_start": 0, "reel_end": 378.28},
+    {"clip": "/Users/me/Movies/MVI_4628.MP4", "clip_duration": 412.0,
+     "start": 0, "end": 412.0, "reel_start": 378.28, "reel_end": 790.28}
+  ]
+}
+```
+
+`made_at` is when the reel was built, in UTC. `clip_duration` is the whole clip's
+length. `start` and `end` are the part of it used.
+
+A reel is a video like any other. The first tool that takes it makes its
+project folder under `projects/`, named from the reel's file name and path as
+usual, and the transcript sits beside the reel as `<reel>.words.json`. The
+reel's file name never contains `-proxy`, and no `.source` file is written,
+since the render step reads both as an alternate source.
+
 ## Word times
 
 Every tool that reads words gets them from one place, so the automatic trims,
@@ -223,6 +287,97 @@ take the edit got 0:51 longer at `fast`: the sound of words that had gone
 with the pauses, and the "like"s the pace no longer takes.
 
 ## Tools
+
+### assemble
+
+Read only: no. Destructive: no. Long job.
+
+Joins clips into one video, the reel, and records where each clip sits in it.
+The clips are not changed. The reel is a second full copy of the footage on disk, in the reels folder under the Lumr folder, and Studio never deletes it.
+
+| Input | Type | Note |
+|---|---|---|
+| `name` | string | a short name for the video being built. Plain letters (A to Z), digits, spaces, `-` and `_`. 1 to 60 characters. Accented letters are refused. |
+| `pieces` | list of 1 to 200 `{clip, start, end}` | the clips in play order |
+
+Each piece:
+
+| Field | Type | Note |
+|---|---|---|
+| `clip` | string | absolute path of a source clip |
+| `start` | float, optional | seconds into the clip to start at. Default 0. |
+| `end` | float, optional | seconds into the clip to stop at. Default the clip's end. |
+
+The same clip may appear more than once.
+
+| Answer | When |
+|---|---|
+| `{status: "exists", reel, name, duration, how, pieces, sequence_file, note}` | the reel for exactly this sequence is already built. Nothing runs. |
+| `{job_id}` | the reel has to be built. The finished job's `result` is the same dict with `status: "built"`. |
+
+`pieces` in the answer is `[{clip, start, end, reel_start, reel_end}]`, with
+`start` and `end` filled in. `reel_start` and `reel_end` are seconds in the
+reel: the running sum of the piece lengths. `reel` is an absolute path.
+`sequence_file` is the path of the `.reel.json` file. `how` is `copy` or
+`encode`. `note` says: use `reel` as `video_path` for every other tool.
+
+Calling it twice with the same clips (same paths, sizes, modified times,
+starts and ends) is safe. The second call answers `exists` and writes nothing.
+
+Errors say what was wrong, in plain words: a clip is missing, a file is not a
+video, a clip has no sound, `start` or `end` is out of range or `end` is not
+after `start`, the name is not allowed, or the list is empty. If a reel file
+sits in the folder with no sequence file, the call fails and names the file.
+It was not finished, and the tool will not build over it.
+
+#### How the reel is built
+
+- **Copy.** When every piece is a whole clip (no `start` or `end`), and all
+  the clips agree on video codec (h264), width, height, rotation, frame
+  rate, pixel format, pixel shape, scan order, the picture's time base, audio
+  codec (aac), audio profile, audio time base, sample rate and channel count,
+  the clips are joined with ffmpeg's concat demuxer, `-c copy`,
+  `-movflags +faststart`. It is fast and loses nothing. Clips that agree on
+  the first nine but not on a time base or the audio profile can't be copied
+  together: the second clip's time stamps would be read in the wrong unit. So
+  one piece with a `start` or an `end`, or one clip that differs in any of
+  these, makes the whole reel an encode.
+- **Encode.** Otherwise one ffmpeg run joins them. Each piece is trimmed and
+  its timestamps reset, then scaled and padded to the first clip's size and
+  set to the first clip's frame rate, and its sound is resampled to 48 kHz
+  stereo. Each piece is cut to a whole number of frames (its length rounded
+  to the nearest frame, at least one) with its sound padded or cut to match.
+  A piece whose picture ends before its sound, or before the end asked for,
+  holds its last frame for the rest of the piece. `reel_start` and `reel_end`
+  use those lengths, so they are where the picture and the sound really
+  change, to the frame. Each piece is its own ffmpeg input, and the filters
+  run on one thread, so 200 pieces don't run ffmpeg out of threads. The reel is libx264,
+  preset medium, CRF 16, yuv420p, with AAC at 256k and `+faststart`. CRF 16
+  because this file is encoded again at export. A clip with non-square
+  pixels is scaled as if its pixels were square.
+- The job is built to its own `<slug>-<id>.<random>.partial.mp4`, then moved
+  to the reel's name with a hard link, which fails if the name is taken
+  (a disk without hard links gets an exclusive create of the reel's name, which
+  also fails if the name is taken, then a rename over that empty file; a file
+  that lands in the instant between those two steps could be replaced, and the
+  platform has no way to close that gap). If another
+  Lumr Studio finished the same reel first, this job leaves that reel alone
+  and its result is that reel's answer with `status: "exists"`. The sequence
+  file is written after the move, so a reel with a sequence file is whole.
+- After the build the reel is probed. If its length, or the length of its
+  picture, or the length of its sound, differs from the sum of the piece
+  lengths by more than 0.5 s, the file is removed. For a copy, the last
+  clip's own shortfall is allowed: when its picture or its sound ends before
+  the clip does, the reel's picture or sound ends that much early too, and
+  that is what a copy is. A copy that fails this
+  check is built again as an encode, once; an encode that fails it makes the
+  job fail, and the answer says `how` the reel was finally made.
+- The job's kind is `assemble`. `job_status` reports progress from ffmpeg's
+  own progress output, in both paths.
+
+Changing the sequence makes a new reel, and a new reel is a new video to every
+other tool. The cuts, the transcript and the page's state belong to the old
+reel and do not carry over.
 
 ### transcribe
 
@@ -349,6 +504,14 @@ are estimates. A laugh marks the line before it as a punchline.
 
 With `show_cuts`, removed phrases are prefixed with `CUT`.
 
+When the video is a reel, a marker line comes at each clip boundary inside the
+range printed, the first clip's at 0.00 included, in the form below. The number in the line is the reel time
+where that clip starts. A plain video has no markers.
+
+```
+== clip 2 of 4: MVI_4628.MP4 starts 378.28 ==
+```
+
 Windows are contiguous and never overlap. Every response ends with one of two
 lines, so the reader always knows whether more remains:
 
@@ -434,6 +597,17 @@ trims (`auto`), the pace, the total removed time, the resulting duration, and
 `word_times`. Each cut carries `clock`, its source times as `m:ss-m:ss`, ready
 to show the creator. The creator's own cuts are never in `cuts`; they are
 under `creator`.
+
+When the video is a reel (a `.reel.json` sequence file sits beside it), the
+result carries `reel`:
+
+```
+{name: "Bread week 5",
+ pieces: [{clip, reel_start, reel_end}]}
+```
+
+It says which clip each stretch of the reel came from. A plain video has no
+`reel`.
 
 When the creator changed something on the page, the result carries `creator`:
 
@@ -1214,7 +1388,7 @@ Read only: yes.
 
 | Input | Type | Note |
 |---|---|---|
-| `job_id` | string | from `transcribe`, `preview` or `render`, or from `export` in `get_edit` |
+| `job_id` | string | from `assemble`, `transcribe`, `preview` or `render`, or from `export` in `get_edit` |
 | `wait` | float, default 0 | seconds to wait for the job to finish before answering, at most 50 |
 
 Returns `{status: "running" | "done" | "failed", progress, result, error}`.

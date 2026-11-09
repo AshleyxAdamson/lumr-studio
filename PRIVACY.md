@@ -1,6 +1,6 @@
 # Privacy
 
-Last updated 2026-10-06.
+Last updated 2026-10-08.
 
 Lumr Studio doesn't collect your data. It has no server, no accounts, no analytics and no telemetry. Nothing on your Mac is ever sent to the person who wrote it, except feedback you choose to send (see "Feedback you send") and the shape of your changes, if you choose to send it (see "What you can choose to send").
 
@@ -9,7 +9,7 @@ Questions about this page go to [GitHub Issues](https://github.com/AshleyxAdamso
 ## What stays on your Mac
 
 - Your video and audio. The plugin opens a file only when you name it to Claude, like "use tight-cut on this video". It never browses your folders. It never uploads your video or audio, and it has no tool that could.
-- What it makes from them. The transcript, the measured word times, your edit and your exports. The section below says where each one lives.
+- What it makes from them. The transcript, the measured word times, your edit, your exports, and, when you join clips with `assemble`, the joined video (a second full copy of your footage). The section below says where each one lives.
 - The review page. A small web server on `127.0.0.1`, on a port your operating system picks, with a private token in the address. Nothing outside your Mac can reach it, and the page makes no outside requests. The two things it can send out are feedback you write and submit, and the shape of your changes if you press Send. Your Mac's own server sends both (see "Feedback you send" and "What you can choose to send").
 
 ## What Claude sees
@@ -47,11 +47,12 @@ The plugin keeps files on your Mac until you delete them. The author holds nothi
 | Project files: `edit.json`, `words-aligned.json`, `plans.json`, `exports/`, `frames/` | `~/Lumr/studio/projects/<video name>-<id>/`. The `~/Lumr` part follows `LUMR_HOME`, or the folder named in `~/.config/lumr/home.txt`. | Delete the project folder |
 | What Lumr learned from your changes | Nothing extra is stored. It's worked out from the project files above each time, and `taste.json` in `~/Lumr/studio/projects/` holds only what you asked it to forget: the words and kinds you named, and after "forget everything" a copy of each project's settings and change ids at that moment, so those stop counting. It names the project folders, which carry your video names. | Ask Claude to forget it, or delete a project folder to drop what that video taught |
 | The transcript | `<video>.words.json`, beside your video. It's the only file the plugin puts in your video's folder. | Delete the file |
+| Joined clips (the reel), when you use `assemble`: a second full copy of your footage, and a `.reel.json` file that lists the full path of each clip | `~/Lumr/studio/reels/<name>/`. The `~/Lumr` part follows the same setting as the projects. A file there ending in `.partial.mp4` is a join still running or one that was cut off. | Delete the folder, or the reel and its `.reel.json`. Studio never deletes a reel, and it takes as much disk space as the clips it joins. |
 | Measured silences | `~/Lumr/media_cache/` | Delete the folder |
 | The Python environment and `build.log` | The plugin's data folder, under `~/.claude/plugins/data/` | Uninstalling the plugin removes it |
 | The two models | `~/.cache/huggingface/hub` and `~/.cache/torch/hub/checkpoints`, or under `HF_HOME` and `TORCH_HOME` | Delete them by hand. They stay after an uninstall, because other tools share those caches. |
 
-No tool in the plugin deletes a file of yours.
+No tool in the plugin deletes a file of yours, and that includes the joined video: clearing it is up to you.
 
 ## Feedback you send
 
