@@ -4,9 +4,10 @@ The details behind the [README](README.md): the review page, what you need, the 
 
 ## The review page and tools
 
-The plugin gives Claude 13 tools and two skills, `tight-cut` and `ui-feedback`. `TOOLS.md` is the contract for each tool. None of them deletes a file of yours, and none uploads your video.
+The plugin gives Claude 14 tools and three skills, `tight-cut`, `assemble-takes` and `ui-feedback`. `TOOLS.md` is the contract for each tool. None of them deletes a file of yours, and none uploads your video.
 
 - `tight-cut` reads a whole recording, proposes a cut list with plain-language reasons, and only saves or renders once you say go.
+- `assemble-takes` is for a video you recorded as several clips, with retakes. Studio can now join the clips into one video and follow your script: Claude finds every take of each line, keeps the best one, which is usually your last complete take, and cuts the rest. Then it tightens the pace the way `tight-cut` does and opens the review page. Your clips stay as they are. The joined video is a new file in the Lumr folder, a second full copy of the footage.
 - `ui-feedback` reads a screen recording where you talk through your feedback, and turns it into numbered notes. Each note has a time and screenshots from that moment (`frames`). It saves a notes file or changes your code only once you say yes.
 - Every saved edit comes back with a read of each join, the way a viewer hears it, and a fix for the ones likely to sound wrong. Claude repairs those before showing you the plan.
 - Likely laughs are marked in the transcript, and Claude keeps them in its own cuts. The automatic pause trims can still clip a laugh at the harder paces. On the test take, 10 places at Standard and 23 at Max. The join check flags those, and Claude tells you which stretch to keep on the page.
@@ -110,7 +111,7 @@ Everything runs on your Mac. The one exception is Claude, which runs wherever yo
 |---|---|
 | The server | Claude Code starts it over stdio with `sh ${CLAUDE_PLUGIN_ROOT}/hooks/start-server.sh ${CLAUDE_PLUGIN_ROOT} ${CLAUDE_PLUGIN_DATA}` (from `.mcp.json`). That short script sets `VIRTUAL_ENV` to the plugin's environment in the data folder, then runs `uv run --active --locked --project <plugin folder>/server lumr-studio-server`. It's the only long-running process. |
 | The speech model | `python -m lumr_studio.speech <video>`, in a process of its own, once per video, reading the downloaded model from disk with Hugging Face set offline. |
-| Cutting and rendering | `ffmpeg` and `ffprobe`, from your PATH. |
+| Joining clips, cutting and rendering | `ffmpeg` and `ffprobe`, from your PATH. |
 | The review page | A small web server on `127.0.0.1`, on a port the operating system picks, with a private token in the address. The plugin opens it in your default browser. It makes no outside requests. The Send feedback button sends a message only when you press Submit, and Help improve Lumr sends the shape of your changes only when you press Send. Your Mac's local server sends both. |
 | The first-run check | `sh "${CLAUDE_PLUGIN_ROOT}/hooks/doctor.sh"`, at the start of each session. It reads your PATH and prints. |
 
@@ -149,6 +150,8 @@ Each video gets one project folder at `~/Lumr/studio/projects/<video name>-<id>/
 | `frames/` | the screenshots `frames` takes of your video |
 
 Lumr learns from the cuts you put back, the cuts you mark "Good cut" or "Wrong cut" on the review page, and the words you cut or bring back. It works that out from your saved edits, on your Mac, and keeps only a note in `taste.json` of what you asked it to forget. To forget something, ask Claude: one word, one kind of cut, or everything. Your videos and edits don't change.
+
+Clips you join go to `~/Lumr/studio/reels/<video name>/`: the joined video, and a small `.reel.json` file that records which seconds came from which clip. The joined video is a second full copy of your footage, so it takes as much disk space as the clips do. Nothing there is overwritten, Studio never deletes it, and your clips are never changed. To get the space back, delete the folder yourself. A file there ending in `.partial.mp4` is a join still running or one that was cut off, and is safe to delete once no `ffmpeg` is running.
 
 The transcript itself stays beside your video, as `<video>.words.json`. It's the only file the plugin puts in your video's folder. Measured silences are cached under `~/Lumr/media_cache/`. The Python environment lives in the plugin's data folder, and Claude Code deletes it when you uninstall the plugin. The models stay in the shared caches (`~/.cache/huggingface` and `~/.cache/torch`) and survive an uninstall.
 

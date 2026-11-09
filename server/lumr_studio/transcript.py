@@ -195,16 +195,24 @@ def _span(run: Run) -> float:
     return float(run[-1]["end"]) - float(run[0]["start"])
 
 
-def _runs(words: list[dict[str, Any]], removed: list[tuple[float, float]], pause: float) -> list[tuple[Run, bool]]:
-    """Split entries at the hard boundaries: a pause, an event, a flip in cut state.
+def _runs(
+    words: list[dict[str, Any]], removed: list[tuple[float, float]], pause: float, breaks: list[float] | None = None
+) -> list[tuple[Run, bool]]:
+    """Split entries at the hard boundaries: a pause, an event, a flip in cut state, a time in ``breaks``.
 
     Returns ``(entries, cut)`` pairs; an event is a run of its own.
     """
     runs: list[tuple[Run, bool]] = []
     current: Run = []
     current_cut = False
+    previous = float("-inf")
     for entry in words:
         cut = word_is_cut(entry, removed)
+        started = float(entry["start"])
+        if current and any(previous < b <= started for b in breaks or ()):
+            runs.append((current, current_cut))
+            current = []
+        previous = started
         if is_event(entry):
             if current:
                 runs.append((current, current_cut))
@@ -297,11 +305,13 @@ def build_phrases(
     removed: list[tuple[float, float]] | None = None,
     pause: float = PHRASE_PAUSE_SECONDS,
     labels: list[dict[str, Any]] | None = None,
+    breaks: list[float] | None = None,
 ) -> list[Phrase]:
     """Group sorted entries into lines that end where the speaker does.
 
     Hard breaks: a gap of at least ``pause`` seconds, an event (its own line),
-    and a flip in cut state (so a line is wholly kept or wholly cut). Between
+    a flip in cut state (so a line is wholly kept or wholly cut), and each
+    time in ``breaks`` (where one clip of a reel gives way to the next). Between
     those, whole sentences are joined into lines of about 6 to 12 seconds. A
     sentence is broken only when it runs past ``MAX_SENTENCE_SECONDS``.
 
@@ -310,7 +320,7 @@ def build_phrases(
     and every event when ``labels`` is None, keep their word.
     """
     phrases: list[Phrase] = []
-    for run, cut in _runs(words, removed or [], pause):
+    for run, cut in _runs(words, removed or [], pause, breaks):
         pieces = [p for s in _sentences(run) for p in _split_long(s, MAX_SENTENCE_SECONDS)]
         for line in _pack_line_groups(pieces, LINE_MIN_SECONDS, LINE_MAX_SECONDS):
             phrases.append(Phrase(
@@ -344,6 +354,7 @@ def pack_transcript(
     budget_chars: int = PACK_BUDGET_CHARS,
     pause: float = PHRASE_PAUSE_SECONDS,
     labels: list[dict[str, Any]] | None = None,
+    markers: list[tuple[float, str]] | None = None,
 ) -> dict[str, Any]:
     """Pack the entries whose start falls in ``[start, end)`` into text lines.
 
@@ -351,7 +362,10 @@ def pack_transcript(
     leave cuts unmarked. ``labels`` (sound labels) prints each labelled event as
     ``(laugh 3.5s)``, ``(laugh? 1.6s)`` or ``(sound 0.2s)``; pass None to print
     ``[vocalization]``. When the lines would exceed ``budget_chars``, only the
-    first part is packed.
+    first part is packed. ``markers`` are ``(time, text)`` lines to print
+    where a reel gives way from one clip to the next: each inside the window
+    comes out as its own line before the first phrase from that time on, and
+    no phrase runs across it. Pass None for a plain video.
 
     The text always ends with one of two lines:
 
@@ -367,8 +381,14 @@ def pack_transcript(
     lo = start if start is not None else float("-inf")
     hi = end if end is not None else float("inf")
     window = [w for w in words if lo <= float(w["start"]) < hi]
-    phrases = build_phrases(window, removed, pause=pause, labels=labels)
+    phrases = build_phrases(window, removed, pause=pause, labels=labels, breaks=[t for t, _ in markers or []])
     lines = _phrase_lines(phrases, pause)
+    shown = [(t, text) for t, text in markers or [] if lo <= t < hi]
+    marker_times = {text: t for t, text in shown}
+    for t, text in reversed(shown):
+        at = next((i for i, (line_start, _) in enumerate(lines) if line_start >= t), None)
+        if at is not None:
+            lines.insert(at, (t, text))
 
     kept: list[str] = []
     used = 0
@@ -384,6 +404,9 @@ def pack_transcript(
     # A trailing pause line before the cut-off point says nothing on its own.
     if next_start is not None and kept and kept[-1].startswith("  (pause"):
         kept.pop()
+    # A clip's marker with none of its words under it waits for the next window.
+    if next_start is not None and len(kept) > 1 and kept[-1] in marker_times:
+        next_start = marker_times[kept.pop()]
 
     if next_start is None and end is not None and any(float(w["start"]) >= end for w in words):
         next_start = end

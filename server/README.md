@@ -71,8 +71,8 @@ Environment:
   `<LUMR_HOME>/studio/projects`, with `LUMR_HOME` resolved the way ClipForge
   resolves it (`engine/paths.py`), at call time.
 - `LUMR_STUDIO_EXTRAS` is a comma list of extras to switch on, `publish_kit`
-  and `overlays`. Empty by default: the server lists 12 tools. With both it
-  lists 16. An unknown name stops the server at start. Their skills come back
+  and `overlays`. Empty by default: the server lists 14 tools. With both it
+  lists 18. An unknown name stops the server at start. Their skills come back
   with an entry in `plugin.json` (`../GUIDE.md`, "Turning the extras on").
 - `ffmpeg` and `ffprobe` must be on `PATH`. There is no `hammy` command.
 - Transcribing runs `python -m lumr_studio.speech` in a process of its own,
@@ -151,6 +151,7 @@ by `../hooks/hooks.json` at session start) against stub programs on a trimmed
 | `jobs.py` | Background jobs, status, receipts |
 | `transcription.py` | The transcribe job: the speech process, then a check of the transcript. The same job measures the word times. |
 | `render_jobs.py` | The render and preview jobs |
+| `reels.py` | The `assemble` job: joins clips into a reel (copy when whole clips match in every detail, else one encode in whole frames), writes the `.reel.json` sequence file beside it, and finds it again (`reel_for`) for `get_edit` and `read_transcript` |
 | `publish_kit.py` | Chapter rules and the `publish-kit/` files. An extra: its tools (`chapter_times`, `save_publish_kit`) list only with `publish_kit` on |
 | `joins.py` | The self-check: every join read the way a viewer hears it, with a fix for Claude and a plain why for the creator |
 | `sounds.py` | Likely laughs told apart from other sounds |
@@ -242,6 +243,19 @@ exception is named in `creator_words.py` and tested in
   packed transcript itself, as plain text ending in `NEXT <time>` or `END`,
   with `{text, phrase_count, next_start}` in `structured_content`. Errors still
   go through `ToolError`, so `is_error` works as before.
+- **Several clips (`assemble`).** Studio can join several clips into one video,
+  the reel, and every other tool takes the reel as its one video. This keeps the
+  join step and the edit step apart: the edit format, the join check, the render
+  and the page do not know a reel from any other file. The sequence file beside
+  the reel is the only thing that does, and `reels.reel_for` is the one reader of
+  it. A reel is never overwritten, because a rewritten file would keep its project
+  folder and its stale transcript. Each build writes its own randomly named
+  partial file and moves it into place only if the reel's name is free, so two
+  builds of one sequence (two servers, or a restart over a surviving ffmpeg)
+  can't swap files. Whole clips are copied only when they agree on every detail
+  a copy depends on, time base and sound profile included; otherwise the reel is
+  encoded, in whole frames, so the times in the sequence file are the real ones. Changing the clips makes a new reel and a new
+  project; the cuts do not follow. `TOOLS.md`, `assemble`, is the contract.
 - **`gap_length` without `auto_tighten`** is an error, so it can't be
   silently ignored.
 - **Silences.** `set_edit` and `analyze_take` measure silences with

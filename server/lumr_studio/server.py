@@ -32,8 +32,9 @@ from lumr_studio.mcp_results import json_text, result as _result, run as _run
 EXTRAS = offering.enabled_extras()
 
 _INSTRUCTIONS_START = (
-    "Lumr Studio edits one video at a time. Every tool except job_status and forget_taste takes the "
-    "absolute path of the source video. Times are seconds in the SOURCE video unless a "
+    "Lumr Studio edits one video at a time. assemble joins several clips into one video, "
+    "a reel; every other tool except job_status and forget_taste takes the absolute path of one "
+    "source video, which may be a reel. Times are seconds in the SOURCE video unless a "
     "field says edited. Long work returns a job_id; call job_status with wait=50 "
     "until it is done. transcribe also measures the word times, in the same job; every "
     "answer that reads words says word_times, measured or estimated. The plugin needs two models on "
@@ -51,7 +52,7 @@ _INSTRUCTIONS_OVERLAYS = (
 )
 _INSTRUCTIONS_END = (
     "The creator can export from the page; get_edit then names that job under export. "
-    "No tool deletes or overwrites a file."
+    "No tool deletes a file or overwrites one it did not make. assemble leaves a second full copy of the footage, the reel, and nothing removes it."
 )
 INSTRUCTIONS = _INSTRUCTIONS_START + (_INSTRUCTIONS_OVERLAYS if "overlays" in EXTRAS else "") + _INSTRUCTIONS_END
 
@@ -91,6 +92,16 @@ class Pick(BaseModel):
     reason: str = Field(description="A few words on why this one is filler, such as: a pause word, the sentence reads the same without it.")
 
 
+class Piece(BaseModel):
+    clip: str = Field(description="Absolute path to one source clip.")
+    start: float | None = Field(
+        default=None, description="Seconds into the clip to start at. Leave it out to start at the beginning of the clip."
+    )
+    end: float | None = Field(
+        default=None, description="Seconds into the clip to stop at. Leave it out to play to the end of the clip."
+    )
+
+
 class Chapter(BaseModel):
     time: float = Field(description="Chapter start in EDITED seconds.")
     label: str = Field(description="Chapter title.")
@@ -111,6 +122,21 @@ def transcribe(
 ) -> CallToolResult:
     """Transcribe the video and measure its word times, in one job. Returns {job_id}; or {status: "exists", ...} when both are there; or {status: "aligning", job_id, ...} when the transcript is there and only the word times are being measured. When a model this needs is not on the machine it downloads nothing and returns {status: "needs_models", models: [{name, size_mb, source_host, license}], total_mb, note}: tell the creator what would download, how big, from where and under which license, and ask. Only when they say yes call transcribe again with download_models true: it returns {status: "downloading", job_id}, and when that job is done call transcribe again. word_times says what the edit runs on: measured, or estimated when this machine can't measure them (word_times_note says why). On estimated times the harder paces find far less to cut. When a saved edit was placed again on measured times, the job's result carries edit with the totals before and now."""
     return _call(tools.transcribe, video_path, force, download_models)
+
+
+@_tool(title="Assemble clips", annotations=_annotations("Assemble clips", read_only=False))
+def assemble(
+    name: Annotated[
+        str,
+        Field(description="A short name for the video being built: 1 to 60 plain letters (A to Z), digits, spaces, - or _. It names the reel's folder."),
+    ],
+    pieces: Annotated[
+        list[Piece],
+        Field(description="The clips in play order, 1 to 200. A clip may appear more than once, each time with its own start and end."),
+    ],
+) -> CallToolResult:
+    """Join several clips, or stretches of clips, into one video, the reel, in the order given. Use it when a video was recorded as several clips. The reel is an ordinary video: pass its path as video_path to every other tool (transcribe it, read it, cut it, review it, render it). Returns {job_id} while the reel is built, and the finished job's result carries the answer; or, when this exact sequence was joined before, the answer at once with status "exists". The answer is {status, reel (the path to pass on), name, duration, how, pieces: [{clip, start, end, reel_start, reel_end}], sequence_file, note}. how is copy when every piece is a whole clip and the clips match in every detail a copy depends on (nothing is re-encoded), or encode when any piece has a start or an end, or the clips differ in size, frame rate, time base or sound (one encode, at high quality). After a reel is built, get_edit names its clips under reel and read_transcript marks where each starts. The reel is a second full copy of the footage on disk, under the Lumr folder in studio/reels, and Studio never deletes it. Changing the sequence makes a new reel and a new project: the cuts made on the old reel do not follow. Nothing is overwritten."""
+    return _call(tools.assemble, name, [p.model_dump() for p in pieces])
 
 
 @_tool(title="Read transcript", annotations=_annotations("Read transcript", read_only=True))
@@ -289,7 +315,7 @@ def forget_taste(
 @_tool(title="Job status", annotations=_annotations("Job status", read_only=True))
 def job_status(
     job_id: Annotated[
-        str, Field(description="Id returned by transcribe, preview or render, or found under export in get_edit.")
+        str, Field(description="Id returned by assemble, transcribe, preview or render, or found under export in get_edit.")
     ],
     wait: Annotated[
         float, Field(description="Seconds to wait for the job to finish before answering, at most 50.")

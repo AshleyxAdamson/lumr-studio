@@ -31,6 +31,7 @@ On a 21:47 test take, measured word times took out more than twice as much at ev
 
 - **Six paces**, Natural to Max, plus two sliders for anything in between.
 - **Switches** for long pauses, filler words, stutters and filler likes.
+- **Several clips, one video.** Studio can join your clips into one video and follow your script. Claude finds every take of each line, keeps your best one, usually the last complete take, and cuts the rest. Then you fine-tune it on the review page. Your clips are never changed.
 - **A review page** in your browser. Double-click any word to cut it or bring it back, hear any cut, flip between the original and the edit, and export.
 - **Cuts you can tell apart.** Dim for the pace, red for Claude, teal for you.
 - **Learns from your fixes.** Every cut you put back or mark good or wrong, and every word you bring back, teaches it, and your next video starts from what you taught it. It stays on your Mac.
@@ -71,11 +72,13 @@ It runs in Claude Code, and in Cowork when the session runs on your Mac. Chat on
 
 > Find the filler likes in ~/Movies/vlog.mov and take them out. Then open the review page.
 
+> Use assemble-takes on ~/Movies/Bread/take-1.mp4, take-2.mp4, take-3.mp4 and take-4.mp4, in that order. Here's my script: (paste it).
+
 > Use ui-feedback on ~/Movies/app-walkthrough.mov
 
 ## What it runs and fetches
 
-- **On your Mac:** a local MCP server, `ffmpeg` and `ffprobe` for cutting and rendering, the two models, and the review page on `127.0.0.1`. A check at the start of each session looks for `uv` and `ffmpeg`, and the first time it builds the plugin's Python environment.
+- **On your Mac:** a local MCP server, `ffmpeg` and `ffprobe` for joining clips, cutting and rendering, the two models, and the review page on `127.0.0.1`. A check at the start of each session looks for `uv` and `ffmpeg`, and the first time it builds the plugin's Python environment.
 - **Downloads, once:** the locked Python packages from PyPI through `uv`, plus a Python build from `github.com/astral-sh/python-build-standalone` if your Mac has none. Parakeet from `huggingface.co` and wav2vec 2.0 from `download.pytorch.org`, only after you say yes. Each model file is checked against a pinned size and sha256.
 - **What leaves your Mac:** nothing of yours, except what Claude reads in the conversation. That's the transcript text, the cut lists, a small picture of a join when Claude checks one, and the screenshots Claude takes of your video with `frames`. Your video and audio never upload.
 - **Feedback, only when you press Submit:** the review page's Send feedback button sends your message to the Lumr Studio team's server (`feedback.lumr-studio.workers.dev`), and your name and email only if you enter them. The page itself never calls the internet; your Mac's local server makes the one request.

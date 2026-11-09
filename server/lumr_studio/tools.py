@@ -21,7 +21,7 @@ from typing import Any
 
 from lumr_studio import edit as edits
 from lumr_studio import frames as screenshots
-from lumr_studio import models, taste
+from lumr_studio import models, reels, taste
 from lumr_studio import treatment as treatments
 from lumr_studio import word_times
 from lumr_studio.aligner import Wav2Vec2Aligner
@@ -235,6 +235,31 @@ def transcribe(
     return {"status": "aligning", "job_id": job_id, **summary}
 
 
+def assemble(name: str, pieces: list[dict[str, Any]], *, jobs: JobRegistry = JOBS) -> dict[str, Any]:
+    """Join clips into one video, the reel, that every other tool then edits.
+
+    ``pieces`` are ``{clip, start?, end?}`` in play order; ``start`` and
+    ``end`` are seconds into the clip. A reel already built for exactly this
+    sequence is answered at once (``status: "exists"``); otherwise a job
+    builds it and the answer is ``{job_id}``, and the finished job's result
+    is the same answer with ``status: "built"``. Whole clips that agree in
+    codec, size, frame rate, time base and sound are copied; if any piece has
+    a start or an end, or the clips differ, the reel is encoded once. Nothing
+    is overwritten: a different sequence is a different file.
+    """
+    plan = reels.plan_reel(name, pieces)
+    project = plan.project
+    running = jobs.latest(reels.KIND, project)
+    if running is not None and running.status == "running":
+        return {"job_id": running.job_id}
+    built = reels.existing_answer(plan)
+    if built is not None:
+        return built
+    project.root.mkdir(parents=True, exist_ok=True)
+    job_id, _started = jobs.start_one(reels.KIND, project, reels.builder(plan))
+    return {"job_id": job_id}
+
+
 def read_transcript(
     video_path: str,
     start: float | None = None,
@@ -243,13 +268,18 @@ def read_transcript(
     *,
     labels: LabelProvider = measured_labels,
 ) -> dict[str, Any]:
-    """Packed transcript text for a window, ending in ``NEXT <time>`` or ``END``."""
+    """Packed transcript text for a window, ending in ``NEXT <time>`` or ``END``.
+
+    On a reel (see ``assemble``) a line marks where each clip starts.
+    """
     project = open_project(video_path)
     words = word_times.load_words(project)
     removed = None
     if show_cuts:
         removed = edits.removed_spans(edits.load_edit(project, project.duration()))
-    return pack_transcript(words, start=start, end=end, removed=removed, labels=labels(project, words))
+    reel = reels.reel_for(project.video)
+    markers = reels.clip_markers(reel) if reel else None
+    return pack_transcript(words, start=start, end=end, removed=removed, labels=labels(project, words), markers=markers)
 
 
 def analyze_take(video_path: str, *, silences: SilenceProvider = measured_silences) -> dict[str, Any]:
@@ -302,7 +332,8 @@ def get_edit(
     render of this video has run since the server started, ``export`` names
     its job, so Claude can follow an export the creator started from the
     page. ``word_times`` says whether the word times are measured or
-    estimated.
+    estimated. A reel made by ``assemble`` also carries ``reel``: its name
+    and where each clip sits in it.
     """
     project = open_project(video_path)
     duration = project.duration()
@@ -310,6 +341,9 @@ def get_edit(
     summary = edits.edit_summary(edit, duration, include_auto=include_auto)
     if project.words_path.exists():
         summary["word_times"] = word_times.source_of(project)
+    reel = reels.reel_for(project.video)
+    if reel:
+        summary["reel"] = reel
     picked = _picks_summary(project, edit, duration)
     if picked:
         summary["picks"] = picked
