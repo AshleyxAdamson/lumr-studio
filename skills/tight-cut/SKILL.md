@@ -93,6 +93,8 @@ If both are clear, go straight to deciding cuts.
 
 ## 4. Decide the cuts
 
+Read the `what-to-cut` skill before you choose a cut that removes words, and again whenever the creator pushes back on one. It holds the judgment; this step holds the mechanics.
+
 Think of the video as having a spine: the parts the story can't lose.
 
 **Spine, never cut.**
@@ -103,7 +105,7 @@ Think of the video as having a spine: the parts the story can't lose.
 - Emotional beats, such as a pause before a hard truth.
 - Asides that sound like the creator. These can look like dead weight in a transcript and are the opposite.
 
-**Optional.** Examples, side stories, and elaborations that support the spine. Trim these first when the creator wants it tighter.
+**Optional.** Examples, side stories, and elaborations that support the spine, and a point the creator makes again later in the video. Leave these in unless the creator asked for a shorter video. Then propose them, each shown as it plays now and as it would play after, and cut only the ones they say.
 
 **Safe to cut, once clearly identified.**
 
@@ -112,6 +114,7 @@ Think of the video as having a spine: the parts the story can't lose.
 - Dead air well beyond a natural breath.
 - Tangents that don't serve the spine and aren't funny or personal.
 - Repeated takes. Keep the last complete take unless an earlier one is clearly stronger.
+- Padding: a tail that says its own sentence again and adds nothing. The test is in `what-to-cut`. Expect few.
 
 **Where a cut starts and ends.**
 

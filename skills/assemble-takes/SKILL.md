@@ -127,9 +127,11 @@ Keep this map in your head and in the chat when you present it. Don't write it t
 
 ## 5. Choose the takes
 
+Read the `what-to-cut` skill before you choose, and again whenever the creator pushes back on a cut. It holds the judgment for what stays and what goes; this step holds the mechanics for takes.
+
 Keep one take of each line.
 
-**Default to the last complete take.** Creators retake because the earlier one did not land. The later one is usually the keeper.
+**Default to the last complete take.** Creators retake because the earlier one did not land. The later one is usually the keeper. A question or lead-in that belongs to a line comes from the same take as the line.
 
 Go to an earlier take only when the last one:
 

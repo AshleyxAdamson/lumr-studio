@@ -79,8 +79,8 @@ def test_an_offered_skill_names_only_tools_that_are_offered(extras):
 
 
 def test_the_skill_tests_read_the_skills_they_mean_to():
-    assert [p.parent.name for p in offered_skills(frozenset())] == ["assemble-takes", "splice-clips", "tight-cut", "ui-feedback"]
-    assert [p.parent.name for p in offered_skills(ALL_ON)] == ["assemble-takes", "splice-clips", "tight-cut", "ui-feedback", "add-visuals", "publish-kit"]
+    assert [p.parent.name for p in offered_skills(frozenset())] == ["assemble-takes", "splice-clips", "tight-cut", "ui-feedback", "what-to-cut"]
+    assert [p.parent.name for p in offered_skills(ALL_ON)] == ["assemble-takes", "splice-clips", "tight-cut", "ui-feedback", "what-to-cut", "add-visuals", "publish-kit"]
     assert all(p.is_file() for p in offered_skills(ALL_ON))
 
 
