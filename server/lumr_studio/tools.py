@@ -438,7 +438,7 @@ def carry_edit(
             **timed,
             "word_times": word_times.source_of(project),
             **placed.report,
-            "joins": _joins_report(placed.cuts, placed.words, placed.duration, placed.sounds),
+            "joins": _joins_report(project, placed.cuts, placed.words, placed.duration, placed.sounds),
             "note": carry.AFTER_CARRYING,
         }
 
