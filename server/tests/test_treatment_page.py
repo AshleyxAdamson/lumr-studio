@@ -2195,6 +2195,19 @@ def test_the_first_word_of_each_clip_is_the_first_whose_middle_is_inside_it():
     assert got == {"0": 0, "1": 1, "3": 3}
 
 
+@needs_node
+def test_short_clips_in_a_row_keep_their_lines_and_only_numbers_with_room_are_drawn():
+    # Found on a real video of 13 clips: three short ones in a row drew "345" as one blot on the bar.
+    clips = [{"n": i + 1, "name": "c", "start": s, "end": s + 1} for i, s in enumerate([0, 220, 500, 503, 511, 616, 742, 795, 809, 816])]
+    shown = js(f"return Core.clipNumbersShown({json.dumps(clips)}, 1000);")
+    assert shown == [True, True, True, False, False, True, True, True, False, False]
+    assert js("return Core.clipNumbersShown([], 1000);") == []
+    assert js(f"return Core.clipNumbersShown({json.dumps(clips[:2])}, 0);") == [True, False], "no length yet: only the first"
+    html = page()
+    drawn = re.search(r"function renderClips\(\)\{(.*?)\n\}", html, re.S).group(1)
+    assert "C.clipNumbersShown(CLIPS, DUR)" in drawn and "numbered[i] ? '<b>'" in drawn
+
+
 def test_the_bar_marks_where_each_clip_starts_without_taking_a_press_or_any_height():
     html = page()
     bar = between(markup(), "whole", "transport")

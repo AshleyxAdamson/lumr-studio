@@ -188,6 +188,25 @@ def read_from(kept: list[Span], fps: Fraction) -> int:
     return math.floor(lead * fps) if lead > 0 else 0
 
 
+# ffmpeg reads "a+b+c+..." as a chain nested one level per term, and from version 9 it refuses an
+# expression nested deeper than about 100 levels ("Cannot allocate memory"). A tight pace on a 20
+# minute video keeps 250 runs and more, so a long sum is written in bracketed groups this size,
+# and groups of groups, which keeps the nesting far under the limit however long the edit is.
+SUM_GROUP = 40
+
+
+def expression_sum(terms: list[str]) -> str:
+    """``terms`` added up as one ffmpeg expression that is never nested deep. Pure.
+
+    Up to ``SUM_GROUP`` terms read ``a+b+c``. More are split into bracketed
+    groups of that size, and the groups are added the same way.
+    """
+    if len(terms) <= SUM_GROUP:
+        return "+".join(terms)
+    groups = [terms[i:i + SUM_GROUP] for i in range(0, len(terms), SUM_GROUP)]
+    return expression_sum([f"({'+'.join(group)})" for group in groups])
+
+
 def picture_chain(picture: Picture, fps: Fraction, origin: int = 0, scale: str | None = None) -> str:
     """The filter chain that shows ``picture``. Pure.
 
@@ -199,8 +218,8 @@ def picture_chain(picture: Picture, fps: Fraction, origin: int = 0, scale: str |
     last frame, held if need be.
     """
     rate = f"{fps.numerator}/{fps.denominator}"
-    picks = "+".join(
-        f"between(pts,{run.first - origin},{run.first + run.count - 1 - origin})" for run in picture.shown
+    picks = expression_sum(
+        [f"between(pts,{run.first - origin},{run.first + run.count - 1 - origin})" for run in picture.shown]
     )
     moves = [str(picture.shown[0].moved - origin)]
     for before, run in zip(picture.shown, picture.shown[1:]):
@@ -209,7 +228,7 @@ def picture_chain(picture: Picture, fps: Fraction, origin: int = 0, scale: str |
     steps = [
         f"fps={rate}",
         f"select='{picks}'",
-        f"setpts='PTS-({'+'.join(moves)})'",
+        f"setpts='PTS-({expression_sum(moves)})'",
         f"fps={rate}:start_time=0",
         "tpad=stop_mode=clone:stop=-1",
         f"trim=end_frame={picture.frames}",

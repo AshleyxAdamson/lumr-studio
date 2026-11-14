@@ -28,6 +28,8 @@ from lumr_studio.render_jobs import (
     Picture,
     Shown,
     frame_rate,
+    SUM_GROUP,
+    expression_sum,
     picture_chain,
     plan_cut,
     plan_picture,
@@ -360,6 +362,36 @@ def test_the_picture_chain_keeps_the_runs_moves_them_and_holds_over_the_gaps():
         "setpts='PTS-(9+gte(PTS,30)*9+gte(PTS,50)*15)',"
         "fps=25/1:start_time=0,tpad=stop_mode=clone:stop=-1,trim=end_frame=29[outv]"
     )
+
+
+def test_a_long_sum_is_written_in_groups_so_it_is_never_nested_deep():
+    few = [f"t{i}" for i in range(SUM_GROUP)]
+    assert expression_sum(few) == "+".join(few), "a short sum reads as it always did"
+    many = [f"t{i}" for i in range(SUM_GROUP * SUM_GROUP + 7)]
+    written = expression_sum(many)
+    assert [t for t in written.replace("(", "").replace(")", "").split("+")] == many, "every term, once, in order"
+    longest_run = max(len(part.split("+")) for part in written.replace(")", "(").split("(") if part.strip("+"))
+    assert longest_run <= SUM_GROUP, "no stretch of terms is added without brackets around it"
+
+
+def test_ffmpeg_takes_the_picture_chain_of_an_edit_with_hundreds_of_cuts(tmp_path):
+    # ffmpeg 9 refuses an expression nested about 100 deep, and a flat a+b+c nests once per term:
+    # a tight pace on a 20 minute take kept 259 runs and the export failed with "Cannot allocate memory".
+    runs = 400
+    picture = Picture(shown=[Shown(i * 4, 2, i * 2) for i in range(runs)], frames=runs * 2)
+    chain = picture_chain(picture, FPS)
+    out = tmp_path / "out.mp4"
+    done = subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc=d={runs * 4 / 25 + 1}:r=25:s=64x48",
+         "-filter_complex", chain, "-map", "[outv]", "-c:v", "libx264", "-preset", "ultrafast", str(out)],
+        capture_output=True, text=True,
+    )
+    assert done.returncode == 0, done.stderr[-400:]
+    frames = subprocess.run(
+        ["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames",
+         "-of", "csv=p=0", str(out)], capture_output=True, text=True,
+    ).stdout.strip()
+    assert int(frames) == runs * 2
 
 
 def test_the_picture_chain_counts_from_where_the_read_starts_and_scales_last():
