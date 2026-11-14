@@ -28,7 +28,7 @@ UM = {"start": 3.3, "end": 3.8, "reason": "filler before the line", "kind": "oth
 RETAKE = {"start": 7.9, "end": 10.75, "reason": "second take of the opening line", "kind": "repeat"}
 
 STATE_KEYS = {
-    "video", "word_times", "word_times_note", "settings", "usual", "taste", "version", "feedback", "share", "paces", "custom", "fine_ranges", "take_out",
+    "video", "reel", "word_times", "word_times_note", "settings", "usual", "taste", "version", "feedback", "share", "paces", "custom", "fine_ranges", "take_out",
     "need_a_look",
     "cut_counts", "groups", "rows", "removed", "trims", "keeps", "samples", "clusters", "busy", "overlays",
     "export", "durations", "changed", "can_undo", "words", "sounds", "updated_at",
@@ -194,6 +194,7 @@ def test_an_edit_saved_before_treatments_reads_as_its_own_pace():
 def test_state_has_every_field_the_page_reads(video):
     state = treatment.page_state(edited(video))
     assert set(state) == STATE_KEYS
+    assert state["reel"] is None, "a plain video is not joined from clips"
     assert [g["key"] for g in state["groups"]] == ["yours", "repeat", "false_start", "off_topic", "other"]
     assert [t["key"] for t in state["take_out"]] == ["pauses", "fillers", "repeats", "likes"]
     assert [t["label"] for t in state["take_out"]] == ["Long pauses", "Filler words", "Stutters", "Filler likes"]

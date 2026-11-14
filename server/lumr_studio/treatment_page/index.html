@@ -378,6 +378,8 @@ h2 .count .mine{color:var(--user)}
 .tright{flex:1 1 0; min-width:max-content; display:flex; justify-content:flex-end}
 #tnow{font-size:16px; color:var(--gold); font-weight:600; font-variant-numeric:tabular-nums}
 .tlen{font-size:12px; color:var(--text3); font-variant-numeric:tabular-nums}
+/* which clip is on screen, beside the clock. It gives way first when the row runs short of room. */
+#clipNow{font-size:12px; color:var(--text2); margin-left:6px; white-space:nowrap; font-variant-numeric:tabular-nums}
 #playBtn{min-height:32px; min-width:88px; padding:0 16px 0 13px; border-radius:16px; font-size:13px; gap:6px}
 #playBtn svg{width:13px; height:13px}
 .hop{min-height:32px; padding:4px 10px}
@@ -386,6 +388,9 @@ h2 .count .mine{color:var(--user)}
 #transport .seg button{min-height:24px}
 /* A narrower video: the row gives up room in this order, and Previous and Next keep their names longest,
    since she moves through the edit by them. Whatever leaves the eye is still said to a screen reader. */
+@container (max-width:560px){
+  #clipNow{position:absolute; width:1px; height:1px; margin:0; overflow:hidden; clip:rect(0,0,0,0)}
+}
 @container (max-width:500px){
   .tlen{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0)}
   #transport{gap:var(--s2)}
@@ -429,6 +434,15 @@ h2 .count .mine{color:var(--user)}
 #words .w.x:not(.now):hover{color:var(--red-lift)}
 #words .w.now:hover{background:var(--gold-soft)}
 #words .w.snd{font-style:italic}
+/* the first word of each clip carries the clip's name in front of it. The two never part at a line's end,
+   so the word keeps one box and picking words by where they sit works as before. */
+#words .w.clip1st{white-space:nowrap}
+#words .w.clip1st::before{
+  content:attr(data-clip); display:inline-block; vertical-align:middle; margin:0 .5em 0 0; padding:1px 7px;
+  max-width:26em; overflow:hidden; text-overflow:ellipsis;
+  font-family:var(--sans); font-size:11px; font-style:normal; font-weight:600; line-height:1.4; letter-spacing:.02em;
+  color:var(--text2); background:var(--ink); border:1px solid var(--line2); border-radius:999px;
+}
 /* Cut and Keep, beside the words she picked */
 #pickBar{
   position:absolute; z-index:3; left:0; top:0; display:flex; gap:var(--s1); padding:3px;
@@ -526,6 +540,15 @@ h2 .count .mine{color:var(--user)}
 /* a block's tip: what it is in bold, then how many edits it holds */
 #hovertip .tip-name{display:block; font-weight:600}
 #hovertip .tip-edits{display:block}
+/* a video joined from several clips: a thin line where each clip starts, with its number beside it.
+   They sit over the blocks and take no press, so the bar is grabbed and played exactly as before. */
+#clips{position:absolute; inset:0; z-index:1; pointer-events:none}
+.clipmark{position:absolute; top:0; bottom:0; border-left:1px solid var(--text2)}
+.clipmark:first-child{border-left-color:transparent}
+.clipmark b{
+  position:absolute; left:4px; top:3px; font-size:10px; line-height:1; font-weight:600; color:var(--text);
+  font-variant-numeric:tabular-nums; text-shadow:0 0 3px var(--ink), 0 0 3px var(--ink);
+}
 
 /* the "?" list: what the bar shows, then the keys */
 #shortcuts{top:calc(var(--top-h) + 6px); right:var(--s5); left:auto; width:min(360px, calc(100vw - 32px)); max-height:calc(100vh - var(--top-h) - 16px); overflow-y:auto}
@@ -630,6 +653,7 @@ h2 .count .mine{color:var(--user)}
         <div id="bar">
           <div id="barTrack" role="slider" tabindex="0" aria-label="Where you are in the whole video" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00"></div>
           <div id="blocks"></div>
+          <div id="clips" aria-hidden="true"></div>
           <div id="playhead" aria-hidden="true"></div>
           <div id="hovertip" aria-hidden="true" hidden></div>
         </div>
@@ -637,6 +661,7 @@ h2 .count .mine{color:var(--user)}
       <div id="transport">
         <div class="tleft">
           <span id="tnow" class="tnum" title="Where you are in your recording">0:00</span><span class="tlen"><span class="sr-only"> of </span><span aria-hidden="true">/ </span><span id="tlen">0:00</span><span class="sr-only"> in your recording</span></span>
+          <span id="clipNow" hidden></span>
         </div>
         <div class="tmid">
           <button id="prevBtn" class="btn quiet hop" type="button" title="Go to the cut before this ([)">
@@ -697,7 +722,7 @@ h2 .count .mine{color:var(--user)}
     <tr><td><kbd>Esc</kbd></td><td>stop a block or a cut you're hearing, or close a list</td></tr>
   </table>
   <h2 id="h-bar">The bar under the video</h2>
-  <p>Each block is a stretch where a lot changed. Press a block to play that stretch; it stops at the block's end. Press or drag anywhere else on the bar to move there.</p>
+  <p>Each block is a stretch where a lot changed. Press a block to play that stretch; it stops at the block's end. Press or drag anywhere else on the bar to move there. When your video is joined from several clips, a thin line with a number shows where each clip starts, and the clip's name sits before its first word.</p>
   <ul class="legend" aria-labelledby="h-bar">
     <li><span class="sw l1" aria-hidden="true"></span>a few edits</li>
     <li><span class="sw l2" aria-hidden="true"></span>many</li>
@@ -1078,6 +1103,47 @@ const Core = (function(){
       "More cuts here, 7:30 to 8:15, 11 edits, 0:14 out. Play", or "… Pause" while it plays. */
   function clusterName(c, playing){
     return BLOCK_NAME + ', ' + c.clock_range + ', ' + editCount(c.edits) + ', ' + c.out + '. ' + (playing ? 'Pause' : 'Play');
+  }
+
+  /* ── the clips of a joined video ─────────────────────────────── */
+
+  /** The clips a joined video is made of, in play order, each { n, name, start, end }: what the server
+      sent, less anything that is not a stretch of the video. A plain video, or one clip, gives none. */
+  function clipsOf(state){
+    const sent = state && state.reel && Array.isArray(state.reel.clips) ? state.reel.clips : [];
+    const clips = sent.filter(c => c && isFinite(c.start) && isFinite(c.end) && c.end > c.start)
+      .map((c, i) => ({ n: c.n || i + 1, name: String(c.name || ''), start: +c.start, end: +c.end }))
+      .sort((a, b) => a.start - b.start);
+    return clips.length > 1 ? clips : [];
+  }
+
+  /** Index of the clip on screen at t, or -1 with no clips. A time before the first clip is in the
+      first, and one past the last is in the last. */
+  function clipAt(clips, t){
+    if(!clips || !clips.length) return -1;
+    let i = 0;
+    for(let k = 1; k < clips.length; k++) if(t >= clips[k].start - END_SLACK) i = k;
+    return i;
+  }
+
+  /** What a clip is called wherever the creator meets it: "Clip 2 of 4 · walk.mp4", or with `brief`
+      only "Clip 2 of 4", for where there is little room. */
+  function clipLabel(clips, i, brief){
+    const c = clips[i];
+    return 'Clip ' + c.n + ' of ' + clips.length + (c.name && !brief ? ' · ' + c.name : '');
+  }
+
+  /** The first word of each clip, as { word index: clip index }: the first word whose middle is inside
+      the clip. A clip with no words in it has none. Words are in time order. */
+  function clipFirstWords(words, clips){
+    const first = {};
+    let k = 0;
+    for(let i = 0; i < (words || []).length && k < (clips || []).length; i++){
+      const m = middle(words[i]);
+      while(k < clips.length && m >= clips[k].end) k++;
+      if(k < clips.length && m >= clips[k].start){ first[i] = k; k++; }
+    }
+    return first;
   }
 
   /* ── photos and clips ────────────────────────────────────────── */
@@ -1868,6 +1934,7 @@ const Core = (function(){
     editedTime, sourceTime, editedLength, joinPlan,
     cutHop, hopTo, hopCuts, blockPress, blockPlaying, followTo, herScroll, nearestWord, edgeScroll, pickAnchor,
     clustersOf, touchesBefore, clusterAt, clusterTip, clusterName, BLOCK_NAME,
+    clipsOf, clipAt, clipLabel, clipFirstWords,
     overlayAt, tagText, shown, needALook, changedParts, exportView,
     wordIndexAt, sentenceBounds, clock, length, outText,
     WHY, whyOut, tellsWho, struckWords, shownWords, herCutAt, wordsBetween, wordChange, cutChange, actionParts, factsLine,
@@ -1926,6 +1993,8 @@ let R = [];            /* removed ranges, normalized: what edited playback skips
 let W = [];            /* words: [text, start, end, removed, who], struck wherever the edit takes any of them (C.shownWords) */
 let CUTS = [];         /* the ranges Previous and Next go through: the ones that take words (C.hopCuts) */
 let CL = [];           /* clusters, every field filled in */
+let CLIPS = [];        /* the clips a joined video is made of (C.clipsOf); none for a plain video */
+let clipShown = -2;    /* the clip named beside the clock; -2 before anything was drawn */
 let DUR = 0;
 let rowsById = {};
 const openGroups = new Set();
@@ -2039,6 +2108,7 @@ function applyState(state, how){
   W = C.shownWords(S, DUR);
   CUTS = C.hopCuts(R, W, S.rows);
   CL = C.clustersOf(S);
+  CLIPS = C.clipsOf(S);
   rowsById = {};
   (S.rows || []).forEach(r => { rowsById[r.id] = r; });
   if(!net.queue.length){
@@ -2761,7 +2831,9 @@ function paint(force){
     const tr = bar.track;
     tr.setAttribute('aria-valuemax', Math.round(DUR));
     tr.setAttribute('aria-valuenow', Math.round(t));
-    tr.setAttribute('aria-valuetext', C.clock(t) + ' of ' + C.clock(DUR) + (here >= 0 ? ', ' + C.BLOCK_NAME.toLowerCase() : ''));
+    const clip = C.clipAt(CLIPS, t);
+    tr.setAttribute('aria-valuetext', C.clock(t) + ' of ' + C.clock(DUR) + (clip >= 0 ? ', ' + C.clipLabel(CLIPS, clip) : '') + (here >= 0 ? ', ' + C.BLOCK_NAME.toLowerCase() : ''));
+    paintClip(clip);
     if(here !== bar.here){
       bar.here = here;
       document.querySelectorAll('#blocks .blk').forEach(b => { if(+b.dataset.i === here) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current'); });
@@ -2771,6 +2843,15 @@ function paint(force){
   dim($('nextBtn'), !C.hopTo(CUTS, t, 1, JOIN_LEAD));
   paintTag(t);
   words.follow(t);
+}
+/** The clip on screen, counted beside the clock, with its name under the pointer. Nothing shows for a plain video. */
+function paintClip(i){
+  if(i === clipShown) return;
+  clipShown = i;
+  const el = $('clipNow');
+  el.hidden = i < 0;
+  setText('clipNow', i < 0 ? '' : C.clipLabel(CLIPS, i, true));
+  el.title = i < 0 ? '' : C.clipLabel(CLIPS, i);
 }
 /** A hop button with nowhere to go is dimmed. It stays in reach of the keyboard, and says why when pressed. */
 function dim(btn, off){ if((btn.getAttribute('aria-disabled') === 'true') !== off) btn.setAttribute('aria-disabled', off ? 'true' : 'false'); }
@@ -2827,15 +2908,23 @@ const words = {
     const kept = w => keeps.some(k => (w[1] + w[2]) / 2 > k.start && (w[1] + w[2]) / 2 < k.end);
     /* words that don't say who took them out are all struck the one way, as before */
     const who = C.tellsWho(W);
-    const cls = W.map(w => {
+    /* the first word of each clip of a joined video carries the clip's name */
+    const first = C.clipFirstWords(W, CLIPS);
+    const cls = W.map((w, j) => {
       const why = C.whyOut(w);
-      return 'w' + (why ? ' x' : '') + (why === C.WHY.you ? ' me' : why === C.WHY.automatic && who ? ' auto' : '') + (kept(w) ? ' kept' : '') + (/^\(.*\)$/.test(w[0]) ? ' snd' : '');
+      return 'w' + (why ? ' x' : '') + (why === C.WHY.you ? ' me' : why === C.WHY.automatic && who ? ' auto' : '') + (kept(w) ? ' kept' : '') + (/^\(.*\)$/.test(w[0]) ? ' snd' : '') + (j in first ? ' clip1st' : '');
     });
+    const named = j => j in first ? C.clipLabel(CLIPS, first[j]) : null;
     if(this.els && this.els.length === W.length && this.els[0].textContent === W[0][0]){
-      for(let j = 0; j < W.length; j++) if(this.els[j].className !== cls[j]) this.els[j].className = cls[j];
+      for(let j = 0; j < W.length; j++){
+        const e = this.els[j], name = named(j);
+        if(e.className !== cls[j]) e.className = cls[j];
+        if(name === null){ if(e.hasAttribute('data-clip')) e.removeAttribute('data-clip'); }
+        else if(e.getAttribute('data-clip') !== name) e.setAttribute('data-clip', name);
+      }
     } else {
       const top = this.box.scrollTop;
-      this.box.innerHTML = W.map((w, j) => '<span class="' + cls[j] + '" data-i="' + j + '">' + esc(w[0]) + '</span>').join(' ');
+      this.box.innerHTML = W.map((w, j) => '<span class="' + cls[j] + '" data-i="' + j + '"' + (j in first ? ' data-clip="' + esc(named(j)) + '"' : '') + '>' + esc(w[0]) + '</span>').join(' ');
       this.els = this.box.children;
       this.scrollTo(top);
     }
@@ -3131,6 +3220,13 @@ function renderBar(){
       ' aria-label="' + esc(C.clusterName(c, false)) + '">' + BLOCK_ICONS + '</button>';
   }).join('');
   bar.here = -1;
+  renderClips();
+}
+/** Where each clip of a joined video starts: a line on the bar with the clip's number. A plain video has none. */
+function renderClips(){
+  $('clips').innerHTML = !DUR ? '' : CLIPS.map(c =>
+    '<span class="clipmark" style="left:' + (Math.max(0, Math.min(DUR, c.start)) / DUR * 100).toFixed(3) + '%"><b>' + esc(c.n) + '</b></span>').join('');
+  clipShown = -2;
 }
 /** The playback, as the Core rules for the blocks read it. */
 function playingNow(){ return { want: PB.want, job: PB.job, key: PB.jobKey }; }
@@ -3164,6 +3260,11 @@ function showTip(what, x){
   tip.style.left = Math.max(half, Math.min(w - half, x)) + 'px';
 }
 function showBlockTip(i, x){ showTip(C.clusterTip(CL[i]), x); }
+/** The tip over the bar away from a block: the time, and under it the clip that time is in when the video is joined from several. */
+function timeTip(t){
+  const clip = C.clipAt(CLIPS, t);
+  return clip < 0 ? C.clock(t) : { name: C.clock(t), edits: C.clipLabel(CLIPS, clip) };
+}
 function hideTip(){ $('hovertip').hidden = true; }
 /* The press is captured, so the drag keeps going wherever the pointer goes until she lets go, and its
    default is stopped: a press that could start a text selection or a drag of the page's own lets the
@@ -3187,7 +3288,7 @@ bar.box.addEventListener('pointermove', e => {
   const b = !p && e.target.closest('.blk');
   const x = e.clientX - bar.box.getBoundingClientRect().left;
   if(b) showBlockTip(+b.dataset.i, x);
-  else showTip(C.clock(barTime(e.clientX)), x);
+  else showTip(timeTip(barTime(e.clientX)), x);
 });
 /** The press ends. Only the play button, let go without a drag, plays its cluster. */
 function endPress(e){

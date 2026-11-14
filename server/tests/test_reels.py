@@ -12,11 +12,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from lumr_studio import reels, tools, word_times
+from lumr_studio import reels, tools, treatment, word_times
 from lumr_studio.errors import StudioError
 from lumr_studio.jobs import JobHandle
 from lumr_studio.overlays import probe_media
 from lumr_studio.project import open_project
+from lumr_studio.silences import no_silences
 from lumr_studio.transcript import pack_transcript
 from lumr_studio.tools import unmeasured_labels
 
@@ -784,6 +785,37 @@ def test_get_edit_shows_the_clips_of_a_reel_and_nothing_for_a_plain_video(video,
         "name": "seen",
         "pieces": [{k: p[k] for k in ("clip", "reel_start", "reel_end")} for p in result["pieces"]],
     }
+
+
+def page_state_of(video: Path, duration: float) -> dict:
+    """What the review page is sent for a video with one saved cut."""
+    cut = {"start": 3.3, "end": 3.8, "reason": "filler before the line", "kind": "other"}
+    tools.set_edit(str(video), [cut], silences=no_silences, labels=unmeasured_labels)
+    ctx = treatment.load_context(open_project(str(video)), duration=duration, silences=no_silences)
+    return treatment.page_state(ctx)
+
+
+def test_the_review_page_is_sent_the_clips_of_a_reel_by_file_name_alone(video, jobs):
+    reel, result = build_reel_with_words(video, jobs)
+    sent = page_state_of(reel, result["duration"])["reel"]
+    start = result["pieces"][1]["reel_start"]
+    assert sent == {
+        "name": "seen",
+        "clips": [
+            {"n": 1, "name": "talk.mp4", "start": 0.0, "end": round(start, 3)},
+            {"n": 2, "name": "talk two.mp4", "start": round(start, 3), "end": round(result["pieces"][1]["reel_end"], 3)},
+        ],
+    }
+    assert str(video.parent) not in json.dumps(sent), "the page is never sent the folder a clip is in"
+
+
+def test_the_review_page_is_sent_no_clips_for_a_plain_video_or_a_reel_of_one_clip(video, jobs):
+    assert page_state_of(video, 20.0)["reel"] is None
+    one = run_assemble(jobs, "alone", whole(video))
+    reel = Path(one["reel"])
+    reel.with_suffix(".words.json").write_text(json.dumps(make_words()))
+    assert reels.reel_for(reel) is not None
+    assert page_state_of(reel, one["duration"])["reel"] is None, "one clip has no place where a clip starts"
 
 
 def test_read_transcript_marks_where_each_clip_starts(video, jobs):

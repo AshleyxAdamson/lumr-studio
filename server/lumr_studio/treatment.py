@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any
 
 from lumr_studio import edit as edits
-from lumr_studio import feedback, share, taste, word_times
+from lumr_studio import feedback, reels, share, taste, word_times
 from lumr_studio.autocuts import (
     FILLER_PAIRS,
     FILLER_TRIM_KIND,
@@ -1202,8 +1202,31 @@ def _overlays(ctx: Context, removed: list[Span]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda r: (r["start"], r["id"]))
 
 
+def _reel(ctx: Context) -> dict[str, Any] | None:
+    """The clips a reel is made of, for the page to mark where each starts, or None for a plain video.
+
+    ``{name, clips: [{n, name, start, end}]}``. ``name`` is the clip's file
+    name alone: the page never shows a folder. A reel of one clip has no
+    place where one clip gives way to the next, so it reads as a plain video.
+    """
+    reel = reels.reel_for(ctx.project.video)
+    if reel is None or len(reel["pieces"]) < 2:
+        return None
+    return {
+        "name": reel["name"],
+        "clips": [
+            {"n": n, "name": Path(p["clip"]).name, "start": round(float(p["reel_start"]), 3),
+             "end": round(float(p["reel_end"]), 3)}
+            for n, p in enumerate(reel["pieces"], start=1)
+        ],
+    }
+
+
 def page_state(ctx: Context, *, changed: dict[str, Any] | None = None) -> dict[str, Any]:
     """Everything the treatment page shows, from the saved edit. The round's API notes list each field.
+
+    ``reel`` is the clips a video made by ``assemble`` is joined from, each
+    with where it starts and ends in the video, or None for a plain video.
 
     ``busy`` is ``clusters`` under its earlier name with ``cuts`` beside
     ``edits``, kept so an earlier page still draws. ``taste`` is
@@ -1230,6 +1253,7 @@ def page_state(ctx: Context, *, changed: dict[str, Any] | None = None) -> dict[s
     usual = load_usual()
     return {
         "video": {"duration": round(ctx.duration, 3)},
+        "reel": _reel(ctx),
         "word_times": ctx.times,
         "word_times_note": ctx.times_note,
         "settings": treatment.as_dict(),

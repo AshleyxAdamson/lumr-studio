@@ -2143,3 +2143,100 @@ def test_cut_and_keep_never_sit_over_the_words_she_picked():
     assert "this.el(p.a), last = this.el(p.b)" in placed, "the bar goes by the whole part, not only the end she moved"
     assert "const fitsOver = over >= box.top, fitsUnder = under + h <= box.bottom;" in placed
     assert "bar.classList.add('tight')" in placed and "$('wordsHead')" in placed, "a part that fills the box: the bar sits above the words"
+
+
+# ── a video joined from several clips ────────────────────────────────────────
+
+FOUR_CLIPS = [
+    {"n": 1, "name": "one.mp4", "start": 0, "end": 60},
+    {"n": 2, "name": "two.mp4", "start": 60, "end": 200},
+    {"n": 3, "name": "three.mp4", "start": 200, "end": 230},
+    {"n": 4, "name": "four.mp4", "start": 230, "end": 300},
+]
+
+
+@needs_node
+def test_a_plain_video_and_a_single_clip_have_no_clips_to_show():
+    assert js("return Core.clipsOf({});") == []
+    assert js("return Core.clipsOf({ reel: null });") == []
+    assert js("return Core.clipsOf({ reel: { name: 'x', clips: [{ n: 1, name: 'a.mp4', start: 0, end: 9 }] } });") == []
+    assert js("return [Core.clipAt([], 3), Core.clipFirstWords([['hi', 0, 1, 0, 0]], [])];") == [-1, {}]
+
+
+@needs_node
+def test_the_clips_come_in_play_order_and_anything_that_is_not_a_stretch_is_left_out():
+    sent = [FOUR_CLIPS[2], FOUR_CLIPS[0], {"n": 9, "name": "bad.mp4", "start": 5, "end": 5}, None, FOUR_CLIPS[1]]
+    got = js(f"return Core.clipsOf({{ reel: {{ name: 'x', clips: {json.dumps(sent)} }} }});")
+    assert [c["name"] for c in got] == ["one.mp4", "two.mp4", "three.mp4"]
+    assert [c["n"] for c in got] == [1, 2, 3]
+
+
+@needs_node
+def test_the_clip_on_screen_is_the_last_one_that_has_started():
+    at = lambda t: js(f"return Core.clipAt({json.dumps(FOUR_CLIPS)}, {t});")
+    assert [at(t) for t in (0, 59.9, 60, 199, 200.5, 229.9, 230, 299, 400)] == [0, 0, 1, 1, 2, 2, 3, 3, 3]
+    # a seek lands a hair short of where it was sent: that hair before a clip's start is already the clip
+    assert at(59.98) == 1
+
+
+@needs_node
+def test_a_clip_is_named_by_its_number_the_count_and_its_file():
+    assert js(f"return Core.clipLabel({json.dumps(FOUR_CLIPS)}, 1);") == "Clip 2 of 4 · two.mp4"
+    assert js(f"return Core.clipLabel({json.dumps(FOUR_CLIPS)}, 1, true);") == "Clip 2 of 4"
+    nameless = [{"n": 1, "name": "", "start": 0, "end": 5}, {"n": 2, "name": "", "start": 5, "end": 9}]
+    assert js(f"return Core.clipLabel({json.dumps(nameless)}, 0);") == "Clip 1 of 2"
+
+
+@needs_node
+def test_the_first_word_of_each_clip_is_the_first_whose_middle_is_inside_it():
+    words = [["a", 1, 2, 0, 0], ["b", 59.8, 60.4, 0, 0], ["c", 61, 62, 0, 0], ["d", 231, 232, 0, 0], ["e", 240, 241, 0, 0]]
+    got = js(f"return Core.clipFirstWords({json.dumps(words)}, {json.dumps(FOUR_CLIPS)});")
+    # "b" straddles the start of clip 2 with its middle inside it; nothing is said in clip 3
+    assert got == {"0": 0, "1": 1, "3": 3}
+
+
+def test_the_bar_marks_where_each_clip_starts_without_taking_a_press_or_any_height():
+    html = page()
+    bar = between(markup(), "whole", "transport")
+    assert 'id="clips" aria-hidden="true"' in bar, "the marks are for the eye; the slider says the clip to a screen reader"
+    order = [bar.index(f'id="{name}"') for name in ("blocks", "clips", "playhead")]
+    assert order == sorted(order), "the marks sit over the blocks and under the playhead"
+    assert re.search(r"#clips\{[^}]*pointer-events:none", html), "a press on a mark is a press on the bar"
+    drawn = re.search(r"function renderClips\(\)\{(.*?)\n\}", html, re.S).group(1)
+    assert "CLIPS.map(" in drawn and 'class="clipmark"' in drawn and "esc(c.n)" in drawn
+    assert "renderClips();" in re.search(r"function renderBar\(\)\{(.*?)\n\}", html, re.S).group(1)
+    assert "C.clipLabel(CLIPS, clip)" in html[html.index("function paint(force){"):html.index("function dim(")], \
+        "the slider's spoken value names the clip"
+    assert "function timeTip(t){" in html and "showTip(timeTip(barTime(e.clientX)), x)" in html, "the tip over the bar names the clip"
+
+
+def test_the_clip_on_screen_is_counted_beside_the_clock_and_gives_way_first():
+    html = page()
+    transport = between(markup(), "transport", "wordsSec")
+    order = [transport.index(f'id="{name}"') for name in ("tnow", "tlen", "clipNow", "prevBtn")]
+    assert order == sorted(order)
+    assert '<span id="clipNow" hidden></span>' in transport, "nothing shows until the page knows the video is joined from clips"
+    painted = html[html.index("function paintClip(i){"):html.index("function dim(")]
+    assert "el.hidden = i < 0;" in painted and "C.clipLabel(CLIPS, i, true)" in painted
+    narrow = [int(n) for n in re.findall(r"@container \(max-width:(\d+)px\)", html)]
+    assert narrow == sorted(narrow, reverse=True) and narrow[0] > 500, "the clip count leaves before the video's length does"
+    assert re.search(r"@container \(max-width:%dpx\)\{\s*#clipNow\{" % narrow[0], html)
+
+
+def test_the_first_word_of_each_clip_carries_the_clips_name_and_stays_one_box():
+    html = page()
+    render = html[html.index("  render(){"):html.index("  el(j){")]
+    assert "C.clipFirstWords(W, CLIPS)" in render and "' clip1st'" in render
+    assert "setAttribute('data-clip', name)" in render and "removeAttribute('data-clip')" in render, \
+        "words that only change their marks still gain or lose the name"
+    assert "this.els = this.box.children;" in render, "the box still holds one element a word, so word i is child i"
+    assert "#words .w.clip1st{white-space:nowrap}" in html, "the name and its word never part at a line's end"
+    assert re.search(r"#words \.w\.clip1st::before\{\s*content:attr\(data-clip\); display:inline-block;", html)
+
+
+def test_the_clip_marks_are_explained_under_the_help_button():
+    shortcuts = part(markup(), "div", "shortcuts")
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", shortcuts))
+    assert ("When your video is joined from several clips, a thin line with a number shows where each clip starts, "
+            "and the clip's name sits before its first word.") in text
+
