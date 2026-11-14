@@ -191,12 +191,13 @@ def read_from(kept: list[Span], fps: Fraction) -> int:
 # ffmpeg reads "a+b+c+..." as a chain nested one level per term, and from version 9 it refuses an
 # expression nested deeper than about 100 levels ("Cannot allocate memory"). A tight pace on a 20
 # minute video keeps 250 runs and more, so a long sum is written in bracketed groups this size,
-# and groups of groups, which keeps the nesting far under the limit however long the edit is.
+# and groups of groups. Each level of groups nests up to this deep, so the size leaves room for
+# two full levels and part of a third: ffmpeg 9.0 takes an edit of 32,000 runs and refuses 33,000.
 SUM_GROUP = 40
 
 
 def expression_sum(terms: list[str]) -> str:
-    """``terms`` added up as one ffmpeg expression that is never nested deep. Pure.
+    """``terms`` added up as one ffmpeg expression, nested far less than once per term. Pure.
 
     Up to ``SUM_GROUP`` terms read ``a+b+c``. More are split into bracketed
     groups of that size, and the groups are added the same way.

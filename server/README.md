@@ -189,7 +189,7 @@ creator's footage stays on the creator's machine: the server binds to
 | The line under the pace when the word times are estimated | `word_times`, `word_times_note` |
 | The bar: one block per cluster, shaded by its number of edits | `clusters[].level` |
 | A name tag on the video for a photo or clip | `overlays[]` |
-| A video joined from several clips: a numbered line on the bar where each starts, "Clip 2 of 4" beside the clock, the clip's name before its first word | `reel.clips[]` (file names only, never a folder) |
+| A video joined from several clips: a line on the bar where each starts, numbered where there is room, "Clip 2 of 4" beside the clock, the clip's name before its first word | `reel.clips[]` (file names only, never a folder) |
 | Export video, with percent, the file's name and Copy path | `export`, `POST api/export`, `GET api/export` |
 
 The page adds `?muted=1` for tests: every media element is muted at volume 0.

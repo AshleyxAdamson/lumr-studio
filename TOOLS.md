@@ -1257,10 +1257,11 @@ word_times}`. On the page the creator:
   that stretch. Previous and Next go from cut to cut.
 - sees a name tag on the video while one of their photos or clips is on
   screen. The page only shows them; changes go through `set_overlays`.
-- on a reel, sees where each clip starts: a thin line with the clip's number
-  on the bar, "Clip 2 of 4" beside the clock, and the clip's name before its
-  first word. The page is sent each clip's file name, never its folder. A
-  reel of one clip shows none.
+- on a reel, sees where each clip starts: a thin line on the bar, with the
+  clip's number beside it where there is room (short clips in a row keep
+  their lines, not all their numbers), "Clip 2 of 4" beside the clock, and
+  the clip's name before its first word. The page is sent each clip's file
+  name, never its folder. A reel of one clip shows none.
 - marks any of Claude's cuts "Good cut" or "Wrong cut". Wrong puts the cut back, the way Put back does. Pressing the same button again clears the rating, and clearing "Wrong cut" does not cut it again.
 - saves the pace and switches as their usual for the next video
 - sees a quiet line, "Learning from your changes on N videos. Ask Claude to forget any of it.", when other videos taught Lumr something. Forgetting goes through Claude (`forget_taste`), not the page.

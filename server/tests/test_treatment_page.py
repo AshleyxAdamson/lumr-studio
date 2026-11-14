@@ -2197,15 +2197,27 @@ def test_the_first_word_of_each_clip_is_the_first_whose_middle_is_inside_it():
 
 @needs_node
 def test_short_clips_in_a_row_keep_their_lines_and_only_numbers_with_room_are_drawn():
-    # Found on a real video of 13 clips: three short ones in a row drew "345" as one blot on the bar.
-    clips = [{"n": i + 1, "name": "c", "start": s, "end": s + 1} for i, s in enumerate([0, 220, 500, 503, 511, 616, 742, 795, 809, 816])]
-    shown = js(f"return Core.clipNumbersShown({json.dumps(clips)}, 1000);")
-    assert shown == [True, True, True, False, False, True, True, True, False, False]
-    assert js("return Core.clipNumbersShown([], 1000);") == []
-    assert js(f"return Core.clipNumbersShown({json.dumps(clips[:2])}, 0);") == [True, False], "no length yet: only the first"
+    # Three short clips in a row drew "345" as one blot on the bar.
+    def numbers(starts: list[int], *more: float) -> list[bool]:
+        clips = [{"n": i + 1, "name": "c", "start": s, "end": s + 1} for i, s in enumerate(starts)]
+        return js(f"return Core.clipNumbersShown({json.dumps([clips, *more])[1:-1]});")
+
+    starts = [0, 220, 500, 503, 511, 616, 742, 795, 809, 816]
+    assert numbers(starts, 1000, 800) == [True, True, True, False, False, True, True, True, False, False]
+    # a number is as wide on a narrow bar as on a wide one, so there it needs a larger share of the bar
+    assert numbers(starts, 1000, 320) == [True, True, True, False, False, True, True, False, True, False]
+    assert numbers(starts, 1000) == numbers(starts, 1000, 800), "a bar with no width yet goes by a share of its length"
+    # a clip at the bar's very end has its number before its line, towards the number before it
+    assert numbers([0, 930, 961], 1000, 800, 0.94) == [True, True, False]
+    assert numbers([0, 900, 961], 1000, 800, 0.94) == [True, True, True]
+    assert numbers([0, 950, 980], 1000, 800, 0.94) == [True, True, True], "two numbers before their lines sit as far apart as the lines"
+    assert numbers([], 1000, 800) == [] and numbers([40], 1000, 800) == [True]
+    assert numbers([0, 220], 0, 800) == [True, False], "no length yet: only the first"
     html = page()
     drawn = re.search(r"function renderClips\(\)\{(.*?)\n\}", html, re.S).group(1)
-    assert "C.clipNumbersShown(CLIPS, DUR)" in drawn and "numbered[i] ? '<b>'" in drawn
+    assert "C.clipNumbersShown(CLIPS, DUR, bar.box.clientWidth, LATE_MARK)" in drawn and "numbered[i] ? '<b>'" in drawn
+    resized = html[html.index("window.addEventListener('resize'"):]
+    assert "renderClips();" in resized[:resized.index("\n")], "a bar that changes width picks its numbers again"
 
 
 def test_the_bar_marks_where_each_clip_starts_without_taking_a_press_or_any_height():
@@ -2267,6 +2279,6 @@ def test_the_first_word_of_each_clip_carries_the_clips_name_and_stays_one_box():
 def test_the_clip_marks_are_explained_under_the_help_button():
     shortcuts = part(markup(), "div", "shortcuts")
     text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", shortcuts))
-    assert ("When your video is joined from several clips, a thin line with a number shows where each clip starts, "
-            "and the clip's name sits before its first word.") in text
+    assert ("When your video is joined from several clips, a thin line shows where each clip starts, with the clip's "
+            "number beside it where there is room, and the clip's name sits before its first word.") in text
 

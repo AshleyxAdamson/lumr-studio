@@ -732,7 +732,7 @@ h2 .count .mine{color:var(--user)}
     <tr><td><kbd>Esc</kbd></td><td>stop a block or a cut you're hearing, or close a list</td></tr>
   </table>
   <h2 id="h-bar">The bar under the video</h2>
-  <p>Each block is a stretch where a lot changed. Press a block to play that stretch; it stops at the block's end. Press or drag anywhere else on the bar to move there. When your video is joined from several clips, a thin line with a number shows where each clip starts, and the clip's name sits before its first word.</p>
+  <p>Each block is a stretch where a lot changed. Press a block to play that stretch; it stops at the block's end. Press or drag anywhere else on the bar to move there. When your video is joined from several clips, a thin line shows where each clip starts, with the clip's number beside it where there is room, and the clip's name sits before its first word.</p>
   <ul class="legend" aria-labelledby="h-bar">
     <li><span class="sw l1" aria-hidden="true"></span>a few edits</li>
     <li><span class="sw l2" aria-hidden="true"></span>many</li>
@@ -1136,18 +1136,24 @@ const Core = (function(){
     return i;
   }
 
-  /* On the bar a clip's number needs this share of the bar to itself, so the numbers of short clips
-     in a row never run into each other. Their lines always show. */
+  /* On the bar a clip's number needs this many pixels to itself, two digits and the gap after them, so
+     the numbers of short clips in a row never run into each other. Their lines always show. */
+  const CLIP_NUMBER_PX = 20;
+  /* The same room as a share of the bar, for a bar whose width is not known. */
   const CLIP_NUMBER_ROOM = 0.03;
 
   /** Which clips show their number on the bar, as a list of true and false in clip order: the first
-      always, then each one that starts far enough after the last number shown. */
-  function clipNumbersShown(clips, duration){
-    let last = -Infinity;
+      always, then each one whose number starts clear of the last number shown. `width` is the bar's, in
+      pixels. A number sits after its line, or before it for a clip that starts past `late` (a share of
+      the bar), so that one needs its room on the near side of its line. */
+  function clipNumbersShown(clips, duration, width, late){
+    const room = width > 0 ? CLIP_NUMBER_PX / width : CLIP_NUMBER_ROOM;
+    let free = -Infinity;   /* where the last number shown ends, as a share of the bar */
     return (clips || []).map(c => {
-      const at = duration > 0 ? c.start / duration : 0;
-      if(at - last < CLIP_NUMBER_ROOM) return false;
-      last = at;
+      const at = duration > 0 ? Math.max(0, Math.min(1, c.start / duration)) : 0;
+      const from = at > late ? at - room : at;
+      if(from < free - 1e-9) return false;
+      free = from + room;
       return true;
     });
   }
@@ -1960,7 +1966,7 @@ const Core = (function(){
     editedTime, sourceTime, editedLength, joinPlan,
     cutHop, hopTo, hopCuts, blockPress, blockPlaying, followTo, herScroll, nearestWord, edgeScroll, pickAnchor,
     clustersOf, touchesBefore, clusterAt, clusterTip, clusterName, BLOCK_NAME,
-    clipsOf, clipAt, clipLabel, clipFirstWords, clipNumbersShown, CLIP_NUMBER_ROOM,
+    clipsOf, clipAt, clipLabel, clipFirstWords, clipNumbersShown, CLIP_NUMBER_ROOM, CLIP_NUMBER_PX,
     overlayAt, tagText, shown, needALook, changedParts, exportView,
     wordIndexAt, sentenceBounds, clock, length, outText,
     WHY, whyOut, tellsWho, struckWords, shownWords, herCutAt, wordsBetween, wordChange, cutChange, actionParts, factsLine,
@@ -3252,7 +3258,7 @@ function renderBar(){
 /** Where each clip of a joined video starts: a line on the bar with the clip's number. A plain video has none. */
 function renderClips(){
   /* short clips in a row keep their lines; only the numbers with room to themselves are drawn */
-  const numbered = C.clipNumbersShown(CLIPS, DUR);
+  const numbered = C.clipNumbersShown(CLIPS, DUR, bar.box.clientWidth, LATE_MARK);
   $('clips').innerHTML = !DUR ? '' : CLIPS.map((c, i) => {
     const at = Math.max(0, Math.min(DUR, c.start)) / DUR;
     return '<span class="clipmark"' + (at > LATE_MARK ? ' data-late' : '') + ' style="left:' + (at * 100).toFixed(3) + '%">' + (numbered[i] ? '<b>' + esc(c.n) + '</b>' : '') + '</span>';
@@ -3354,7 +3360,7 @@ bar.box.addEventListener('keydown', e => {
   else if(e.key === 'End'){ e.preventDefault(); e.stopPropagation(); seekUser(Math.max(0, DUR - 1)); }
 });
 let resizeT = 0;
-window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { words.scroll(); words.placeBar(); }, 80); });
+window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { words.scroll(); words.placeBar(); renderClips(); }, 80); });
 
 
 /* ══ export: the one main button ═══════════════════════════════

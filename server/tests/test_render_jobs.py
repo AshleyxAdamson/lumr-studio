@@ -1,6 +1,7 @@
 """Starting a full render and reading it as an export, and how the cut is planned. No video is encoded here."""
 
 import json
+import shutil
 import subprocess
 import threading
 from fractions import Fraction
@@ -374,24 +375,27 @@ def test_a_long_sum_is_written_in_groups_so_it_is_never_nested_deep():
     assert longest_run <= SUM_GROUP, "no stretch of terms is added without brackets around it"
 
 
-def test_ffmpeg_takes_the_picture_chain_of_an_edit_with_hundreds_of_cuts(tmp_path):
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_ffmpeg_takes_the_picture_chain_of_an_edit_with_hundreds_of_cuts():
     # ffmpeg 9 refuses an expression nested about 100 deep, and a flat a+b+c nests once per term:
     # a tight pace on a 20 minute take kept 259 runs and the export failed with "Cannot allocate memory".
     runs = 400
     picture = Picture(shown=[Shown(i * 4, 2, i * 2) for i in range(runs)], frames=runs * 2)
-    chain = picture_chain(picture, FPS)
-    out = tmp_path / "out.mp4"
-    done = subprocess.run(
-        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc=d={runs * 4 / 25 + 1}:r=25:s=64x48",
-         "-filter_complex", chain, "-map", "[outv]", "-c:v", "libx264", "-preset", "ultrafast", str(out)],
-        capture_output=True, text=True,
-    )
-    assert done.returncode == 0, done.stderr[-400:]
-    frames = subprocess.run(
-        ["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames",
-         "-of", "csv=p=0", str(out)], capture_output=True, text=True,
-    ).stdout.strip()
-    assert int(frames) == runs * 2
+    source = ["-f", "lavfi", "-i", f"testsrc2=d={runs * 4 / 25}:r=25:s=320x240"]
+
+    def frames(*graph: str) -> list[str]:
+        """A checksum of each frame ffmpeg puts out. Nothing is encoded."""
+        done = subprocess.run(
+            ["ffmpeg", "-v", "error", *source, *graph, "-f", "framemd5", "-"], capture_output=True, text=True
+        )
+        assert done.returncode == 0, done.stderr[-400:]
+        return [line.rsplit(",", 1)[1].strip() for line in done.stdout.splitlines() if not line.startswith("#")]
+
+    recorded = frames()
+    assert len(set(recorded)) == runs * 4, "no two frames of the source look the same"
+    shown = frames("-filter_complex", picture_chain(picture, FPS), "-map", "[outv]")
+    # the count alone proves nothing: the chain holds its last frame out to the full length whatever it kept
+    assert shown == [recorded[run.first + k] for run in picture.shown for k in range(run.count)]
 
 
 def test_the_picture_chain_counts_from_where_the_read_starts_and_scales_last():

@@ -27,7 +27,7 @@ The plugin gives Claude 14 tools and three skills, `tight-cut`, `assemble-takes`
 | Play, Previous, Next | Centered under the video. Previous and Next go from cut to cut. The video and the words move together. |
 | Original and Edited | Switch between your recording and the edit. |
 | The bar | The whole video along the bottom. Each amber block is a stretch where lots was cut close together; hover one and it says "More cuts here" and how many edits it holds. The shade shows the same: a few, many, or the most. Press the play button on a block to hear that stretch. Click or drag anywhere else on the bar to move. |
-| Clips | When the video was joined from several clips: a thin line with a number on the bar where each clip starts, "Clip 2 of 4" beside the clock, and the clip's name before its first word. Click that word to go to the clip. |
+| Clips | When the video was joined from several clips: a thin line on the bar where each clip starts, with the clip's number beside it where there is room, "Clip 2 of 4" beside the clock, and the clip's name before its first word. Click that word to go to the clip. |
 | Export video | The one filled button, upper right. It shows a percent while it runs, then the file's name with "Copy path". |
 
 Struck words say who took them out: dim for the pace, red for Claude, teal for you. When you're done, tell Claude, and it reads what you changed.
