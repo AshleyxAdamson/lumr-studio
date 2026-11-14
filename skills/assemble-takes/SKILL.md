@@ -175,7 +175,7 @@ When one cut covers a whole take and a broken-off try, use `repeat`.
 
 **Long silences go, and you list their places.** When the creator stops talking for several seconds and the recording keeps running, they usually left room for b-roll. Before you cut one, call `look` at its start and read the sound wave and the pictures. A silence can be a creator showing something to the camera, a laugh, or a sound you can't hear in the transcript. Keep any stretch where the words around it point at something shown ("look at this", "see"), or where the wave is loud with no word on it, and mention it to the creator. Cut the rest as `other`. Do this before you save the cut that removes it: with no cut near, `look` shows the plain footage, and once the silence is cut it shows the join and not what was inside. The creator needs to know where it was, so for each one keep a note of its reel time. After you save the draft in step 6, find where it falls in the edited video: call `look` with the silence's start time. The answer's `edited_at` is that place.
 
-**Keep the order.** The reel plays in the order the clips were joined. Cuts take takes out. They don't move anything. If the takes you kept come out of script order, tell the creator. Offer to join the clips again in another order, or with a start and end on a clip. That makes a new reel, so the transcript and the cuts start over for it.
+**Keep the order.** The reel plays in the order the clips were joined. Cuts take takes out. They don't move anything. If the takes you kept come out of script order, tell the creator. Offer to join the clips again in another order, or with a start and end on a clip. That makes a new reel. Call `carry_edit` from the old reel to the new one and the transcript and the cuts go with it; read its report for any cut it split or dropped.
 
 ## 6. Then pace
 
@@ -253,7 +253,7 @@ Follow the tight-cut skill's steps 8 and 9. Two things differ here.
 - **In chat.** "Use the first take of line 3" means you change the cuts: drop the cut that removed it, cut the take you had kept, and call `set_edit` with the whole new list. Check `joins` again and show what changed.
 - **Export.** The finished video lands in the reel's own project folder, under `exports/`. The clips are never touched.
 
-If the creator wants a different order of clips, or another clip added, that is a new `assemble` call. It makes a new reel, and a new reel is a new project. The cuts you made don't carry over, so transcribe and choose the takes again.
+If the creator wants a different order of clips, or another clip added, that is a new `assemble` call. It makes a new reel, and a new reel is a new project. Call `carry_edit` from the old reel to the new one: the cuts, the picks, the creator's own changes and the transcript go with it, and its report names every cut it split, shortened or dropped. To put the creator's other clips in where the talk calls for them, follow the `splice-clips` skill.
 
 ## Handling tool errors
 

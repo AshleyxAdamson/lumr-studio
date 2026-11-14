@@ -74,6 +74,8 @@ It runs in Claude Code, and in Cowork when the session runs on your Mac. Chat on
 
 > Use assemble-takes on ~/Movies/Bread/take-1.mp4, take-2.mp4, take-3.mp4 and take-4.mp4, in that order. Here's my script: (paste it).
 
+> Use splice-clips on my bread video. Put ~/Movies/Bread/oven.mov in where I say "watch this", and crumb.mov where I cut the loaf.
+
 > Use ui-feedback on ~/Movies/app-walkthrough.mov
 
 ## What it runs and fetches
