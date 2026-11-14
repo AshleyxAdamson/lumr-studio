@@ -342,11 +342,11 @@ def test_a_filler_trim_that_takes_no_filler_is_filed_as_a_pause():
 def test_only_words_on_a_filler_list_are_named_as_fillers():
     from lumr_studio.autocuts import FILLER_PAIRS, FILLER_WORDS, fillers_in
 
-    said = [word(text, i, i + 0.5) for i, text in enumerate(["You", "know,", "take", "So,", "sort", "of", "know", "um."])]
-    assert fillers_in(said) == ["you know", "so", "sort of", "um"], "a pair reads as one, and its halves alone are no filler"
+    said = [word(text, i, i + 0.5) for i, text in enumerate(["You", "know,", "take", "So,", "sort", "of", "know", "and."])]
+    assert fillers_in(said) == ["you know", "so", "sort of", "and"], "a pair reads as one, and its halves alone are no filler"
     assert fillers_in([word("take", 0, 1), word("maybe", 1, 2)]) == []
     assert fillers_in([]) == []
-    assert {"and", "so", "um", "just"} <= FILLER_WORDS and "take" not in FILLER_WORDS
+    assert {"and", "so", "just"} <= FILLER_WORDS and "take" not in FILLER_WORDS
     assert {"you know", "sort of"} <= FILLER_PAIRS
 
 
@@ -355,14 +355,17 @@ def test_a_word_judged_by_reading_is_no_filler_to_the_pace():
 
     from lumr_studio.autocuts import FILLER_WORDS, JUDGED_BY_READING, engine_level, file_by_what_it_takes, filler_lists, fillers_in
 
-    assert JUDGED_BY_READING == {"like"}
-    assert any("like" in level.filler_words for level in EDIT_LEVELS.values()), "ClipForge lists it, and plans removals for it"
-    assert "like" not in FILLER_WORDS
-    assert fillers_in([word("Like,", 0, 0.5), word("um", 1, 1.5)]) == ["um"]
+    from lumr_studio.sounds import UM_WORDS
+
+    assert JUDGED_BY_READING == {"like"} | UM_WORDS and {"um", "umm", "uh", "uhh", "uhm", "er", "erm", "ah"} <= UM_WORDS
+    for said in ("like", "um", "uh"):
+        assert any(said in level.filler_words for level in EDIT_LEVELS.values()), "ClipForge lists it, and plans removals for it"
+        assert said not in FILLER_WORDS
+    assert fillers_in([word("Like,", 0, 0.5), word("Um,", 0.6, 0.9), word("and", 1, 1.5)]) == ["and"]
     for gap_length in (NATURAL, STANDARD, FAST, GAP_LENGTH_MIN):
         singles, _pairs = filler_lists(engine_level(gap_length))
-        assert "like" not in singles
-        assert fillers_in([word("like", 0, 0.5)], engine_level(gap_length)) == []
+        assert "like" not in singles and not singles & UM_WORDS
+        assert fillers_in([word("like", 0, 0.5), word("uhh", 0.6, 0.9)], engine_level(gap_length)) == []
     # A removal ClipForge named for the word is a pause, whatever it lands on.
     trims = [{"start": 1.15, "end": 1.5, "reason": "filler: like"}]
     file_by_what_it_takes(trims, AND_LIKE, engine_level(FAST))
@@ -390,6 +393,7 @@ def pause(start, end):
 JUST_TAKE = [word("You", 0.0, 0.2), word("can", 0.2, 0.4), word("just", 0.4, 0.6),
              word("take", 1.0, 1.25), word("one", 1.7, 1.9), word("step.", 1.9, 2.2)]
 AND_LIKE = [word("works.", 0.0, 0.5), word("like,", 1.2, 1.45), word("it", 2.2, 2.4), word("helps.", 2.4, 2.9)]
+AND_AND = [word("works.", 0.0, 0.5), word("and,", 1.2, 1.45), word("it", 2.2, 2.4), word("helps.", 2.4, 2.9)]
 AND_UM = [word("works.", 0.0, 0.5), word("um,", 1.2, 1.45), word("it", 2.2, 2.4), word("helps.", 2.4, 2.9)]
 
 
@@ -416,14 +420,14 @@ def test_a_trim_that_holds_no_word_is_left_as_planned():
 
 def test_a_filler_inside_a_pause_belongs_to_the_filler_switch():
     whole = [pause(0.55, 2.15)]
-    assert taken(whole, AND_UM) == [(0.55, 2.15, "pauses")], "on, the pause takes the filler with it"
-    assert taken(whole, AND_UM, on=("pauses", "repeats")) == [
+    assert taken(whole, AND_AND) == [(0.55, 2.15, "pauses")], "on, the pause takes the filler with it"
+    assert taken(whole, AND_AND, on=("pauses", "repeats")) == [
         (0.55, 1.2, "pauses"), (1.45, 2.15, "pauses"),
     ], "off, the word stays and the pause either side of it still goes"
 
 
 def test_with_long_pauses_off_a_pause_goes_nowhere_and_takes_no_filler_with_it():
-    assert taken([pause(0.55, 2.15)], AND_UM, on=("fillers", "repeats")) == []
+    assert taken([pause(0.55, 2.15)], AND_AND, on=("fillers", "repeats")) == []
 
 
 @pytest.mark.parametrize("gap_length", [NATURAL, STANDARD, FAST, GAP_LENGTH_MIN])
@@ -432,6 +436,27 @@ def test_a_pause_never_takes_a_like_with_it(gap_length, on):
     assert taken([pause(0.55, 2.15)], AND_LIKE, gap_length=gap_length, on=on) == [
         (0.55, 1.2, "pauses"), (1.45, 2.15, "pauses"),
     ], "the word stays at every pace, and the pause either side of it still goes"
+
+
+@pytest.mark.parametrize("gap_length", [NATURAL, STANDARD, FAST, GAP_LENGTH_MIN])
+@pytest.mark.parametrize("on", [EVERY_KIND, ("pauses", "repeats"), ("pauses",)])
+@pytest.mark.parametrize("spelling", ["um,", "Uhh", "erm", "ah,"])
+def test_a_pause_never_takes_an_um_with_it(gap_length, on, spelling):
+    talk = [word("works.", 0.0, 0.5), word(spelling, 1.2, 1.45), word("it", 2.2, 2.4), word("helps.", 2.4, 2.9)]
+    assert taken([pause(0.55, 2.15)], talk, gap_length=gap_length, on=on) == [
+        (0.55, 1.2, "pauses"), (1.45, 2.15, "pauses"),
+    ], "an um is judged by reading: it stays at every pace, and the pause either side of it still goes"
+
+
+def test_a_removal_clipforge_named_for_an_um_takes_the_pause_beside_it_and_leaves_the_word():
+    named = [{"start": 1.15, "end": 2.15, "reason": "filler: um", "kind": "fillers"}]
+    assert taken(named, AND_UM) == [(1.45, 2.15, "pauses")]
+    assert taken(named, AND_UM, on=("fillers", "repeats")) == [], "and that pause waits for the pause switch"
+    assert taken([{"start": 1.2, "end": 1.45, "reason": "filler: um", "kind": "fillers"}], AND_UM) == []
+    # Said twice it is no stutter either: both stay.
+    twice = [word("so", 0.0, 0.4), word("um", 1.0, 1.2), word("um", 1.25, 1.45), word("begin", 1.5, 2.0)]
+    stutter = [{"start": 0.95, "end": 1.22, "reason": "stutter: um um", "kind": "repeats"}]
+    assert taken(stutter, twice, gap_length=FAST) == [] and taken(stutter, twice, gap_length=GAP_LENGTH_MIN) == []
 
 
 def test_a_removal_clipforge_named_for_a_like_takes_the_pause_beside_it_and_leaves_the_word():
@@ -456,9 +481,9 @@ def test_a_word_is_a_filler_by_the_list_of_the_pace():
     # ClipForge counts "so" as a filler from its fourth level on, which Fast reads. Standard reads the third.
     assert taken([pause(0.55, 2.15)], so, gap_length=FAST) == [(0.55, 2.15, "pauses")]
     assert taken([pause(0.55, 2.15)], so, gap_length=STANDARD) == [(0.55, 1.2, "pauses"), (1.45, 2.15, "pauses")]
-    # "um" is on the third level's list and on none at Natural, where no word goes at all.
-    assert taken([pause(0.55, 2.15)], AND_UM, gap_length=STANDARD) == [(0.55, 2.15, "pauses")]
-    assert taken([pause(0.55, 2.15)], AND_UM, gap_length=NATURAL) == [(0.55, 1.2, "pauses"), (1.45, 2.15, "pauses")]
+    # "and" is on the third level's list and on none at Natural, where no word goes at all.
+    assert taken([pause(0.55, 2.15)], AND_AND, gap_length=STANDARD) == [(0.55, 2.15, "pauses")]
+    assert taken([pause(0.55, 2.15)], AND_AND, gap_length=NATURAL) == [(0.55, 1.2, "pauses"), (1.45, 2.15, "pauses")]
 
 
 def test_a_two_word_filler_goes_whole_or_stays_whole():
@@ -470,15 +495,15 @@ def test_a_two_word_filler_goes_whole_or_stays_whole():
 
 
 def test_a_filler_trim_goes_with_its_own_switch_as_before():
-    named = [{"start": 1.15, "end": 2.15, "reason": "filler: um", "kind": "fillers"}]
-    assert taken(named, AND_UM) == [(1.15, 2.15, "fillers")]
-    assert taken(named, AND_UM, on=("fillers",)) == [(1.15, 2.15, "fillers")], "with the pause beside the word, as ClipForge planned it"
-    assert taken(named, AND_UM, on=("pauses", "repeats")) == []
+    named = [{"start": 1.15, "end": 2.15, "reason": "filler: and", "kind": "fillers"}]
+    assert taken(named, AND_AND) == [(1.15, 2.15, "fillers")]
+    assert taken(named, AND_AND, on=("fillers",)) == [(1.15, 2.15, "fillers")], "with the pause beside the word, as ClipForge planned it"
+    assert taken(named, AND_AND, on=("pauses", "repeats")) == []
 
 
 def test_what_is_left_of_a_filler_trim_once_its_word_stays_in_is_a_pause():
-    talk = [word("works.", 0.0, 0.5), word("um,", 1.0, 1.25), word("maybe", 1.6, 1.9), word("it", 2.6, 2.8)]
-    named = [{"start": 0.95, "end": 2.55, "reason": "filler: um (+1 more)", "kind": "fillers"}]
+    talk = [word("works.", 0.0, 0.5), word("and,", 1.0, 1.25), word("maybe", 1.6, 1.9), word("it", 2.6, 2.8)]
+    named = [{"start": 0.95, "end": 2.55, "reason": "filler: and (+1 more)", "kind": "fillers"}]
     assert taken(named, talk) == [(0.95, 1.6, "fillers"), (1.9, 2.55, "pauses")], "\"maybe\" is nobody's to take"
     assert taken(named, talk, on=("fillers",)) == [(0.95, 1.6, "fillers")], "and its pause waits for the pause switch"
 
@@ -517,7 +542,7 @@ def test_a_plan_saved_by_an_earlier_version_is_planned_again(tmp_path):
 
     from lumr_studio import autocuts
 
-    assert autocuts.PLANS_VERSION == 6
+    assert autocuts.PLANS_VERSION == 7
     autocuts.forget_plans()
     mark = autocuts.take_mark(TALK, [], 8.0)
     stale = [{"start": 1.1, "end": 2.9, "reason": "pause: 2.0s", "kind": "pauses"}, pause(0.05, 0.95)]
@@ -527,4 +552,4 @@ def test_a_plan_saved_by_an_earlier_version_is_planned_again(tmp_path):
     planned = autocuts.plan_auto_cuts(TALK, duration=8.0, silences=[], gap_length=0.6, rhythm=3, saved_in=tmp_path)
     assert planned and planned != stale, "the saved plan held a trim over \"One two.\""
     saved = json.loads((tmp_path / autocuts.PLANS_FILE).read_text())
-    assert saved["version"] == 6 and saved["plans"]["0.6/3.0"]["trims"] == planned
+    assert saved["version"] == 7 and saved["plans"]["0.6/3.0"]["trims"] == planned

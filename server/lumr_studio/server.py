@@ -44,7 +44,9 @@ _INSTRUCTIONS_START = (
     "(0.38 GB from PyTorch's download site) pins each word to the sound so cuts never land inside a word. "
     "Unless they already have them, tell the creator about both up front, before they pick a video, and say what each does. When transcribe answers "
     "needs_models, ask the creator before you pass download_models; nothing downloads without a yes. find_words lists every "
-    "place a word is said, so you can pick the filler ones by reading. set_edit saves a draft and returns joins, a check of how every "
+    "place a word is said, so you can pick the filler ones by reading. Ask it for \"um\" to see every um, the ones the speech "
+    "model wrote and the ones it left out, each with where it sits in its sentence and the quiet either side. No rule takes an um or "
+    "a \"like\" out: you pick them one at a time and hand them to set_edit as picks. set_edit saves a draft and returns joins, a check of how every "
     "cut will sound; read it and fix what it flags. "
     "frames shows the source video at any times you pass, for screen recordings with spoken feedback. "
 )
@@ -90,8 +92,8 @@ class Cut(BaseModel):
 
 
 class Pick(BaseModel):
-    id: str = Field(description="The id of one place a word is said, from find_words, such as w312.395-312.541.")
-    reason: str = Field(description="A few words on why this one is filler, such as: a pause word, the sentence reads the same without it.")
+    id: str = Field(description="The id of one place a word or an um is said, from find_words, such as w312.395-312.541.")
+    reason: str = Field(description="A few words on why this one goes, such as: a pause word, the sentence reads the same without it; or: opens the line after a long pause.")
 
 
 class Piece(BaseModel):
@@ -167,7 +169,7 @@ def read_transcript(
     end: Annotated[float | None, Field(description="Window end, source seconds.")] = None,
     show_cuts: Annotated[bool, Field(description="Prefix phrases the saved edit removes with CUT.")] = False,
 ) -> CallToolResult:
-    """Packed transcript as plain text, one line per sentence or two, split at pauses and sentence ends. The text ends with `NEXT <time>` (pass it as start to continue) or `END`."""
+    """Packed transcript as plain text, one line per sentence or two, split at pauses and sentence ends. A laugh or another sound between the words is a line of its own, such as `(laugh 3.5s)`. An um the speech model wrote no word for reads in its sentence where it is said, as `(um 0.5s)`. The text ends with `NEXT <time>` (pass it as start to continue) or `END`."""
     data = _run(tools.read_transcript, video_path, start, end, show_cuts)
     return _result(data, text=data["text"])
 
@@ -184,7 +186,7 @@ def find_words(
     words: Annotated[list[str], Field(description='One to five words or short phrases to find, such as ["like"].')],
     start: Annotated[float | None, Field(description="Go on from here, source seconds: the time after NEXT.")] = None,
 ) -> CallToolResult:
-    """Every place a word is said, as plain text, one place a line: an id, the clock time, six words before and after, the quiet either side, OUT:<who> when the saved edit removes it already, and NOT CLEAN when a cut there would clip the word beside it. Use it to pick filler words by reading: take the word out and read the sentence again; if it means the same, the word was filler. When unsure, leave it in. Hand the ids you pick to set_edit as picks. The text ends with `NEXT <time>` (pass it as start to continue) or `END`."""
+    """Every place a word is said, as plain text, one place a line: an id, the clock time, six words before and after, the quiet either side, OUT:<who> when the saved edit removes it already, and NOT CLEAN when a cut there would clip the word beside it. Use it to pick filler words by reading: take the word out and read the sentence again; if it means the same, the word was filler. When unsure, leave it in. Hand the ids you pick to set_edit as picks. Pass "um" (any spelling) to list every um in the video: the ones the transcript holds as a word and the ones the speech model left out, shown as `[(um 0.5s)]`. Each um line says first whether it OPENS A SENTENCE or is INSIDE A SENTENCE and the QUIET before and after it in seconds. An um that opens a sentence or has a clear pause beside it can go; one tucked between words holds the sentence together and stays. No rule decides that or takes an um out: you read each one. The text ends with `NEXT <time>` (pass it as start to continue) or `END`."""
     data = _run(tools.find_words, video_path, words, start)
     return _result(data, text=data["text"])
 
@@ -199,7 +201,7 @@ def get_edit(
         bool, Field(description="Also return joins, the self-check of how every cut will sound.")
     ] = False,
 ) -> CallToolResult:
-    """Your saved cuts with reasons, a count of automatic trims, total removed time, and the resulting duration. Carries creator when the creator changed something on the page: the pace, the take-out switches, cuts of yours put back (put_back), parts kept no matter what (kept), words brought back one by one (brought_back), and the cuts the creator made by hand (cuts, with cut_words counting what they say). The creator's cuts are settled: never list them in your own cuts and never ask to undo them. Learn from them. Carries taste: what this creator's corrections on their other videos teach (read its lessons). creator.fine holds the two slider values when the creator set the pace by hand (the pace reads custom); they are hers, so leave pace and gap_length out of set_edit. Carries picks when you picked filler words before. Carries export when a full render has run, from render or from Export video on the page: pass its job_id to job_status. Carries moved_from, once, when the video was moved or its project came from another Mac and the saved edit was found in the folder made for the old path: it is used where it is, so tell the creator and go on. Carries project_note when a folder that may hold this video's saved edit was not used: read it to the creator before you say a video has no edit."""
+    """Your saved cuts with reasons, a count of automatic trims, total removed time, and the resulting duration. Carries creator when the creator changed something on the page: the pace, the take-out switches, cuts of yours put back (put_back), parts kept no matter what (kept), words brought back one by one (brought_back), and the cuts the creator made by hand (cuts, with cut_words counting what they say). The creator's cuts are settled: never list them in your own cuts and never ask to undo them. Learn from them. Carries taste: what this creator's corrections on their other videos teach (read its lessons). creator.fine holds the two slider values when the creator set the pace by hand (the pace reads custom); they are hers, so leave pace and gap_length out of set_edit. Carries picks when you picked filler words or ums before, counted by word (counts, such as "2 ums, 3 likes"). Carries export when a full render has run, from render or from Export video on the page: pass its job_id to job_status. Carries moved_from, once, when the video was moved or its project came from another Mac and the saved edit was found in the folder made for the old path: it is used where it is, so tell the creator and go on. Carries project_note when a folder that may hold this video's saved edit was not used: read it to the creator before you say a video has no edit."""
     return _call(tools.get_edit, video_path, include_auto, check)
 
 
@@ -229,13 +231,13 @@ def set_edit(
     picks: Annotated[
         list[Pick] | None,
         Field(description=(
-            "Single filler words you picked by reading, as ids from find_words with a short reason each. "
-            "Not part of cuts: the creator has one switch for all of them on the page. Leave it out to "
+            "Single filler words and ums you picked by reading, as ids from find_words with a short reason each. "
+            "Not part of cuts: the creator has one switch for all of them on the page (Ums and likes). Leave it out to "
             "keep the picks saved before; a list replaces them; an empty list clears them."
         )),
     ] = None,
 ) -> CallToolResult:
-    """Replace the saved edit with a draft. Nothing is rendered. Cuts are checked, merged, and moved clear of spoken words; no automatic trim takes any part of a laugh or of a sound of a second or more, and a cut of yours that covers one only in part stops at it (adjusted says so; cover all of it to take it out); nothing cuts a part the creator kept: a cut over a word the creator brought back splits around it. The cuts the creator made by hand stay in the edit whatever you send. Returns applied, adjusted (requested vs final), rejected (with why), removed_seconds, new_duration, and joins: every join read the way a viewer hears it, with the ones likely to sound wrong listed and a fix for each. With picks it returns picks: how many are out, which were left in because cutting them would clip the word beside them, which the creator kept, and which ids were refused."""
+    """Replace the saved edit with a draft. Nothing is rendered. Cuts are checked, merged, and moved clear of spoken words; no automatic trim takes any part of a laugh or of a sound of a second or more, and a cut of yours that covers one only in part stops at it (adjusted says so; cover all of it to take it out); nothing cuts a part the creator kept: a cut over a word the creator brought back splits around it. The cuts the creator made by hand stay in the edit whatever you send. Returns applied, adjusted (requested vs final), rejected (with why), removed_seconds, new_duration, and joins: every join read the way a viewer hears it, with the ones likely to sound wrong listed and a fix for each. With picks it returns picks: how many are out, counted by word (counts, such as "2 ums, 3 likes"), which were left in because cutting them would clip the word beside them, which the creator kept, and which ids were refused. An um goes only when you pick it: no pace and no switch takes one."""
     return _call(
         tools.set_edit, video_path, [c.model_dump() for c in cuts], auto_tighten, gap_length,
         override_keeps, pace, None if picks is None else [p.model_dump() for p in picks],

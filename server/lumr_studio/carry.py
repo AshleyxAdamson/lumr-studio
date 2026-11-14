@@ -680,7 +680,9 @@ def _carried_picks(old: list[dict[str, Any]], stretches: list[Stretch], said: ed
             if found is None:
                 continue
             start, end, chosen = found
-            if text and plain_text(" ".join(str(w["word"]).strip() for w in chosen)) != plain_text(text):
+            # An um sound was saved as "(um)", and is a sound of the new transcript too.
+            now = " ".join(edits.UM_TEXT if is_event(w) else str(w["word"]).strip() for w in chosen)
+            if text and plain_text(now) != plain_text(text):
                 reads_differently = True
                 continue
             spots.append((start, end))

@@ -15,14 +15,15 @@ The plugin gives Claude 15 tools and four skills, `tight-cut`, `assemble-takes`,
 - Laughs, giggles and other sounds between your words are found when the video is transcribed and marked in the transcript. Claude keeps them in its own cuts, and no automatic cut takes any part of a laugh or of a sound that lasts a second or more, at any pace. A video transcribed by an earlier version gets its sounds the next time Claude works on it, without transcribing again.
 - Six pace stops, from Natural to Max, set how much of each pause comes out. Each leaves a pause at every join, the most between sentences. Fine tune holds two sliders for a setting between the stops.
 - Claude finds every place you say "like" (`find_words`), reads each one, and picks the filler ones. "I like jazz" stays. "Into like three sections" goes. When Claude is unsure, the word stays. You get one switch for all of Claude's picks and a double-click for each.
+- Claude sees every "um" too, including the ones the transcript has no word for, which it shows as "(um)". It reads each one in its sentence. An um that starts a sentence, or has a clear pause beside it, comes out. An um tucked between two words stays, because it holds the sentence together. No switch and no pace takes an um: only Claude's pick does, and the same switch and double-click cover it.
 - The review page is one page to shape the edit after Claude makes it. It plays your video from disk, and every change saves at once.
 
 | On the page | What it does |
 |---|---|
 | Pace | Six stops: Natural, Standard, Fast, Tight, Hard, Max, with the time each saves. Hard and Max say what you give up. |
 | Fine tune | Opens under the pace. Two sliders, "Cut pauses longer than" and "Speech kept between cuts". Both cut harder to the right. The pace then reads Custom. Pressing a stop leaves Custom. |
-| Take out | A switch each for long pauses, filler words, stutters and filler likes, with a count. Filler words names the words it takes at this pace, such as "like, so, and". "Make this my usual" saves your pace and switches as the start for your next video. |
-| Filler likes | The likes Claude picked, all on or off. Until Claude has picked, it reads "Ask Claude to find them." |
+| Take out | A switch each for long pauses, filler words, stutters, and ums and likes, with a count. Filler words names the words it takes at this pace, such as "so, and". It never takes an um or a like. "Make this my usual" saves your pace and switches as the start for your next video. |
+| Ums and likes | The ums and likes Claude picked, all on or off, counted by the word, such as "2 ums, 3 likes picked by Claude". Until Claude has picked, it reads "Ask Claude to find them." |
 | Cuts | Your own cuts first, then Claude's in four groups, one row per cut. Hear it cut, leave it out, put it back, or take yours back. One count shows how many need a look, and each of those says why. |
 | Words | Double-click a word to cut it. Double-click a struck word to bring it back. Drag across words to pick a part, then press Cut or Keep. Cut takes exactly the words you picked. Keep means nothing is taken out there after that, and "Kept: 1" opens the list. |
 | Undo | Shows in the top line after you cut, keep, or bring back words. The Z key does the same. It takes back your last cut or keep, one step. It doesn't cover the pace, the sliders, or the switches. |

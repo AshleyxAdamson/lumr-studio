@@ -1,4 +1,4 @@
-"""Find the sounds between a take's words, and tell laughs from hesitations among them.
+"""Find the sounds between a take's words, and tell laughs, ums and other sounds apart among them.
 
 A sound is a transcript entry of ``type: "event"``: a laugh, a giggle, a
 breath, an "uhh". Claude reads the packed transcript without hearing it, and
@@ -24,21 +24,27 @@ the transcript gets cut like silence. Three steps, each in this module:
      sounding time is voiced), a giggle is pitched most of the way through.
      Neither is a steady sound: a hesitation is one voiced blob.
    * A laugh follows a sentence end, the punchline.
+   * An um (``UM``) is a held hesitation, an "um" or "uh" the speech model
+     wrote no word for: one steady voiced sound under a second, no louder
+     than the speech around it (``is_filler``), and no short run-on of the
+     word before it. The speech model writes almost none of them as words:
+     on a 28 minute test take it wrote 3 and 10 more were sounds.
 
-3. Protecting (``protected_spans``, ``whole_spans``, ``is_filler``). The rule
-   every automatic cut goes by:
+3. Protecting (``protected_spans``, ``whole_spans``). The rule every
+   automatic cut goes by:
 
    * A laugh, likely or possible, and any sound that lasts
      ``LONG_SOUND_SECONDS`` or more is never taken, in whole or in part, by a
      pause cut, by the Filler words switch, by the Stutters switch, or by an
      edge of one of Claude's cuts that the server moved. Only a cut that was
      asked for over the whole of it takes it out.
-   * A short plain sound (a breath, an "uhh", under a second and no laugh)
-     is never taken in part, and no pause cut is planned over one. The
-     Filler words switch takes it whole when it is a held hesitation
-     (``is_filler``): one steady voiced sound, no louder than the speech
-     around it. A breath stays, and so does anything in bursts or louder
-     than the speech.
+   * A short plain sound (a breath, an um, under a second and no laugh) is
+     never taken in part, and no pause cut is planned over one. No rule
+     takes one whole either. An um is judged by reading, the way "like" is:
+     ``find_words`` lists every one in its sentence, Claude picks the ones
+     that do not help, and a pick is the one thing that takes an um out
+     (``edit.parse_pick``). Some hold a sentence together, and no measure
+     of the sound says which.
 
 ``load_or_measure_labels`` caches the labels beside the project.
 
@@ -61,15 +67,18 @@ from typing import Any
 import numpy as np
 
 from lumr_studio import word_times
+from lumr_studio.engine.microcut_pacing import GAP_LENGTH_MIN
 from lumr_studio.errors import StudioError
 from lumr_studio.project import Project, now_iso, write_json_atomic, write_text_atomic
-from lumr_studio.transcript import EVENT_TYPE, _is_sentence_end, is_event, load_transcript
+from lumr_studio.transcript import EVENT_TYPE, UM, _is_sentence_end, is_event, load_transcript, plain_text
 
 AudioMeasure = Callable[[Path, list[tuple[float, float]]], list[dict]]
 Decoder = Callable[[Path, float, float, int], np.ndarray]
 
 LAUGH = "laugh"
 SOUND = "sound"
+# ``UM`` (from ``transcript``) is the third kind: a held hesitation between
+# two words, an "um" or "uh" with no word in the transcript. See ``is_um``.
 LIKELY = "likely"
 POSSIBLE = "possible"
 
@@ -606,12 +615,13 @@ def classify_events(words: list[dict[str, Any]], *, measures: list[dict] | None 
     ``measure_samples``-shaped dict per event in the same order; an empty dict
     means that event was not measured and is judged by length and position.
     Returns ``[{start, end, seconds, kind, confidence, voiced, bursts,
-    burst_rate, over_speech_db, punchline}]``. ``confidence`` only matters
-    for a laugh and is ``possible`` for a sound. ``voiced``, ``bursts`` and
-    ``burst_rate`` are the measure, or None when the event was not measured.
-    ``over_speech_db`` is what the finder wrote on the event (``OVER_SPEECH``),
-    or None for a sound it did not find. ``is_filler`` reads all four.
-    ``punchline`` is set for laughs only.
+    burst_rate, over_speech_db, punchline}]``. ``kind`` is ``LAUGH``, ``UM``
+    (a held hesitation, see ``is_um``) or ``SOUND`` for anything else.
+    ``confidence`` only matters for a laugh and is ``possible`` otherwise.
+    ``voiced``, ``bursts`` and ``burst_rate`` are the measure, or None when
+    the event was not measured. ``over_speech_db`` is what the finder wrote
+    on the event (``OVER_SPEECH``), or None for a sound it did not find.
+    ``is_filler`` reads all four. ``punchline`` is set for laughs only.
 
     Raises StudioError when ``measures`` does not have one entry per event.
     """
@@ -622,13 +632,14 @@ def classify_events(words: list[dict[str, Any]], *, measures: list[dict] | None 
             "Measure again from the same transcript."
         )
     labels = []
+    spoken_ends = [float(w["end"]) for w in words if not is_event(w)]
     for n, i in enumerate(indexes):
         start, end = float(words[i]["start"]), float(words[i]["end"])
         seconds = round(end - start, 2)
         punchline = _punchline(words, i)
         measure = measures[n] if measures is not None else UNMEASURED
         kind, confidence = _judge(seconds, punchline, measure)
-        labels.append({
+        label = {
             "start": start,
             "end": end,
             "seconds": seconds,
@@ -639,11 +650,14 @@ def classify_events(words: list[dict[str, Any]], *, measures: list[dict] | None 
             "burst_rate": round(float(measure["burst_rate"]), 2) if measure else None,
             OVER_SPEECH: words[i].get(OVER_SPEECH),
             "punchline": punchline if kind == LAUGH else None,
-        })
+        }
+        if is_um(label, spoken_ends):
+            label["kind"] = UM
+        labels.append(label)
     return sorted(labels, key=lambda label: label["start"])
 
 
-# ── Filler vocalizations ────────────────────────────────────────────────────────
+# ── Ums ───────────────────────────────────────────────────────────────────────
 
 # A "[vocalization]" this voiced or more is a held "umm" or "uhh", the way a
 # reader hears it: a filler, not a breath. On a 21 minute take, 25 of its 87
@@ -675,20 +689,21 @@ def is_long(label: dict[str, Any]) -> bool:
 
 
 def is_filler(label: dict[str, Any]) -> bool:
-    """Whether a sound label is a held "um" or "uh", the one kind of sound the Filler words switch takes.
+    """Whether a sound label has the shape of a held "um" or "uh", by its measures alone.
 
-    All of: a ``SOUND`` (no laugh, likely or possible), voiced
-    ``FILLER_VOICED_MIN`` or more, shorter than ``LONG_SOUND_SECONDS``, no
-    louder than ``FILLER_MAX_OVER_SPEECH_DB`` over the take's loud speech,
-    and one steady sound: under ``POSSIBLE_MIN_BURSTS`` bursts in laugh
-    spacing. A giggle is voiced like an "uhh" and comes in bursts, and one
-    too short or too far from a sentence end to be called a laugh still has
-    two; on the second test video two laughs of under a second had 2 and 3.
+    All of: no laugh, likely or possible, voiced ``FILLER_VOICED_MIN`` or
+    more, shorter than ``LONG_SOUND_SECONDS``, no louder than
+    ``FILLER_MAX_OVER_SPEECH_DB`` over the take's loud speech, and one
+    steady sound: under ``POSSIBLE_MIN_BURSTS`` bursts in laugh spacing. A
+    giggle is voiced like an "uhh" and comes in bursts, and one too short
+    or too far from a sentence end to be called a laugh still has two; on
+    the second test video two laughs of under a second had 2 and 3.
 
     Measured only: an event never measured (``voiced`` is None) answers
-    False, so nothing is cut on a guess.
+    False, so nothing is called an um on a guess. ``is_um`` adds what the
+    words around the sound say; ``classify_events`` names the sound by it.
     """
-    if label.get("kind") != SOUND or label.get("voiced") is None or label["voiced"] < FILLER_VOICED_MIN:
+    if label.get("kind") not in (SOUND, UM) or label.get("voiced") is None or label["voiced"] < FILLER_VOICED_MIN:
         return False
     if is_long(label):
         return False
@@ -697,6 +712,74 @@ def is_filler(label: dict[str, Any]) -> bool:
         return False
     bursts = label.get("bursts")
     return bursts is None or bursts < POSSIBLE_MIN_BURSTS
+
+
+# A sound with no gap at all from the word right before it, and this short
+# or shorter, is that word's own voice running on, not a fresh sound: on the
+# real take "in" (aligned end 299.44) ran on 0.119 s into a "[vocalization]"
+# logged right there, voiced 0.5, the edge of held. Longer than this a
+# run-on is its own um, held or not: the measured "uhh" after "And" ran on
+# 0.169 s and is one. Matches ``GAP_LENGTH_MIN``, the shortest pause any
+# pace cuts and the same gap ``word_times.RUNS_ON_SECONDS`` calls no gap.
+WORD_TAIL_MAX_SECONDS = GAP_LENGTH_MIN
+# How close a sound's start must sit to the word before it to call it no gap
+# at all. Times are saved to the millisecond; this gives a little past that.
+WORD_TAIL_TOUCH_SECONDS = 0.002
+# A sound shorter than this is no um: nobody hesitates for under a tenth of
+# a second, and a cut that short removes nothing worth removing
+# (``autocuts.SHORTEST_PIECE_SECONDS``).
+SHORTEST_UM_SECONDS = 0.1
+
+
+def _is_word_tail(sound: dict[str, Any], spoken_ends: list[float]) -> bool:
+    """Whether ``sound`` is the trailing voice of the spoken word right before it, not a sound of its own.
+
+    True when some word ends within ``WORD_TAIL_TOUCH_SECONDS`` of where
+    ``sound`` starts, no gap at all, and ``sound`` is
+    ``WORD_TAIL_MAX_SECONDS`` or shorter.
+    """
+    if float(sound["end"]) - float(sound["start"]) > WORD_TAIL_MAX_SECONDS:
+        return False
+    start = float(sound["start"])
+    return any(abs(end - start) <= WORD_TAIL_TOUCH_SECONDS for end in spoken_ends)
+
+
+def is_um(label: dict[str, Any], spoken_ends: list[float]) -> bool:
+    """Whether a sound is an um: a held hesitation (``is_filler``) that stands on its own between the words.
+
+    ``spoken_ends`` are the ends of the take's spoken words. Left out: a
+    sound under ``SHORTEST_UM_SECONDS``, and a short run-on with no gap from
+    the word before it, which is that word's own tail (``_is_word_tail``).
+    A sound label already holds nothing but its audible span
+    (``word_times._sound_left``), so its times are the um's own.
+    """
+    if not is_filler(label) or float(label["end"]) - float(label["start"]) < SHORTEST_UM_SECONDS:
+        return False
+    return not _is_word_tail(label, spoken_ends)
+
+
+# The ways a speech model spells a hesitation when it does write one, each
+# as ``plain_text`` gives it: the "um" family (lips closed or closing) and
+# the "uh" family (mouth open). They are one thing to a viewer and to an
+# editor, and one thing here: ``find_words`` lists every spelling, and every
+# um sound, under ``UM``. "ah" and "mm" are on the list because a reader
+# tells "ah, um, so" from "Ah, there it is" at a glance and no rule can.
+# Not on it, because each says something: "mhm" (yes), "huh" (a question),
+# "oh", "well" and "so".
+UM_WORDS = frozenset({
+    "um", "umm", "ummm", "uhm", "hm", "hmm", "mm", "mmm", "erm",
+    "uh", "uhh", "uhhh", "er", "err", "ah", "ahh", "eh",
+})
+
+
+def is_um_word(entry: dict[str, Any]) -> bool:
+    """Whether a spoken entry of the transcript is a hesitation the speech model wrote as a word (``UM_WORDS``)."""
+    return not is_event(entry) and plain_text(str(entry.get("word", ""))) in UM_WORDS
+
+
+def um_spans(labels: list[dict[str, Any]] | None) -> list[tuple[float, float]]:
+    """The um sounds among ``labels``, as ``(start, end)`` sorted by start."""
+    return sorted((float(lb["start"]), float(lb["end"])) for lb in labels or [] if lb.get("kind") == UM)
 
 
 # ── Protecting ────────────────────────────────────────────────────────────────
@@ -761,7 +844,8 @@ def protected_spans(labels: list[dict], words: list[dict[str, Any]]) -> list[tup
 SOUNDS_FILE = "sounds.json"
 # Bump when the measures or the rule change, so old caches are rebuilt.
 # 3: a pitched laugh in bursts is a laugh, not only a breathy one.
-SOUNDS_VERSION = 3
+# 4: a held hesitation is named ``UM``.
+SOUNDS_VERSION = 4
 
 
 def _made_as_before(times: str) -> int | None:

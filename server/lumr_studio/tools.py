@@ -53,7 +53,15 @@ from lumr_studio.render_jobs import (
 from lumr_studio.review import ACCEPTED, EDITED, RESTORED, load_review
 from lumr_studio.review_server import review_url
 from lumr_studio.silences import SilenceProvider, measured_silences
-from lumr_studio.sounds import NOT_CHECKED, classify_events, find_sounds, load_or_measure_labels, looked_on, sounds_checked
+from lumr_studio.sounds import (
+    NOT_CHECKED,
+    classify_events,
+    find_sounds,
+    load_or_measure_labels,
+    looked_on,
+    sounds_checked,
+    um_spans,
+)
 from lumr_studio.timeline import edited_duration, to_edited_time
 from lumr_studio.transcript import pack_transcript, timing_report
 from lumr_studio.transcription import Transcriber, run_transcription, speech_transcriber, transcript_summary
@@ -562,11 +570,19 @@ def get_edit(
     return _with_sounds_note(project, summary)
 
 
-def _picks_summary(project: Project, edit: dict[str, Any], duration: float) -> dict[str, Any] | None:
-    """The filler words Claude picked and whether their switch is on, or None when Claude has not picked.
+def _counted_by_word(picks: list[dict[str, Any]]) -> dict[str, Any]:
+    """Picks counted by the word each one is: ``{by_word: [["um", 2], ["like", 3]], counts: "2 ums, 3 likes"}``."""
+    by_word = edits.picks_by_word([str(k.get("text", "")) for k in picks])
+    return {"by_word": by_word, "counts": edits.counted(by_word)}
 
-    ``{switch_on, picked, picks: [{id, clock, text, reason}]}``. What became
-    of each pick when the edit was built is in set_edit's answer.
+
+def _picks_summary(project: Project, edit: dict[str, Any], duration: float) -> dict[str, Any] | None:
+    """The filler words and ums Claude picked and whether their switch is on, or None when Claude has not picked.
+
+    ``{switch_on, picked, by_word, counts, picks: [{id, clock, text,
+    reason}]}``. ``by_word`` counts the picks by word and ``counts`` says
+    it ("2 ums, 3 likes"). What became of each pick when the edit was built
+    is in set_edit's answer.
     """
     picks = treatments.saved_picks(edit)
     if picks is None:
@@ -574,6 +590,7 @@ def _picks_summary(project: Project, edit: dict[str, Any], duration: float) -> d
     return {
         "switch_on": treatments.saved_treatment(edit).picks_on,
         "picked": len(picks),
+        **_counted_by_word(picks),
         "picks": [
             {"id": k["id"], "clock": edits.clock(float(k["start"])), "text": k.get("text", ""), "reason": k.get("reason", "")}
             for k in picks
@@ -674,22 +691,24 @@ def _treatment_for_set_edit(
 
 
 def _picks_for_set_edit(
-    picks: list[Any] | None, previous: dict[str, Any], words: Words
+    picks: list[Any] | None, previous: dict[str, Any], words: Words, sounds: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]]]:
-    """The filler words to save as picked, and the picks that were refused: ``(picks, rejected)``.
+    """The filler words and ums to save as picked, and the picks that were refused: ``(picks, rejected)``.
 
     With ``picks`` left out the list saved before carries over. A list
-    replaces it. Raises StudioError when picks were given and every one is
-    refused, so a stale list of ids can never wipe a good one.
+    replaces it. ``sounds`` are the sound labels: of the sounds, only an um
+    can be picked. Raises StudioError when picks were given and every one
+    is refused, so a stale list of ids can never wipe a good one.
     """
     if picks is None:
         return treatments.saved_picks(previous), []
     said = edits.SaidOrder.of(words)
+    ums = um_spans(sounds)
     kept: dict[str, dict[str, Any]] = {}
     rejected = []
     for i, raw in enumerate(picks):
         try:
-            pick = edits.parse_pick(i, raw, said)
+            pick = edits.parse_pick(i, raw, said, ums)
         except edits.CutRejected as why:
             rejected.append({"index": i, "pick": raw, "why": f"Pick {i} {why}"})
             continue
@@ -714,15 +733,21 @@ def _picks_report(made: Any, picks: list[dict[str, Any]], rejected: list[dict[st
             for pid, p in became.items() if p["status"] == status
         ]
 
+    out = [pid for pid, p in became.items() if p["status"] == edits.PICK_OUT]
     report: dict[str, Any] = {
         "picked": len(picks), "switch_on": switch_on,
-        "out": sum(1 for p in became.values() if p["status"] == edits.PICK_OUT),
+        "out": len(out),
+        "counts": edits.counted(edits.picks_by_word(list(text.values()))),
+        "out_counts": edits.counted(edits.picks_by_word([text.get(pid, "") for pid in out])),
         "left_in": listed(edits.PICK_LEFT_IN) + listed(edits.PICK_LOST),
         "kept_by_the_creator": listed(edits.PICK_KEPT),
         "rejected": rejected,
     }
     if not switch_on:
-        report["note"] = "The creator switched Filler likes off on the page, so no pick is taken out. The list is saved for when it goes on."
+        report["note"] = (
+            f"The creator switched {edits.PICK_LABEL} off on the page, so no pick is taken out. "
+            "The list is saved for when it goes on."
+        )
     return report
 
 
@@ -752,11 +777,13 @@ def set_edit(
     laughs. The result carries ``joins``, the self-check of every join in
     the saved edit.
 
-    ``picks`` are single filler words Claude picked by reading, each ``{id,
-    reason}`` with an id from ``find_words``. They are no part of ``cuts``:
-    the creator has one switch for all of them. Left out, the picks saved
-    before stay; a list replaces them. A pick that would clip the word
-    beside it is left in, and the result says which.
+    ``picks`` are single filler words and ums Claude picked by reading,
+    each ``{id, reason}`` with an id from ``find_words``. They are no part
+    of ``cuts``: the creator has one switch for all of them. Left out, the
+    picks saved before stay; a list replaces them. A pick that would clip
+    the word beside it is left in, and the result says which. An um the
+    transcript holds as a sound is picked like a word; no other sound can
+    be, and no rule takes an um nobody picked.
 
     An empty ``cuts`` list without ``auto_tighten`` clears the edit, and the
     result says ``cleared: true``. When cuts were given and every one is
@@ -779,7 +806,7 @@ def set_edit(
     creator_cuts = list(previous.get("creator_cuts", []))
     ratings = treatments.saved_ratings(previous)
     treatment = _treatment_for_set_edit(previous, auto_tighten, pace, gap_length)
-    picked, refused = _picks_for_set_edit(picks, previous, words)
+    picked, refused = _picks_for_set_edit(picks, previous, words, sounds)
     requested = [
         {**c, edits.OVERRIDE_FLAG: True} if override_keeps and isinstance(c, dict) else c for c in cuts
     ]
@@ -861,6 +888,11 @@ def find_words(
     id, its clock time, the words around it, the quiet either side, whether
     the saved edit removes it already and who does, and whether a cut there
     would be clean. ``start`` goes on from a ``NEXT <time>`` line.
+
+    "um", in any spelling, lists every um of the video: the ones the speech
+    model wrote as a word and the ones it left out, which the transcript
+    holds as sounds. Each of those lines opens with where the um sits (it
+    opens a sentence, or is inside one) and the quiet before and after it.
     """
     phrases = check_phrases(words)
     project = open_project(video_path)
@@ -869,7 +901,7 @@ def find_words(
         raise StudioError(f"start {start} is outside the video (0 to {duration:.2f}).")
     ctx = treatments.load_context(project, duration=duration, silences=silences, labels_for=labels)
     codes = treatments.removal_codes(ctx) if ctx.edit.get("cuts") else {}
-    places = find_places(ctx.words, phrases, ctx.silences, duration, codes)
+    places = find_places(ctx.words, phrases, ctx.silences, duration, codes, ctx.sounds)
     return {**pack_places(places, phrases, start=start), "word_times": ctx.times}
 
 

@@ -32,7 +32,8 @@ Claude's, and `get_edit` reports them.
 
 The second wave of round 5 adds two things. Fine tune: two sliders under the
 pace, for the shortest pause cut and the rhythm; a setting made with them is
-the pace `custom`. Filler likes: `find_words` lists every place a word is
+the pace `custom`. Filler likes (the switch reads Ums and likes since round
+8): `find_words` lists every place a word is
 said, Claude picks the filler ones by reading and hands them to `set_edit` as
 `picks`, and the creator has one switch for all of them.
 
@@ -47,6 +48,16 @@ Round 7 adds `carry_edit`. When a creator wants a clip added to an edited
 reel, taken out or moved, `assemble` builds the new sequence as a new reel and
 `carry_edit` takes the saved edit across: the cuts, the picks, what the creator
 did on the page, and the transcript itself, so nothing is heard twice.
+
+Round 8 makes an um a thing Claude reads, the way it reads a "like". The
+speech model writes almost none of them, so most are sounds found between
+two words: `transcribe` labels each held hesitation `um`, `read_transcript`
+shows it in its sentence as `(um 0.5s)`, and `find_words` lists every um,
+written or heard, with where it sits in its sentence and the quiet either
+side. No rule takes one: the Filler words switch, Stutters and every pace
+leave an um in. Claude picks the ones that do not help and hands them to
+`set_edit` as `picks`, and the creator's one switch, now called Ums and
+likes, covers them with the likes.
 
 Words. A **cut** is a choice with a reason, Claude's or the creator's own: the
 page and the chat both say "cut". A **trim** is one of the small automatic
@@ -728,7 +739,8 @@ in one sentence that the harder paces will do less.
 #### Sounds
 
 A laugh, a giggle, a breath or an "uhh" is an entry of the transcript with
-`type: "event"` and the word `[vocalization]`. The speech model writes words
+`type: "event"` and the word `[vocalization]`. Each one gets a label
+(`sounds.classify_events`) whose `kind` is `laugh`, `um` or `sound`. The speech model writes words
 only, so the server finds the sounds itself (`sounds.find_sounds`):
 
 - It reads the loudness of the whole video, 20 ms at a time, through ffmpeg.
@@ -758,14 +770,39 @@ it before you go on.
 
 What no automatic cut may take, at any pace and with every switch on:
 
-| Sound | Pause cuts, Stutters, an edge of Claude's cut the server moved | Filler words switch |
-|---|---|---|
-| a laugh, likely or possible | never any part of it | never |
-| any sound of a second or more | never any part of it | never |
-| a shorter plain sound | never a part of it, and no pause cut is planned over it | takes it whole when it is a held hesitation: one steady voiced sound, no louder than 2 dB over the take's loud speech. A breath, a sound in two or more bursts and a sound louder than that stay. |
+| Sound | Pause cuts, Filler words, Stutters, an edge of Claude's cut the server moved |
+|---|---|
+| a laugh, likely or possible | never any part of it |
+| any sound of a second or more | never any part of it |
+| a shorter plain sound, an um among them | never a part of it, no pause cut is planned over it, and no switch takes it whole |
 
 A cut that Claude or the creator asks for over the whole of a laugh still
 takes it out, and the join check flags it (`removes_laugh`).
+
+An um (`kind: "um"`) is a held hesitation, an "um" or "uh" the speech model
+wrote no word for. All of this holds for it:
+
+- it is no laugh, likely or possible, and lasts under a second;
+- it is one steady voiced sound: half or more of its sounding time has a
+  pitch, and it has under two bursts in laugh spacing. A breath has no
+  pitch and a giggle comes in bursts;
+- its loudest moment is no more than 2 dB over the take's loud speech. A
+  short laugh, an exclamation or a cough breaks out over the speech;
+- it stands on its own: 0.1 s or longer, and no run-on of 0.15 s or less
+  that starts where the word before it ends, which is that word's own tail.
+
+Only a measured sound can be an um. On a machine that can't read the
+video's sound every short sound stays `sound`.
+
+An um is judged by reading, the way "like" is. Some hold a sentence together
+("and, um, the thing is") and some only open a line, and no measure of the
+sound says which. So no rule takes one: Claude reads each um in its
+sentence (`find_words`) and picks the ones that do not help (`picks` on
+`set_edit`). Before round 8 the Filler words switch took every um sound or
+none. An edit saved then with that switch on is made again when it is next
+opened, as any edit is when the recipe changes: its um sounds play again
+until Claude picks them, and every cut, pick, kept part and switch the
+creator or Claude chose stays as saved.
 
 #### Models
 
@@ -855,10 +892,21 @@ Sounds that aren't speech appear on their own line, labeled by kind:
 ```
 
 `(laugh 3.5s)` is a likely laugh. `(laugh? 1.6s)` is a possible one. `(sound
-0.2s)` is anything else: a breath, a hesitation, a bump. The labels come from
+0.2s)` is anything else: a breath, a bump. The labels come from
 the sound's length, its place in the sentence, and its measured shape: a
 laugh comes in bursts, four or five a second, breathy or pitched like a
 giggle. They are estimates. A laugh marks the line before it as a punchline.
+
+An um the speech model wrote no word for is the one sound that is no line of
+its own. It reads in its sentence, where it is said, as `(um 0.5s)`:
+
+```
+[61.20-66.90] Shape the dough. (um 0.5s) Then let it rest and, (um 0.4s) the thing is, don't touch it.
+```
+
+The first one opens a sentence and the second holds one together. An um
+the speech model did write reads as the word it wrote ("Um,"). To see every
+um with its id, call `find_words` with `["um"]`.
 
 The answer carries `sounds_note` while the transcript was never looked
 through for sounds (see "Sounds" under `transcribe`). No sound line then
@@ -888,7 +936,7 @@ Read only: yes.
 | Input | Type | Note |
 |---|---|---|
 | `video_path` | string | |
-| `words` | list of string | one to five words or short phrases, such as `["like"]` or `["you know", "so"]`. A phrase is at most four words. |
+| `words` | list of string | one to five words or short phrases, such as `["like"]`, `["um"]` or `["you know", "so"]`. A phrase is at most four words. |
 | `start` | float, optional | go on from a `NEXT <time>` line |
 
 Returns every place each word is said, as packed text, one place a line:
@@ -928,8 +976,55 @@ neighbour's, so it is often `.00` where the sound runs from one word into
 the next. `clean` reads the aligner's own edges, which say whether it could
 tell the two words apart. The cut takes the word's whole room.
 
-The tool takes any word. This round the page's switch and the skill cover
-"like".
+The tool takes any word. The page's switch and the skill cover "like" and
+"um".
+
+#### Ums
+
+An um is one thing, however it got into the transcript. `["um"]`, or any
+other spelling of one, lists every um of the video under the one word `um`:
+
+- the ones the speech model wrote as a word. The spellings are `um`, `umm`,
+  `ummm`, `uhm`, `hm`, `hmm`, `mm`, `mmm`, `erm`, `uh`, `uhh`, `uhhh`, `er`,
+  `err`, `ah`, `ahh` and `eh` (`sounds.UM_WORDS`): the two sounds people
+  make while finding the next word, lips closed or mouth open. "ah" and
+  "mm" are on the list because a reader tells "ah, um, so" from "Ah, there
+  it is" at a glance and no rule can. "mhm", "huh", "oh", "well" and "so"
+  are not: each says something.
+- the ones it left out, which the transcript holds as sounds with the label
+  `um` (see "Sounds" under `transcribe`). On a 28 minute test take the
+  speech model wrote 3 ums and 10 more were sounds.
+
+No laugh, breath or other sound is ever listed.
+
+```
+um: 9 in this video, 5 open a sentence, 4 inside one. 6 of them are sounds with no word in the transcript. 8 clean to cut, 1 not, 0 already out.
+Each line: id, clock, the words before, [the word], the words after, q<quiet before>/<quiet after> ...
+An um line says, right after the clock, where the um sits, then QUIET ...
+w61.900-62.400 1:01 OPENS A SENTENCE, QUIET 0.62s BEFORE, 0.10s AFTER: and shape the dough. [(um 0.5s)] Then let it rest and
+w65.120-65.510 1:05 INSIDE A SENTENCE, QUIET 0.08s BEFORE, 0.06s AFTER: Then let it rest and, [(um 0.4s)] the thing is, don't touch
+w140.300-140.580 2:20 OPENS A SENTENCE, QUIET 1.10s BEFORE, 0.12s AFTER: for about an hour. [Um,] so the oven goes on
+END
+```
+
+| Part of an um line | Meaning |
+|---|---|
+| `OPENS A SENTENCE` | the um is the first thing said after a sentence end, or after a pause of 0.5 s or more, the length at which `read_transcript` prints a pause. So is the first thing said in the video. |
+| `INSIDE A SENTENCE` | every other um: words run on either side of it |
+| `QUIET 0.62s BEFORE, 0.10s AFTER` | seconds of quiet between the um and what is said before and after it. It takes the place of `q` on an um line, in plain words, because it is what Claude decides by. |
+| `[(um 0.5s)]` | an um the transcript has no word for, with its length. Its id is passed in `picks` like a word's. |
+| `[Um,]` | an um the speech model wrote, as it wrote it |
+
+Ums said one after another are one hesitation: each sits where the first
+of them does. A laugh or another sound between a word and an um is not a
+word and ends no sentence.
+
+The server only says where an um sits and how much quiet is beside it. It
+never says an um should go, and it holds no threshold for that: which ums
+go is Claude's reading, by the rules in the skill, one um at a time.
+
+The `words` entry for `um` carries three more counts:
+`{word: "um", said, clean, already_out, opens, inside, sounds}`.
 
 ### analyze_take
 
@@ -1013,7 +1108,7 @@ Each key is there only when it applies.
 
 | Key | What the creator did |
 |---|---|
-| `pace`, `take_out` | moved away from the pace or switches Claude asked for. `take_out.likes: false` means they switched Claude's picked filler words off. |
+| `pace`, `take_out` | moved away from the pace or switches Claude asked for. `take_out.likes: false` means they switched Claude's picked filler words and ums off. The key was named when "like" was the only word picked and stays `likes`. |
 | `fine` | set the pace with the two sliders; `pace` reads `custom`. Listed for as long as the pace is custom. The values are hers: leave `pace` and `gap_length` out of `set_edit` to keep them. |
 | `put_back` | put back one of Claude's cuts. Carries Claude's reason. |
 | `kept` | flagged a part "keep no matter what". It widened to whole sentences. Carries the words and their note. |
@@ -1052,7 +1147,7 @@ touched or deleted.
 ```
 
 `videos` counts the projects with at least one change. `ratings` counts, per
-kind of Claude's cuts (or `likes`, the filler words it picks), how many the
+kind of Claude's cuts (or `likes`, the filler words and ums it picks), how many the
 creator marked good and how many wrong; lessons read like "Marked 4
 restated-point cuts (repeat) good across 2 videos." and "Marked 3 filler-word
 picks wrong across 2 videos." `put_back` counts, per
@@ -1065,15 +1160,19 @@ for what at least two videos, or three events, back. They are facts, not
 advice. Let them shape the proposal, and let this video's own `creator`
 changes win.
 
-When Claude has picked filler words, the result carries `picks`:
+When Claude has picked filler words or ums, the result carries `picks`:
 
 ```
-{switch_on: true, picked: 41,
+{switch_on: true, picked: 5,
+ by_word: [["um", 2], ["like", 3]], counts: "2 ums, 3 likes",
  picks: [{id, clock, text, reason}]}
 ```
 
 `switch_on` is the creator's switch on the page. With it off no pick is
-taken out, and the list stays saved.
+taken out, and the list stays saved. `by_word` counts the picks by the word
+each one is, ums first, and `counts` says it ready to show. Every spelling
+of an um and every um sound counts as `um`. A picked um sound has the
+`text` `(um)`.
 
 When the creator used the round 2 review page on this video, the result
 carries `review`: `{accepted, restored: [...], changed: [...],
@@ -1106,7 +1205,7 @@ Read only: no. Destructive: no. Replaces the saved edit for this video.
 | `pace` | string, optional | how hard `auto_tighten` trims: `natural`, `standard`, `fast`, `tight`, `hard` or `max`. Left out: the pace already set for this video, else the creator's usual, else `standard`. |
 | `gap_length` | float, optional | overrides the pace's shortest trimmed pause, 0.15 to 1.5. Usually left out. |
 | `override_keeps` | bool, default false | allow cuts in spans the creator kept (a cut put back, or a part flagged to keep). Only when the creator asks. |
-| `picks` | list of `{id, reason}`, optional | single filler words Claude picked by reading, by their ids from `find_words`. Left out: the picks saved before stay. A list replaces them. An empty list clears them. |
+| `picks` | list of `{id, reason}`, optional | single filler words and ums Claude picked by reading, by their ids from `find_words`. Left out: the picks saved before stay. A list replaces them. An empty list clears them. |
 
 Each cut's `kind` tells the creator what sort of cut it is. The page groups
 Claude's cuts by it:
@@ -1138,8 +1237,10 @@ replaces her setting; do that only when she asks for a pace.
 
 `picks` are kept apart from `cuts` on purpose. A cut is a row on the page,
 with a reason the creator reads and a put back of its own. A picked filler
-word is none of that: there can be dozens, so the creator has one switch for
-all of them (Filler likes) and a double-click for each.
+word or um is none of that: there can be dozens, so the creator has one
+switch for all of them (Ums and likes) and a double-click for each. The
+switch's key is `likes`, as it was when it held only the likes, so saved
+edits, the creator's usual and the taste data read as they did.
 
 - Each pick is placed the way the creator's own word cuts are: the word's
   own span, widened into the quiet beside it when under 0.1 s, never into
@@ -1149,11 +1250,18 @@ all of them (Filler likes) and a double-click for each.
 - A pick on a word the creator brought back, or inside a part she kept, is
   not cut: what she did by hand wins. The answer names it under
   `kept_by_the_creator`.
-- The pace never takes a word that is judged by reading, which today is
-  "like" (`autocuts.JUDGED_BY_READING`). So a picked "like" is out while
-  Filler likes is on and plays while it is off, at every pace. A pick
-  beside a pause the pace removes is one removal with it, counted as the
-  pick.
+- The pace never takes a word that is judged by reading: "like", and "um"
+  in every spelling (`autocuts.JUDGED_BY_READING`). So a picked "like" or
+  "um" is out while Ums and likes is on and plays while it is off, at every
+  pace. A pick beside a pause the pace removes is one removal with it,
+  counted as the pick.
+- An um the transcript holds as a sound is picked by its id like a word,
+  and a pick is the one thing that takes it out. It is cut whole, never in
+  part, and comes back with the switch or a double-click like a picked
+  word. No other sound can be picked: an id that names a laugh, a breath
+  or any sound that is no um is refused, and says to send a cut over the
+  whole of it. A sound picked as an um and labelled a laugh or a long sound
+  since stays in, and the answer names it under `left_in`.
 - An id that names no word as the transcript is timed now is refused, with
   the reason, and the rest are saved. When every pick is refused nothing is
   saved. Ids change when the word times do: call `find_words` again after
@@ -1164,12 +1272,14 @@ With `picks` the result carries:
 
 ```
 picks: {picked: 41, switch_on: true, out: 35,
+        counts: "6 ums, 35 likes", out_counts: "5 ums, 30 likes",
         left_in: [{id, clock, text, why}],
         kept_by_the_creator: [{id, clock, text}],
         rejected: [{index, pick, why}]}
 ```
 
-`out` is counted with the switch on, whether it is on or off.
+`out` is counted with the switch on, whether it is on or off. `counts` says
+the picks by word and `out_counts` the ones that are out.
 
 The server validates before saving:
 
@@ -1261,9 +1371,8 @@ Automatic trims come in three kinds, each a switch on the page: long pauses
 (`pauses`), filler words (`fillers`), and stutters (`repeats`, a word said
 twice in a row). The result's `auto.take_out` lists the kinds that were on.
 
-The filler switch is named for what it removes. An "um" is rare; "and",
-"so", "you know" are what it mostly takes, and only where a pause sits
-beside the word, or the word is doubled. `natural` has no filler list, so
+The filler switch is named for what it removes: "and", "so", "you know",
+and only where a pause sits beside the word, or the word is doubled. `natural` has no filler list, so
 the switch does nothing there. The page lists the words the switch takes at
 the current pace, with counts.
 
@@ -1271,10 +1380,16 @@ It never takes "like". No rule tells a filler "like" from a real one: on the
 test take the pace took 10 at `standard`, and "not feeling like I know
 the way" and "ask what it was like." lost theirs. So "like" is
 judged by reading (`autocuts.JUDGED_BY_READING`): Claude reads each one and
-picks the fillers, and the creator has the Filler likes switch for those. A
+picks the fillers, and the creator has the Ums and likes switch for those. A
 rule and a judgment never share a word. ClipForge still lists "like" as a
 filler and plans removals for it; the plugin shortens each one around the
 word.
+
+It never takes an um either, written or heard. An um that opens a line can
+go and one that carries a thought across a pause holds the sentence
+together, and the switch took all of them or none. So every spelling of
+"um" is judged by reading too, and an um sound gets no trim at any pace
+(see "Ums" under `find_words`).
 
 What a trim may take (`autocuts.trims_taken`):
 
@@ -1285,12 +1400,13 @@ What a trim may take (`autocuts.trims_taken`):
   With the switch on, a long pause takes the "and" that sits in it. With
   the switch off, the trim is shortened around the word, and the pause
   either side of it still goes. A filler is a word on the list ClipForge
-  reads at that pace, so `standard` takes "and" and "um" and never "so".
+  reads at that pace, so `standard` takes "and" and never "so".
 - The first of a word said twice belongs to the stutter switch the same
   way, from `fast` on.
 - A word judged by reading belongs to no switch of the pace, said once or
-  twice. A trim that lands on a "like" is shortened around it at every
-  pace, and the pause beside it still goes, down to what the pace leaves.
+  twice. A trim that lands on a "like" or an "um" is shortened around it at
+  every pace, and the pause beside it still goes, down to what the pace
+  leaves.
   On the test take "like" is said twice in a row in two places, and one of
   them is the end of a sentence and the start of the next.
 
@@ -1346,7 +1462,7 @@ happened to write. On one that was looked through and holds none it reads
 A flag is a reason to look again. Some flagged joins are right as they are.
 
 Each join's `source` says who made the cut: `claude`, `you` (the creator, by
-hand), `pick` (a filler word Claude picked) or `auto`. A pick is judged as
+hand), `pick` (a filler word or um Claude picked) or `auto`. A pick is judged as
 lightly as an automatic trim. The creator's cuts are checked the way Claude's are, so one
 can be flagged. Tell her what the check found if she asks; the cut is hers
 to keep. Fixing a flag on one of her cuts is never a reason to change it.
@@ -1631,7 +1747,7 @@ word_times}`. On the page the creator:
 - turns each kind of automatic trim on or off, each with a count and the
   time it saves. The filler switch lists the words it takes. A switch with
   nothing to take out at this pace says which pace would find some.
-- turns Filler likes on or off: the filler words Claude picked, all at once.
+- turns Ums and likes on or off: the ums and filler words Claude picked, all at once. Under the switch the page counts what is out by the word, such as "2 ums, 3 likes picked by Claude".
   Until Claude has picked, the switch can't be pressed and says "Ask Claude
   to find them."
 - sees her own cuts first (Your cuts), then Claude's grouped by kind (Said
@@ -1745,9 +1861,9 @@ After the creator says they're done, call `get_edit` and read `creator` and
 | cuts inside a part she kept | the newer action wins: the kept part shrinks or splits around the words |
 | brings a word back from a cut of Claude's | the cut splits around the word; the rest stays cut |
 | brings a word back from an automatic trim | the trim is shortened around the word. The word stays back at every pace. |
-| brings back a filler word Claude picked | the word plays, and stays back when Filler likes goes off and on again |
+| brings back a filler word or um Claude picked | it plays, and stays back when Ums and likes goes off and on again. An um the transcript holds as a sound shows among the words as "(um)" and comes back the same way. |
 | cuts a word Claude left in | her own cut, a row under Your cuts. A lesson for Claude's next picks. |
-| switches Filler likes off | every pick of Claude's plays again. Her own cuts and the words she brought back stay as they are. |
+| switches Ums and likes off | every pick of Claude's plays again. Her own cuts and the words she brought back stay as they are. |
 | moves a slider | the pace reads custom. Her cuts, keeps and Claude's picks stay. Not a step of undo. |
 | keeps a part (not one word) | as before. A cut of hers inside the words she picked is taken back; one the widening reaches stays. |
 | takes back a cut of hers | the words play again, unless Claude or the pace also removes them |
@@ -1768,7 +1884,7 @@ input; anything else is an error.
 |---|---|---|
 | `everything` | bool | must be `true`. Forgets every change made on all videos so far. Ask the creator first. |
 | `word` | string | stop learning from one word, such as `"so"`. Stored lower case, without punctuation. |
-| `kind` | string | stop learning from one kind of cut: `repeat`, `false_start`, `off_topic`, `other`, or `likes` (the filler words Claude picks) |
+| `kind` | string | stop learning from one kind of cut: `repeat`, `false_start`, `off_topic`, `other`, or `likes` (the filler words and ums Claude picks) |
 
 Returns what was forgotten and what is left:
 

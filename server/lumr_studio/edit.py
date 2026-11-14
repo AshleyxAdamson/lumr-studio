@@ -48,6 +48,11 @@ no row of Claude's cuts: the creator has one switch for all of them and a
 double-click for each. Each is placed the way her own word cuts are, by
 ``place_creator_cut``, the one way a word is cut. A pick that would clip the
 word beside it is left in (``why_not_clean``).
+
+An um is picked the same way, whether the speech model wrote it as a word or
+it is a sound heard between two words (``sounds.UM``). A pick is the one
+thing that takes an um sound out, and an um is the one sound a pick can
+name: a laugh, a breath or any other sound is refused (``parse_pick``).
 """
 
 from __future__ import annotations
@@ -69,8 +74,9 @@ from lumr_studio import word_times as times
 from lumr_studio.autocuts import SHORTEST_PIECE_SECONDS, TRIM_KINDS, Said, around, span_without, take_mark
 from lumr_studio.errors import StudioError
 from lumr_studio.project import Project, now_iso, write_json_atomic
+from lumr_studio.sounds import UM_WORDS
 from lumr_studio.timeline import edited_duration
-from lumr_studio.transcript import is_event
+from lumr_studio.transcript import UM, is_event, plain_text
 
 log = logging.getLogger(__name__)
 
@@ -97,10 +103,16 @@ DEFAULT_CUT_KIND = "other"
 BY_CLAUDE, BY_CREATOR, BY_AUTO, BY_PICK = "claude", "you", "auto", "pick"
 # When several made one removed span, the first of these that did is its source.
 SOURCE_ORDER = (BY_CLAUDE, BY_CREATOR, BY_PICK, BY_AUTO)
-# The filler words Claude picks have one switch on the page.
+# The filler words Claude picks have one switch on the page. Its key was
+# named when "like" was the only word picked; it now holds the ums too, and
+# stays ``likes`` so saved edits, the creator's usual and the taste data
+# read as they did.
 PICK_KIND = "likes"
-PICK_LABEL = "Filler likes"
+PICK_LABEL = "Ums and likes"
 PICK_REASON = "A filler word Claude picked"
+# How a picked um sound reads where a picked word's own text would: in a
+# saved pick's ``text``, and beside the words around it.
+UM_TEXT = f"({UM})"
 # Every switch under Take out, in the order shown: one for each kind of
 # automatic trim, then the one over Claude's picks. This is the one list of
 # what the creator can switch. ``TRIM_KINDS`` is the part of it the pace
@@ -446,11 +458,14 @@ def span_of_pick_id(value: Any) -> Span:
     return start, end
 
 
-def parse_pick(index: int, raw: Any, said: SaidOrder) -> dict[str, Any]:
+def parse_pick(index: int, raw: Any, said: SaidOrder, ums: list[Span] | None = None) -> dict[str, Any]:
     """Check one ``{id, reason}`` against the transcript: ``{id, start, end, text, reason}``. Raises CutRejected.
 
     The id must name words as they are timed now, so a pick made before the
-    word times changed is refused and not guessed at.
+    word times changed is refused and not guessed at. ``ums`` are the um
+    sounds of the take (``sounds.um_spans``). An id that names one of them
+    is a pick like any other, saved with the text ``UM_TEXT``. An id that
+    names any other sound is refused: no pick takes a laugh.
     """
     if not isinstance(raw, dict):
         raise CutRejected("is not an object. Pass {id, reason}.")
@@ -469,10 +484,62 @@ def parse_pick(index: int, raw: Any, said: SaidOrder) -> dict[str, Any]:
             f"has id {raw['id']!r}, which names no word as the transcript is timed now. "
             "Call find_words again and use its ids."
         )
+    held = {(round(a, 3), round(b, 3)) for a, b in ums or []}
+    texts = []
+    for w in chosen:
+        if not is_event(w):
+            texts.append(str(w["word"]).strip())
+        elif (round(float(w["start"]), 3), round(float(w["end"]), 3)) in held:
+            texts.append(UM_TEXT)
+        else:
+            raise CutRejected(
+                f"has id {raw['id']!r}, which names a laugh or another sound, not a word or an um. A pick takes "
+                "single filler words and ums. To take a sound out, send a cut that covers all of it."
+            )
     return {
         "id": pick_id(start, end), "start": round(start, 3), "end": round(end, 3),
-        "text": " ".join(str(w["word"]).strip() for w in chosen), "reason": reason.strip(),
+        "text": " ".join(texts), "reason": reason.strip(),
     }
+
+
+# What a pick counts as when the picks are counted by word, for everything
+# that is neither an um nor a "like".
+OTHER_PICKS = "other"
+
+
+def pick_word(text: str) -> str:
+    """The word a pick counts under, from its saved ``text``: ``um`` for every spelling of one and for an um sound, else the word as said.
+
+    "Like," counts as ``like`` and "(um)", "Um," and "uhh" as ``um``. A pick
+    of two words or more counts as what it says ("you know").
+    """
+    said = " ".join(t for t in (plain_text(part) for part in str(text).split()) if t)
+    return UM if said in UM_WORDS else said or OTHER_PICKS
+
+
+def picks_by_word(texts: list[str]) -> list[list[Any]]:
+    """Picks counted by the word each one is: ``[["um", 2], ["like", 3]]``, ums first, then most first."""
+    tally: dict[str, int] = {}
+    for text in texts:
+        word = pick_word(text)
+        tally[word] = tally.get(word, 0) + 1
+    return [[word, n] for word, n in sorted(tally.items(), key=lambda item: (item[0] != UM, -item[1]))]
+
+
+def counted(by_word: list[list[Any]]) -> str:
+    """Counts by word as a creator would say them: ``2 ums, 3 likes``. Empty for none.
+
+    A one-word filler takes a plural; a longer one is quoted as said.
+    """
+    parts = []
+    for word, n in by_word:
+        if word == OTHER_PICKS:
+            parts.append(f"{n} {OTHER_PICKS}")
+        elif " " in word:
+            parts.append(f'{n} "{word}"')
+        else:
+            parts.append(f"{n} {word}{'' if n == 1 else 's'}")
+    return ", ".join(parts)
 
 
 def creator_cut_id(cut: dict[str, Any]) -> str:
@@ -861,14 +928,20 @@ def _work_out_placement(
     return pieces, None if pieces else whole
 
 
+IS_A_SOUND_TO_KEEP = "it is a laugh or a long sound now, which only a cut over all of it takes"
+
+
 def _placed_picks(
-    picks: list[dict[str, Any]], said: SaidOrder | None, quiet: SilenceIndex, kept: list[Span], duration: float
+    picks: list[dict[str, Any]], said: SaidOrder | None, quiet: SilenceIndex, kept: list[Span], duration: float,
+    whole: list[Span] | None = None,
 ) -> list[dict[str, Any]]:
     """What becomes of each filler word Claude picked. See ``EditOutcome.picks``.
 
     A pick in a span the creator kept, or on a word she brought back, stays
-    in: what she did by hand wins. A pick that is not clean stays in. The
-    rest are placed the way her own word cuts are.
+    in: what she did by hand wins. A pick that is not clean stays in. So
+    does a pick on one of ``whole``, the laughs and long sounds: a sound
+    picked as an um that is judged a laugh since. The rest are placed the
+    way her own word cuts are.
     """
     out = []
     for pick in picks:
@@ -880,6 +953,8 @@ def _placed_picks(
             why = why_not_clean(found, said, quiet, duration)
             if _first_overlap(start, end, kept) or any(a <= start and end <= b for a, b in kept):
                 entry["status"] = PICK_KEPT
+            elif _first_overlap(start, end, whole or []):
+                entry["status"], entry["why"] = PICK_LEFT_IN, IS_A_SOUND_TO_KEEP
             elif why:
                 entry["status"], entry["why"] = PICK_LEFT_IN, why
             else:
@@ -982,7 +1057,9 @@ def build_edit(
             "word_start": float(cut["start"]), "word_end": float(cut["end"]), "words": picked,
         })
 
-    outcome.picks = _placed_picks(picks or [], said, SilenceIndex(silences), kept_by_creator + brought_back, duration)
+    outcome.picks = _placed_picks(
+        picks or [], said, SilenceIndex(silences), kept_by_creator + brought_back, duration, whole_sounds,
+    )
     picked_out = [(p["start"], p["end"]) for p in outcome.picks if p["status"] == PICK_OUT]
 
     auto = _allowed_auto_cuts(

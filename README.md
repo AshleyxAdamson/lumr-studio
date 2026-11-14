@@ -30,7 +30,8 @@ On a 21:47 test take, measured word times took out more than twice as much at ev
 ## What it can do
 
 - **Six paces**, Natural to Max, plus two sliders for anything in between.
-- **Switches** for long pauses, filler words, stutters and filler likes.
+- **Switches** for long pauses, filler words, stutters, and ums and likes.
+- **Ums read one at a time.** Claude sees every "um", even the ones a transcript leaves out. It takes out the ones that start a sentence or sit beside a clear pause, and leaves the ones that hold a sentence together.
 - **Several clips, one video.** Studio can join your clips into one video and follow your script. Claude finds every take of each line, keeps your best one, usually the last complete take, and cuts the rest. Then you fine-tune it on the review page. Your clips are never changed.
 - **A review page** in your browser. Double-click any word to cut it or bring it back, hear any cut, flip between the original and the edit, and export.
 - **Cuts you can tell apart.** Dim for the pace, red for Claude, teal for you.
@@ -71,6 +72,8 @@ It runs in Claude Code, and in Cowork when the session runs on your Mac. Chat on
 > Tighten this one hard, but keep every joke: ~/Desktop/podcast-intro.mp4
 
 > Find the filler likes in ~/Movies/vlog.mov and take them out. Then open the review page.
+
+> Take out the ums that open a line in ~/Movies/vlog.mov, and leave the ones inside my sentences.
 
 > Use assemble-takes on ~/Movies/Bread/take-1.mp4, take-2.mp4, take-3.mp4 and take-4.mp4, in that order. Here's my script: (paste it).
 

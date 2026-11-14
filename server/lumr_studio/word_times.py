@@ -941,8 +941,8 @@ def _sound_left(
     instant here is where the word's claim stopped, not where the sound
     itself began. On the real take this leaves 50 to 100 ms of an "uhh"'s
     onset with the word before it ("And" into one, "while" into another).
-    ``autocuts._is_word_tail`` catches the extreme of this, a short run-on
-    with no gap at all, and never counts it as a filler to begin with.
+    ``sounds._is_word_tail`` catches the extreme of this, a short run-on
+    with no gap at all, and never counts it as an um to begin with.
     """
     start, end = float(sound["start"]), float(sound["end"])
     piece = spoken.longest_free(start, end)

@@ -183,7 +183,7 @@ When one cut covers a whole take and a broken-off try, use `repeat`.
 Now the video has one take of each line. The rest is the same job as a tight cut, so go to the tight-cut skill and follow it from its step 4.
 
 - **Step 4, decide the cuts.** The retakes are done. Don't cut them twice. Look for what is left: filler runs, dead air, tangents. Set `auto_tighten` and the `pace` from what the creator asked for. If they didn't say how tight they want it, ask for that and nothing else. `set_edit` takes a `pace` only together with `auto_tighten` on. With it off, a `pace` is an error, and there are no automatic trims at all. Read "Before you turn automatic trimming on" below first.
-- **Step 5, pick the filler likes.** Call `find_words` with `["like"]` and read each line. Check each pick against the script before you save it. A "like" that is part of a scripted line, such as "Like I could not just express myself", is not filler. Leave it in.
+- **Step 5, pick the ums and the filler likes.** Call `find_words` with `["um"]` and read each line by that step's rules: an um that starts a sentence, or has about half a second of quiet or more on at least one side, goes. An um tucked between words with a short gap on both sides stays, and so does any you are unsure of. Leave some in. Then call `find_words` with `["like"]` and read each line. Check each pick against the script before you save it. A "like" that is part of a scripted line, such as "Like I could not just express myself", is not filler. Leave it in. If the creator says they don't want likes cut, leave every "like" in and say so.
 - **Step 6, save a draft and check it.** Call `set_edit`. Read `rejected`, `adjusted`, `joins`, and `picks`. Fix what is flagged, up to three times.
 
 **Before you turn automatic trimming on, check it against the laughs.** No automatic trim takes any part of a laugh or of a sound of a second or more that the transcript has a line for. A laugh with no line is a pause to it, and it can cut one the creator got on purpose. Do this with the list of laughs you made in step 3:
@@ -214,7 +214,7 @@ Show these, in this order:
 4. **Script lines that were never said**, if any.
 5. **Where the silences were**, if you cut any. For each, the reel time and its place in the edited video, so the creator knows where to put b-roll.
 6. **Any join still flagged**, in plain words, and a `long_jump` on a retake cut only as "expected": "The cut at 4:12 ends mid-sentence. I kept it since the next take restarts the thought. Listen to that one."
-7. **The likes**, in one or two sentences: how many times the word is said, how many you picked as filler, and how many stay in.
+7. **The ums and the likes**, in a sentence or two each. For the ums: how many you found, how many go, and that the rest are the ones inside sentences, left on purpose. For the likes: how many times the word is said, how many you picked as filler, and how many stay in.
 8. **Automatic trimming and the laughs**, if a trim sat over a laugh: the laughs' times, and that they should press Keep on those spots on the page before they pick a pace there.
 
 Then offer the page, and wait for a yes before you open it. A browser window the creator didn't ask for is a bad surprise. The offer is the one line the creator must not miss, so it goes last, in this box, exactly as drawn and inside a code block so it keeps its shape:
@@ -237,7 +237,7 @@ Under the box, one line: "It runs on your machine only. Or answer here, such as 
 On a yes, call `review` with the reel path and give them the address with these steps:
 
 1. Press Next to go to each cut in turn, then Play to hear it. The bar under the video shows where the most changed; press a block on it to play that stretch.
-2. If it feels rushed or drags, move the pace. For a setting between two stops, open Fine tune under it and move the two sliders. Under Take out, turn off anything you want left in. Filler likes switches off the likes I picked.
+2. If it feels rushed or drags, move the pace. For a setting between two stops, open Fine tune under it and move the two sliders. Under Take out, turn off anything you want left in. Ums and likes switches off the ums and likes I picked.
 3. Open my cuts by kind. The retakes I cut are under Said twice and False starts. Put one back only if you want both takes in the video.
 4. A word you want gone? Double-click it. Double-click a struck word to bring it back. Drag across words to cut or keep a part.
 5. Found a moment that must stay? Select it and press "Keep".

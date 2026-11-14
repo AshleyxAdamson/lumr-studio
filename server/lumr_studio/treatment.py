@@ -16,8 +16,9 @@ Claude undoes them, and when two of her own actions meet, the newer one wins.
 
 Two more controls sit under those. Fine tune: two sliders that set the
 shortest pause cut and the rhythm by hand; the pace then reads ``custom``
-(see ``pace.level_for``). Filler likes: the single filler words Claude picked
-by reading, with one switch for all of them (see ``edit.SWITCHES``).
+(see ``pace.level_for``). Ums and likes: the single filler words and ums
+Claude picked by reading, with one switch for all of them (see
+``edit.SWITCHES``).
 
 This module owns:
 
@@ -68,7 +69,6 @@ from lumr_studio.autocuts import (
     silences_key,
     trim_kind,
     trims_taken,
-    vocalization_filler_trims,
     words_key,
 )
 from lumr_studio.engine.audio_boundaries import Silence
@@ -103,7 +103,7 @@ from lumr_studio.samples import (
     sentence_spans,
 )
 from lumr_studio.silences import SilenceProvider
-from lumr_studio.sounds import LAUGH, LIKELY, protected_spans, whole_spans
+from lumr_studio.sounds import LAUGH, LIKELY, is_um_word, protected_spans, um_spans, whole_spans
 from lumr_studio.transcript import is_event, plain_text
 
 log = logging.getLogger(__name__)
@@ -131,8 +131,9 @@ BROUGHT_BACK_BY_YOU = "brought back by you"
 
 # Why a word on the page is removed, the fifth value of each ``words`` entry.
 PLAYING, REMOVED_AUTO, REMOVED_BY_CLAUDE, REMOVED_BY_YOU, REMOVED_AS_PICKED = 0, 1, 2, 3, 4
-# The word the Filler likes switch covers. ``find_words`` takes any word;
-# this round the switch and the skill cover this one.
+# The words the Ums and likes switch covers: "like", and "um" in every
+# spelling and as a sound (``sounds.UM``). ``find_words`` takes any word;
+# the switch and the skill cover these two.
 LIKES_WORD = "like"
 # The creator's cuts are rows with ids of their own, so a route for Claude's
 # cuts can never be handed one of hers.
@@ -142,9 +143,6 @@ MAX_CREATOR_CUTS = 2000
 # Only the filler switch says which words it takes out. The others carry an
 # empty list, so every entry has the same shape.
 KINDS_THAT_LIST_WORDS = frozenset({FILLER_TRIM_KIND})
-# What a filler vocalization (a held "umm" or "uhh", no word inside it) is
-# named in the filler words list, beside "um" and "so" (``taken_by_kind``).
-SOUND_FILLER_LABEL = "sound"
 
 # A note on a kept part longer than this is not from the page.
 MAX_NOTE_CHARS = 200
@@ -336,14 +334,12 @@ def forget_recipes() -> None:
 def _recipe_key(cuts: list[Any], words: Words, duration: float, silences: list[Silence],
                 protected: list[Span], keeps: list[Span], treatment: Treatment, override_keeps: bool,
                 creator_cuts: list[dict[str, Any]], exact_keeps: list[Span],
-                picks: list[dict[str, Any]], filler_trims: list[dict[str, Any]],
-                whole: list[Span]) -> tuple[Any, ...]:
+                picks: list[dict[str, Any]], whole: list[Span]) -> tuple[Any, ...]:
     return (
         json.dumps(cuts, sort_keys=True, default=str), words_key(words), round(float(duration), 3),
         silences_key(silences), tuple(protected), tuple(keeps), treatment, override_keeps,
         tuple((float(c["start"]), float(c["end"])) for c in creator_cuts), tuple(exact_keeps),
-        tuple((float(c["start"]), float(c["end"])) for c in picks),
-        tuple((float(t["start"]), float(t["end"])) for t in filler_trims), tuple(whole),
+        tuple((float(c["start"]), float(c["end"])) for c in picks), tuple(whole),
     )
 
 
@@ -375,28 +371,25 @@ def make_edit(
     ``sounds`` are the
     sound labels; their laughs and long sounds become the protected spans
     and the sounds a cut of Claude's takes only when it covers them whole
-    (``sounds.whole_spans``), and a filler
-    vocalization (``sounds.is_filler``: a held "umm" or "uhh", not the tail
-    of the word before it) becomes a trim of its own while Filler words is
-    on (``autocuts.vocalization_filler_trims``), whatever the pace. Its span
-    is held the way her own cuts are: shortening a trim for the pause it
-    joined never eats into it, and the last check never widens or drops it,
-    since what it removes is already exactly the sound. ``keeps``
+    (``sounds.whole_spans``). No trim is made for an um, written or heard
+    (``sounds.UM``): an um goes only when Claude picked it. ``keeps``
     are the kept spans that stop a cut whole, ``exact_keeps`` the words
     brought back one by one (see ``edit.build_edit``). ``plans_in`` is the
     project folder, where the plan of each pace is kept from one run to the
-    next. ``picks`` are the filler words Claude picked; they are taken out
-    while their switch is on. Raises StudioError when the result would
-    remove the whole video.
+    next. ``picks`` are the filler words and ums Claude picked; they are
+    taken out while their switch is on. A picked um sound is held the way
+    her own cuts are: shortening a trim for the pause it joined never eats
+    into it, and the last check never widens or drops it, since what it
+    removes is already exactly the sound. Raises StudioError when the
+    result would remove the whole video.
     """
     level = treatment.level()
     protected = protected_spans(sounds, words)
     whole = whole_spans(sounds)
     creator_cuts, exact_keeps = list(creator_cuts or []), list(exact_keeps or [])
     picks = list(picks or []) if treatment.picks_on else []
-    filler_trims = vocalization_filler_trims(sounds, words)
     key = _recipe_key(cuts, words, duration, silences, protected, keeps, treatment, override_keeps,
-                      creator_cuts, exact_keeps, picks, filler_trims, whole)
+                      creator_cuts, exact_keeps, picks, whole)
     with _recipes_lock:
         hit = _recipes.get(key)
         if hit is not None:
@@ -411,8 +404,6 @@ def make_edit(
         planned = plan_auto_cuts(words, duration=duration, silences=silences, gap_length=shortest,
                                  rhythm=level.rhythm, saved_in=plans_in, stop=on_a_stop)
         auto = trims_taken(planned, words, gap_length=shortest, on=treatment.trims)
-    if FILLER_TRIM_KIND in treatment.trims:
-        auto = auto + filler_trims
     outcome = edits.build_edit(
         cuts, words, duration, auto_cuts=auto, silences=silences,
         keeps=keeps, protected=protected, override_keeps=override_keeps,
@@ -422,8 +413,6 @@ def make_edit(
     hers = [(c["start"], c["end"]) for c in outcome.creator_placed]
     hers += [(c["start"], c["end"]) for c in outcome.picks if c["status"] == edits.PICK_OUT]
     asked = hers + [(p["start"], p["end"]) for p in outcome.placed if not p["put_back"]]
-    if FILLER_TRIM_KIND in treatment.trims:
-        hers += [(t["start"], t["end"]) for t in filler_trims]
     if treatment.trims:
         outcome.cuts, made.pauses = settle_trims(outcome.cuts, words, silences, level, hers)
     chosen = hers + [(p["start"], p["end"]) for p in outcome.placed if not p["put_back"]]
@@ -782,10 +771,7 @@ def taken_by_kind(made: MadeEdit, words: Words) -> dict[str, Taken]:
     three add up to what the pace removes.
 
     Filler words are counted by the word, since a filler goes with whatever
-    removal holds it. The other kinds are counted by the removal. A filler
-    vocalization holds no word at all (``autocuts.vocalization_filler_trims``
-    takes a "[vocalization]" whole); it counts once under Filler words, named
-    ``SOUND_FILLER_LABEL``, the way a word would be.
+    removal holds it. The other kinds are counted by the removal.
     """
     said = Said.of(words)
     level = engine_level(made.shortest)
@@ -804,9 +790,6 @@ def taken_by_kind(made: MadeEdit, words: Words) -> dict[str, Taken]:
                 taken[filed].seconds -= length
         if filed != FILLER_TRIM_KIND:
             taken[filed].count += 1
-        elif not inside:
-            taken[filed].count += 1
-            taken[filed].words[SOUND_FILLER_LABEL] = taken[filed].words.get(SOUND_FILLER_LABEL, 0) + 1
         for kind in TRIM_KINDS:
             mine = [w for w, owner in zip(inside, owners) if owner == kind]
             named = fillers_in(mine, level) if kind == FILLER_TRIM_KIND else _said(mine)
@@ -885,27 +868,41 @@ def _switches(ctx: Context, current: Treatment, by_pace: dict[str, dict[str, int
     return out
 
 
+def ums_said(words: Words, sounds: list[dict[str, Any]]) -> int:
+    """How many ums a take holds: the ones the speech model wrote as a word, and the um sounds."""
+    return sum(1 for w in words if is_um_word(w)) + len(um_spans(sounds))
+
+
+def _picked_text(ctx: Context, pick: dict[str, Any], ums: set[Span]) -> str:
+    """What one placed pick takes, as a saved pick's ``text`` would say it: its words, and ``edit.UM_TEXT`` for an um sound."""
+    held = [w for w in ctx.words if pick["word_start"] <= _mid(w) <= pick["word_end"]]
+    return " ".join(
+        str(w["word"]).strip() if not is_event(w) else edits.UM_TEXT
+        for w in held if not is_event(w) or (round(float(w["start"]), 3), round(float(w["end"]), 3)) in ums
+    )
+
+
 def _likes(ctx: Context, current: Treatment, stops: list[str]) -> dict[str, Any]:
-    """The Filler likes entry of ``take_out``: what Claude picked and what became of each.
+    """The Ums and likes entry of ``take_out``: what Claude picked and what became of each.
 
     Counted with the switch on, whether it is on or off, as the other
-    entries are.
+    entries are. ``words`` counts what is out by the word, ums first:
+    ``[["um", 2], ["like", 3]]``, every spelling of an um and every um
+    sound as ``um``. ``said`` is how often "like" and an um are said in the
+    whole video, picked or not.
     """
     picks = saved_picks(ctx.edit)
     on = _remake(ctx, Treatment(pace=current.pace, take_out=current.take_out | {edits.PICK_KIND},
                                 gap_length=current.gap_length, fine=current.fine))
     became = [p["status"] for p in on.outcome.picks]
     out = [p for p in on.outcome.picks if p["status"] == edits.PICK_OUT]
-    said = sum(1 for w in ctx.words if not is_event(w) and _plain(w) == LIKES_WORD)
-    tally: dict[str, int] = {}
-    for p in out:
-        for text in _said([w for w in ctx.words if not is_event(w) and p["word_start"] <= _mid(w) <= p["word_end"]]):
-            tally[text] = tally.get(text, 0) + 1
+    said = sum(1 for w in ctx.words if not is_event(w) and _plain(w) == LIKES_WORD) + ums_said(ctx.words, ctx.sounds)
+    ums = {(round(a, 3), round(b, 3)) for a, b in um_spans(ctx.sounds)}
     return {
         "key": edits.PICK_KIND, "label": edits.PICK_LABEL, "count": len(out),
         "seconds": round(sum(p["end"] - p["start"] for p in out), 1),
         "by_pace": {name: len(out) for name in stops},
-        "words": [[t, n] for t, n in sorted(tally.items(), key=lambda item: -item[1])],
+        "words": edits.picks_by_word([_picked_text(ctx, p, ums) for p in out]),
         "picked": len(became), "said": said,
         "left_in": became.count(edits.PICK_LEFT_IN) + became.count(edits.PICK_LOST),
         "kept_by_you": became.count(edits.PICK_KEPT),
@@ -1580,8 +1577,19 @@ def _need_seconds(body: dict[str, Any], key: str, duration: float) -> float:
 # ── The creator's hand on the words ───────────────────────────────────────────
 
 
+@dataclass(frozen=True)
 class _Yard(edits.SaidOrder):
     """The words and sounds in the order they are said, for finding what a span picks."""
+
+    # The um sounds of the take, by ``(start, end)`` to the millisecond: the one kind of sound that reads as a word.
+    ums: frozenset[Span] = frozenset()
+
+    @classmethod
+    def at(cls, ctx: Context) -> _Yard:
+        """The yard of a project's words, knowing which of its sounds are ums."""
+        said = cls.of(ctx.words)
+        return cls(tokens=said.tokens, mids=said.mids,
+                   ums=frozenset((round(a, 3), round(b, 3)) for a, b in um_spans(ctx.sounds)))
 
     def span(self, picked: range) -> Span:
         """From the first picked word's start to the last one's end."""
@@ -1595,8 +1603,13 @@ class _Yard(edits.SaidOrder):
         return min(start, floor), max(end, ceiling)
 
     def text(self, picked: range) -> str:
+        """What the picked words say. An um sound among them reads ``(um)``; any other sound says nothing."""
         chosen = self.tokens[picked.start:picked.stop]
-        return _shorten(" ".join(str(w["word"]).strip() for w in chosen if not is_event(w)), KEEP_TEXT_CHARS)
+        said = [
+            str(w["word"]).strip() if not is_event(w) else edits.UM_TEXT for w in chosen
+            if not is_event(w) or (round(float(w["start"]), 3), round(float(w["end"]), 3)) in self.ums
+        ]
+        return _shorten(" ".join(said), KEEP_TEXT_CHARS)
 
     def runs_without(self, whole: range, gone: range) -> list[range]:
         """``whole`` with ``gone`` taken out: the runs of words left, in order."""
@@ -1698,7 +1711,7 @@ def add_cut(ctx: Context, body: Any) -> dict[str, Any]:
     """
     body = _need_object(body, {"start", "end"}, '{"start": 412.3, "end": 412.6}')
     start, end = _need_span(ctx, body)
-    yard = _Yard.of(ctx.words)
+    yard = _Yard.at(ctx)
     picked = _need_words(yard, start, end)
     requested, keep, cuts = _copies(ctx.edit)
     if len(cuts) >= MAX_CREATOR_CUTS:
@@ -1738,7 +1751,7 @@ def remove_cut(ctx: Context, body: Any) -> dict[str, Any]:
     mine = next((c for c in cuts if edits.creator_cut_id(c) == rid), None)
     if mine is None:
         raise StudioError("That cut is not in this video any more. Reload the page to see your cuts.")
-    yard = _Yard.of(ctx.words)
+    yard = _Yard.at(ctx)
     gone = yard.picked(float(mine["start"]), float(mine["end"]))
     if "start" in body or "end" in body:
         gone = _need_words(yard, *_need_span(ctx, body))
@@ -1849,7 +1862,7 @@ def add_keep(ctx: Context, body: Any) -> dict[str, Any]:
     requested, keep, cuts = _copies(ctx.edit)
     if len(keep) >= MAX_KEEPS:
         raise StudioError(f"This video already has {len(keep)} kept parts. Remove some before adding more.")
-    yard = _Yard.of(ctx.words)
+    yard = _Yard.at(ctx)
     picked = _need_words(yard, start, end) if exact else yard.picked(start, end)
     back = _removed_now(ctx, yard, picked)
     cuts, _ = _cuts_without(cuts, yard, picked)

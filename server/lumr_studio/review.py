@@ -39,7 +39,7 @@ from lumr_studio.edit import (
 from lumr_studio.engine.audio_boundaries import Silence
 from lumr_studio.errors import StudioError
 from lumr_studio.project import Project, append_receipt, now_iso, write_json_atomic
-from lumr_studio.transcript import is_event
+from lumr_studio.transcript import UM, is_event
 from lumr_studio.word_times import load_words
 
 REVIEW_VERSION = 1
@@ -161,8 +161,9 @@ def _removed_word_count(start: float, end: float, words: list[dict[str, Any]]) -
 def page_words(words: list[dict[str, Any]], labels: list[dict[str, Any]] | None = None) -> list[list[Any]]:
     """The transcript in the page's compact form: ``[start, end, text, is_sound]``.
 
-    Sounds read as plain words: "(laugh)", "(laugh?)" for a possible laugh, or
-    "(sound)", using the sound labels when given.
+    Sounds read as plain words: "(laugh)", "(laugh?)" for a possible laugh,
+    "(um)" for a held hesitation, or "(sound)", using the sound labels when
+    given.
     """
     label_at = {round(float(lb["start"]), 2): lb for lb in (labels or [])}
     out: list[list[Any]] = []
@@ -173,6 +174,8 @@ def page_words(words: list[dict[str, Any]], labels: list[dict[str, Any]] | None 
             text = "(sound)"
             if lb and lb.get("kind") == "laugh":
                 text = "(laugh)" if lb.get("confidence") == "likely" else "(laugh?)"
+            elif lb and lb.get("kind") == UM:
+                text = f"({UM})"
             out.append([s, e, text, 1])
         else:
             out.append([s, e, str(w["word"]).strip(), 0])
