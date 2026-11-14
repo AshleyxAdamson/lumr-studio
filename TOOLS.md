@@ -762,8 +762,8 @@ only, so the server finds the sounds itself (`sounds.find_sounds`):
   replaces only those; a sound the speech model wrote stays.
 
 `sounds-found.json` in the project folder says the transcript was looked
-through. While it does not, `read_transcript`, `analyze_take`, `get_edit`
-and `set_edit` carry `sounds_note`, and the `joins` text opens with the same
+through. While it does not, `read_transcript`, `find_words`, `analyze_take`,
+`get_edit` and `set_edit` carry `sounds_note`, and the `joins` text opens with the same
 sentence: this transcript was never checked for laughs, so an automatic cut
 can take one, and `transcribe` finds them without transcribing again. Call
 it before you go on.
@@ -798,11 +798,23 @@ An um is judged by reading, the way "like" is. Some hold a sentence together
 ("and, um, the thing is") and some only open a line, and no measure of the
 sound says which. So no rule takes one: Claude reads each um in its
 sentence (`find_words`) and picks the ones that do not help (`picks` on
-`set_edit`). Before round 8 the Filler words switch took every um sound or
-none. An edit saved then with that switch on is made again when it is next
-opened, as any edit is when the recipe changes: its um sounds play again
-until Claude picks them, and every cut, pick, kept part and switch the
-creator or Claude chose stays as saved.
+`set_edit`).
+
+Before round 8 the Filler words switch took every um sound or none, and a
+pace from `standard` up took a written "um" or "uh" that sat in a pause it
+cut. An edit saved then with that switch on is made again the first time
+`find_words`, `review`, the page or a `transcribe` job opens it, as any edit
+is when the recipe changes:
+
+- its ums, heard and written, play again until Claude picks them;
+- the pause either side of each still goes, down to what the pace leaves;
+- the edit is longer by about the length of those ums;
+- every cut, pick, kept part and switch the creator or Claude chose stays
+  as saved.
+
+Nothing announces it. `get_edit`, `read_transcript`, `preview` and `render`
+read the edit as saved and never make it again, so until one of the four
+above opens it they still show, and export, the ums as cut.
 
 #### Models
 
@@ -1009,15 +1021,27 @@ END
 
 | Part of an um line | Meaning |
 |---|---|
-| `OPENS A SENTENCE` | the um is the first thing said after a sentence end, or after a pause of 0.5 s or more, the length at which `read_transcript` prints a pause. So is the first thing said in the video. |
+| `OPENS A SENTENCE` | the um is the first thing said after a sentence end, or after a pause of 0.5 s or more, the length at which `read_transcript` prints a pause. So is the first thing said in the video, and in each clip of a reel. |
 | `INSIDE A SENTENCE` | every other um: words run on either side of it |
+| `AFTER A CUT` | added to either of the two when the words right before the um are out of the saved edit already (a cut, a pick or the pace took them). The um sits where the cut leaves it, after the last word that still plays: `OPENS A SENTENCE AFTER A CUT` is an um at the head of what a cut keeps. |
 | `QUIET 0.62s BEFORE, 0.10s AFTER` | seconds of quiet between the um and what is said before and after it. It takes the place of `q` on an um line, in plain words, because it is what Claude decides by. |
 | `[(um 0.5s)]` | an um the transcript has no word for, with its length. Its id is passed in `picks` like a word's. |
 | `[Um,]` | an um the speech model wrote, as it wrote it |
 
 Ums said one after another are one hesitation: each sits where the first
 of them does. A laugh or another sound between a word and an um is not a
-word and ends no sentence.
+word and ends no sentence, but a pause of 0.5 s or more before that sound
+is a pause before the um: `read_transcript` breaks the line there too.
+
+Where an um sits is read off what plays. A word the saved edit removes is
+not said, so the word before the um is the last one that plays. A pause is
+only read between two things that both play, since what a cut leaves of the
+quiet around it is not known here, and `QUIET` stays the quiet in the video
+as it was shot. `find_words` knows only the cuts that are saved.
+
+On a transcript that was never looked through for sounds the answer
+carries `sounds_note` (see "Sounds" under `transcribe`): the ums the speech
+model left out are not listed then, because nobody looked for them.
 
 The server only says where an um sits and how much quiet is beside it. It
 never says an um should go, and it holds no threshold for that: which ums
@@ -1240,7 +1264,11 @@ with a reason the creator reads and a put back of its own. A picked filler
 word or um is none of that: there can be dozens, so the creator has one
 switch for all of them (Ums and likes) and a double-click for each. The
 switch's key is `likes`, as it was when it held only the likes, so saved
-edits, the creator's usual and the taste data read as they did.
+edits, the creator's usual and the taste data read as they did. It is one
+switch, so one turned off while it read Filler likes, on a video or in the
+usual, is still off and now keeps the ums in too: no picked um comes out
+until the creator switches it on. `picks.note` says so, for Claude to pass
+on.
 
 - Each pick is placed the way the creator's own word cuts are: the word's
   own span, widened into the quiet beside it when under 0.1 s, never into
@@ -1261,7 +1289,10 @@ edits, the creator's usual and the taste data read as they did.
   word. No other sound can be picked: an id that names a laugh, a breath
   or any sound that is no um is refused, and says to send a cut over the
   whole of it. A sound picked as an um and labelled a laugh or a long sound
-  since stays in, and the answer names it under `left_in`.
+  since stays in, and the answer names it under `left_in`. So does a pick
+  saved as an um sound whose place holds a spoken word now, as it can once
+  the sounds were found again on other word times: a pick of an um never
+  takes a word.
 - An id that names no word as the transcript is timed now is refused, with
   the reason, and the rest are saved. When every pick is refused nothing is
   saved. Ids change when the word times do: call `find_words` again after
@@ -1279,7 +1310,11 @@ picks: {picked: 41, switch_on: true, out: 35,
 ```
 
 `out` is counted with the switch on, whether it is on or off. `counts` says
-the picks by word and `out_counts` the ones that are out.
+the picks by word and `out_counts` the ones that are out. An um and a
+"like" are counted as nouns ("2 ums, 1 like"); any other word Claude picked
+is quoted as said (`2 "so"`). With the switch off the result also carries
+`note`: no pick is out, whatever `out` counts, and the creator should be
+told that the picks play until Ums and likes goes on.
 
 The server validates before saving:
 

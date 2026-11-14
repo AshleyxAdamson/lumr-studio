@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import wave
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -20,7 +21,7 @@ from lumr_studio.errors import StudioError
 from lumr_studio.pace import PACES
 from lumr_studio.project import open_project
 from lumr_studio.silences import no_silences
-from lumr_studio.sounds import SAMPLE_RATE, UM_WORDS, classify_events, is_um_word
+from lumr_studio.sounds import NOT_CHECKED, SAMPLE_RATE, UM_WORDS, classify_events, is_um_word
 from lumr_studio.transcript import pack_transcript
 from test_sound_finding import SameTimes, giggle, tone
 
@@ -368,6 +369,92 @@ def test_ums_said_one_after_another_sit_where_the_first_one_does():
     ]
 
 
+def test_a_pause_before_a_breath_is_a_pause_before_the_um_after_it():
+    # "and then", 0.8 s of quiet, a breath, an um: the transcript breaks the line at the pause and the um starts the next one.
+    words = [w("and", 0.5, 0.8), w("then", 0.85, 1.1), um_sound(1.9, 2.1), um_sound(2.2, 2.6), w("the", 2.7, 2.9),
+             w("oven.", 3.0, 3.4)]
+    found, labels = places(words, [BREATH, HELD])
+    assert [lb["kind"] for lb in labels] == ["sound", "um"]
+    assert [(p.position, p.quiet_before) for p in found] == [("opens", 0.1)]
+    assert pack_transcript(words, labels=labels)["text"].splitlines()[-2] == "[2.20-3.40] (um 0.4s) the oven."
+    # A laugh between a word and an um, with no pause either side of it, ends no sentence: the um is inside one.
+    words = [w("and", 0.5, 0.8), w("then", 0.85, 1.1), um_sound(1.2, 3.1), um_sound(3.2, 3.6), w("the", 3.7, 3.9),
+             w("oven.", 4.0, 4.4)]
+    found, labels = places(words, [IN_BURSTS, HELD])
+    assert [lb["kind"] for lb in labels] == ["laugh", "um"] and [p.position for p in found] == ["inside"]
+
+
+BROKEN_OFF = [w("Okay.", 0.2, 0.5), w("So", 0.6, 0.8), w("first", 0.85, 1.1), w("we", 1.15, 1.3), w("um,", 1.4, 1.7),
+              w("so", 1.8, 2.0), w("first", 2.05, 2.3), w("we", 2.35, 2.5), w("mix.", 2.55, 3.0)]
+
+
+def test_an_um_left_at_the_head_of_what_a_cut_keeps_opens_a_sentence():
+    um_in = lambda words, codes: word_finder.find_places(words, [["um"]], [], 60.0, codes)[0]
+    as_shot = um_in(BROKEN_OFF, None)
+    assert (as_shot.position, as_shot.after_cut) == ("inside", False), "as it was shot, words run on either side of it"
+    # The broken-off try is cut: what plays is "Okay. um, so first we mix."
+    cut = um_in(BROKEN_OFF, {(0.6, 0.8): 2, (0.85, 1.1): 2, (1.15, 1.3): 2})
+    assert (cut.position, cut.after_cut) == ("opens", True)
+    text = word_finder.pack_places([cut], [["um"]])["text"]
+    assert "w1.400-1.700 0:01 OPENS A SENTENCE AFTER A CUT, QUIET 0.10s BEFORE, 0.10s AFTER: " \
+        "Okay. So first we [um,] so first we mix." in text
+    assert "AFTER A CUT: the words right before it are out" in text, "and the lines above say how to read it"
+    # One word out, by the pace or by a pick: the um sits after the last word that plays, mid sentence here.
+    one_out = um_in(BROKEN_OFF, {(1.15, 1.3): 1})
+    assert (one_out.position, one_out.after_cut) == ("inside", True)
+    # A pause is read only between two things that both play: what a cut leaves of the quiet is not known.
+    paused = [w("add", 0.5, 0.8), w("the", 0.85, 1.0), w("wait", 2.0, 2.3), w("um", 2.35, 2.6), w("salt.", 2.7, 3.0)]
+    assert um_in(paused, {(2.0, 2.3): 2}).position == "inside"
+    # Every word before it cut: it is the first thing heard.
+    assert um_in(paused, {(0.5, 0.8): 2, (0.85, 1.0): 2, (2.0, 2.3): 2}).position == "opens"
+    # A word that is no um reads as it always did.
+    assert word_finder.find_places(BROKEN_OFF, [["so"]], [], 60.0, {(0.6, 0.8): 2})[1].after_cut is False
+
+
+def test_find_words_reads_where_an_um_sits_off_the_saved_edit(video):
+    video.with_suffix(".words.json").write_text(json.dumps(BROKEN_OFF))
+    quiet = {"silences": no_silences, "labels": tools.unmeasured_labels}
+    assert " INSIDE A SENTENCE, QUIET " in tools.find_words(str(video), ["um"], **quiet)["text"]
+    tools.set_edit(str(video), [{"start": 0.55, "end": 1.35, "reason": "starts the line and starts it again",
+                                 "kind": "false_start"}], **quiet)
+    found = tools.find_words(str(video), ["um"], **quiet)
+    assert " OPENS A SENTENCE AFTER A CUT, QUIET " in found["text"] and found["words"][0]["opens"] == 1
+
+
+def test_the_first_thing_said_in_a_clip_of_a_reel_opens_a_line():
+    words = [w("and", 0.5, 0.8), w("then", 0.85, 1.1), w("um", 1.3, 1.6), w("we", 1.7, 1.9), w("bake.", 2.0, 2.4)]
+    at = lambda breaks: word_finder.find_places(words, [["um"]], [], 60.0, breaks=breaks)[0].position
+    assert at(None) == "inside" and at([0.0]) == "inside", "a plain video, and a reel of one clip"
+    assert at([0.0, 1.2]) == "opens", "a clip starts between \"then\" and the um"
+    assert at([0.0, 1.65]) == "inside", "the clip starts after it"
+
+
+def test_find_words_on_a_reel_knows_where_each_clip_starts(video, jobs):
+    # "Hello everyone" from the first clip, then a clip that starts on the "um": no sentence end and no pause between them.
+    started = tools.assemble("two takes", [{"clip": str(video), "start": 0.0, "end": 1.55},
+                                           {"clip": str(video), "start": 3.3, "end": 7.0}], jobs=jobs)
+    job = jobs.wait(started["job_id"], timeout=120)
+    assert job["status"] == "done", job["error"]
+    reel = Path(job["result"]["reel"])
+    talk = [w("Hello", 0.5, 0.9), w("everyone", 0.95, 1.5), w("um", 1.65, 1.95), w("today", 2.15, 2.55), w("we", 2.6, 2.75),
+            w("talk.", 2.8, 3.15)]
+    reel.with_suffix(".words.json").write_text(json.dumps(talk))
+    found = tools.find_words(str(reel), ["um"], silences=no_silences, labels=tools.unmeasured_labels)
+    assert " OPENS A SENTENCE, QUIET 0.15s BEFORE, 0.20s AFTER: Hello everyone [um] today we talk." in found["text"]
+    lines = tools.read_transcript(str(reel), labels=tools.unmeasured_labels)["text"].splitlines()
+    assert lines[lines.index(next(ln for ln in lines if ln.startswith("== clip 2 of 2"))) + 1].endswith("] um today we talk.")
+
+
+def test_find_words_says_when_nobody_looked_for_the_ums_the_speech_model_left_out(video):
+    video.with_suffix(".words.json").write_text(json.dumps(BROKEN_OFF))
+    found = tools.find_words(str(video), ["um"], silences=no_silences, labels=tools.unmeasured_labels)
+    assert found["words"][0]["sounds"] == 0 and found["sounds_note"] == NOT_CHECKED, "none listed is not none there"
+
+
+def test_find_words_says_nothing_of_it_on_a_transcript_that_was_looked_through(take):
+    assert "sounds_note" not in find_ums(take)
+
+
 def test_a_laugh_a_breath_and_an_unmeasured_sound_are_never_ums():
     words = [w("the", 0.5, 0.8), w("joke.", 0.9, 1.4), um_sound(1.6, 2.9), w("So", 3.2, 3.5),
              um_sound(3.6, 4.0), w("anyway", 4.1, 4.6), um_sound(4.7, 5.1), w("next.", 5.2, 5.6)]
@@ -397,6 +484,13 @@ def test_a_sound_can_only_be_picked_when_it_is_an_um():
     # A sound picked as an um and judged a laugh since stays in, whole.
     out = edits.build_edit([], words, 60.0, picks=[{"id": "w1.600-2.900", "start": 1.6, "end": 2.9}], whole_sounds=[(1.6, 2.9)])
     assert out.cuts == [] and [(p["status"], p["why"]) for p in out.picks] == [("left_in", edits.IS_A_SOUND_TO_KEEP)]
+    # A pick saved as an um sound never takes a spoken word: where the sound was, "So" is said now.
+    saved = {"id": "w3.200-3.500", "start": 3.2, "end": 3.5, "text": "(um)"}
+    out = edits.build_edit([], words, 60.0, picks=[saved])
+    assert out.cuts == [] and [(p["status"], p["why"]) for p in out.picks] == [("left_in", edits.IS_A_WORD_NOW)]
+    assert edits.build_edit([], words, 60.0, picks=[{**saved, "text": "So"}]).picks[0]["status"] == "out", "a picked word goes"
+    still_there = {"id": "w4.700-5.100", "start": 4.7, "end": 5.1, "text": "(um)"}
+    assert edits.build_edit([], words, 60.0, picks=[still_there]).picks[0]["status"] == "out", "and so does the um itself"
 
 
 def test_the_words_a_speech_model_writes_for_a_hesitation_are_all_one_um():
@@ -410,6 +504,8 @@ def test_the_words_a_speech_model_writes_for_a_hesitation_are_all_one_um():
     assert by_word == [["um", 2], ["like", 3], ["you know", 1]]
     assert edits.counted(by_word) == '2 ums, 3 likes, 1 "you know"' and edits.counted([["um", 1]]) == "1 um"
     assert edits.counted([]) == ""
+    # Only an um and a "like" are counted as nouns. Any other pick is quoted as said: never "2 sos".
+    assert edits.counted(edits.picks_by_word(["so", "So,", "like", "basically", ""])) == '2 "so", 1 like, 1 "basically", 1 other'
 
 
 def test_the_packed_transcript_puts_an_um_among_the_words_and_leaves_other_sounds_as_they_were():
@@ -481,6 +577,65 @@ def test_an_edit_saved_before_ums_could_be_picked_opens_as_it_was(video, likes_o
     found = tools.find_words(str(video), ["like"], silences=no_silences, labels=tools.unmeasured_labels)
     assert found["words"] == [{"word": "like", "said": 3, "clean": 3, "already_out": 2 if likes_on else 0}]
     assert json.loads(project.edit_path.read_text())["ratings"] == before["ratings"]
+
+
+def test_a_usual_saved_with_filler_likes_off_keeps_the_ums_in_too_and_set_edit_says_so(video):
+    # The switch held only the likes when this usual was saved. It is one switch, so it is still off, for the ums too.
+    video.with_suffix(".words.json").write_text(json.dumps(BROKEN_OFF))
+    usual = {"version": 1, "pace": "standard", "take_out": {"pauses": True, "fillers": True, "repeats": True, "likes": False}}
+    treatment.usual_path().parent.mkdir(parents=True, exist_ok=True)
+    treatment.usual_path().write_text(json.dumps(usual))
+    quiet = {"silences": no_silences, "labels": tools.unmeasured_labels}
+    found = tools.find_words(str(video), ["um"], **quiet)
+    result = tools.set_edit(str(video), [], picks=[{"id": lines_of(found)[0].split()[0], "reason": "opens the line"}], **quiet)
+    picks = result["picks"]
+    assert (picks["switch_on"], picks["counts"]) == (False, "1 um") and taken(video, (1.4, 1.7)) == 0, "the um plays"
+    assert picks["note"] == tools.PICKS_SWITCHED_OFF
+    for said in ("switched Ums and likes off", "in their usual", "Filler likes", "every um and like you picked still plays",
+                 "Tell the creator"):
+        assert said in picks["note"], said
+    assert tools.get_edit(str(video), labels=tools.unmeasured_labels)["picks"]["switch_on"] is False
+    # She switches it on, on the page, and the pick goes out.
+    treatment.change_treatment(ctx_quiet(video), {"take_out": {"likes": True}})
+    assert taken(video, (1.4, 1.7)) == pytest.approx(0.3, abs=0.01)
+
+
+def ctx_quiet(video):
+    return treatment.load_context(open_project(str(video)), silences=no_silences, labels_for=tools.unmeasured_labels)
+
+
+def test_an_edit_whose_pace_took_a_written_um_gives_it_back_the_first_time_it_is_made_again(video, monkeypatch):
+    # Before, "um" was on the pace's filler list: at Standard a long pause took the "Um," that sat in it.
+    from lumr_studio import autocuts
+
+    words = [w("Mix", 0.7, 1.0), w("the", 1.05, 1.2), w("flour.", 1.25, 1.7), w("Um,", 3.0, 3.3), w("then", 4.6, 4.9),
+             w("add", 4.95, 5.2), w("salt.", 5.25, 5.7), w("Rest", 8.0, 8.3), w("it", 8.35, 8.5), w("now.", 8.55, 9.0)]
+    video.with_suffix(".words.json").write_text(json.dumps(words))
+    project = open_project(str(video))
+    quiet = {"silences": no_silences, "labels": tools.unmeasured_labels}
+    with monkeypatch.context() as as_before:
+        as_before.setattr(autocuts, "JUDGED_BY_READING", frozenset({"like"}))
+        autocuts.forget_plans()
+        tools.set_edit(str(video), [], auto_tighten=True, pace="standard", **quiet)
+    saved = project.edit_path.read_text()
+    assert taken(video, (3.0, 3.3)) == pytest.approx(0.3), "as it was saved, the um is out with its pause"
+    (project.root / autocuts.PLANS_FILE).unlink(missing_ok=True)  # plans of that version are never read again
+    autocuts.forget_plans()
+    treatment.forget_recipes()
+
+    # get_edit and read_transcript read the edit as saved, and make nothing again.
+    before = tools.get_edit(str(video), labels=tools.unmeasured_labels)
+    assert "CUT [3.00-3.30] Um," in tools.read_transcript(str(video), show_cuts=True, labels=tools.unmeasured_labels)["text"]
+    assert project.edit_path.read_text() == saved
+    # find_words makes it again: the um plays, the pause either side of it still goes, and the edit is that much longer.
+    found = tools.find_words(str(video), ["um"], **quiet)
+    assert found["words"][0]["already_out"] == 0 and " OPENS A SENTENCE, QUIET 1.30s BEFORE, 1.30s AFTER: " in found["text"]
+    assert taken(video, (3.0, 3.3)) == 0 and taken(video, (1.7, 3.0)) > 0.5 and taken(video, (3.3, 4.6)) > 0.5
+    after = tools.get_edit(str(video), labels=tools.unmeasured_labels)
+    assert after["removed_seconds"] < before["removed_seconds"]
+    assert before["removed_seconds"] - after["removed_seconds"] < 1.0, "the um and the pause a pace leaves beside it, no more"
+    made_again = json.loads(project.edit_path.read_text())
+    assert made_again["treatment"] == json.loads(saved)["treatment"], "her pace and switches stand"
 
 
 def test_a_usual_saved_before_reads_with_the_same_switches():

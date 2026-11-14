@@ -46,10 +46,14 @@ OUT_BY = {1: "pace", 2: "claude", 3: "creator", 4: "pick"}
 
 # Where an um sits, as its line says it. It opens a sentence when it is the
 # first thing said after a sentence end or after a pause the transcript
-# prints (``PHRASE_PAUSE_SECONDS``), or the first thing said at all. Every
-# other um has words running on either side of it.
+# prints (``PHRASE_PAUSE_SECONDS``), the first thing said in a clip of a
+# reel, or the first thing said at all. Every other um has words running on
+# either side of it. Words the saved edit removes are not said: an um right
+# after a cut sits where the cut leaves it, after the last word that plays.
 OPENS, INSIDE = "opens", "inside"
 POSITION_TEXT = {OPENS: "OPENS A SENTENCE", INSIDE: "INSIDE A SENTENCE"}
+# Added to the line of an um whose place was read past words the saved edit removes.
+AFTER_A_CUT = "AFTER A CUT"
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,7 @@ class Place:
     why_not_clean: str  # "" when a cut here is clean
     position: str = ""  # for an um: OPENS or INSIDE; "" for every other word
     sound: bool = False  # an um the speech model wrote no word for
+    after_cut: bool = False  # an um whose place was read past words the saved edit removes
 
     @property
     def clean(self) -> bool:
@@ -116,30 +121,56 @@ def _is_um(token: dict[str, Any], labels: list[dict[str, Any]] | None) -> bool:
     return is_um_word(token) or (label_of(token, labels) or {}).get("kind") == UM
 
 
-def _position(tokens: list[dict[str, Any]], ums: list[bool], i: int) -> str:
-    """Where the um at ``tokens[i]`` sits: ``OPENS`` a sentence or ``INSIDE`` one. ``ums`` says which tokens are ums.
+def _position(
+    tokens: list[dict[str, Any]], ums: list[bool], i: int,
+    out: list[bool] | None = None, breaks: list[float] | None = None,
+) -> tuple[str, bool]:
+    """Where the um at ``tokens[i]`` sits, ``OPENS`` a sentence or ``INSIDE`` one, and whether that was read past a cut.
+
+    ``ums`` says which tokens are ums, ``out`` which ones the saved edit
+    removes, and ``breaks`` are the times a reel gives way to its next clip.
 
     Ums said one after another are one hesitation, so the first one's place
     is the place of all of them. It opens a sentence when nothing is said
-    before it, when a pause of ``PHRASE_PAUSE_SECONDS`` or more lies between
-    it and the word before, or when that word ends a sentence. A laugh or
-    another sound between the two is not a word and ends no sentence.
+    before it, when a clip starts between it and what is said before, when a
+    pause of ``PHRASE_PAUSE_SECONDS`` or more lies before it, or when the
+    word before it ends a sentence. A laugh or another sound between the two
+    is not a word and ends no sentence, but a pause before that sound is a
+    pause before the um: ``read_transcript`` prints it, and the um starts
+    the line after it.
+
+    A word the saved edit removes is not said. The word before the um is
+    the last one that plays, so an um left at the head of what a cut keeps
+    opens a sentence when that word ends one. A pause is only read between
+    two things that both play: what a cut leaves of the quiet around it is
+    not known here.
     """
     first = i
     while first > 0 and ums[first - 1]:
         first -= 1
-    if first == 0:
-        return OPENS
-    run = tokens[first - 1:i + 1]
+    run = tokens[first:i + 1]
     if any(float(b["start"]) - float(a["end"]) >= PHRASE_PAUSE_SECONDS for a, b in zip(run, run[1:])):
-        return OPENS
-    before = next((w for w in reversed(tokens[:first]) if not is_event(w)), None)
-    return OPENS if before is None or _is_sentence_end(before) else INSIDE
+        return OPENS, False
+    later, past_a_cut, touching = tokens[first], False, True
+    for j in range(first - 1, -1, -1):
+        token = tokens[j]
+        if out and out[j]:
+            past_a_cut, touching = True, False
+            continue
+        if any(float(token["start"]) < at <= float(later["start"]) for at in breaks or ()):
+            return OPENS, past_a_cut
+        if touching and float(later["start"]) - float(token["end"]) >= PHRASE_PAUSE_SECONDS:
+            return OPENS, past_a_cut
+        if not is_event(token):
+            return (OPENS if _is_sentence_end(token) else INSIDE), past_a_cut
+        later, touching = token, True
+    return OPENS, past_a_cut
 
 
 def find_places(
     words: list[dict[str, Any]], phrases: list[list[str]], silences: list[Any], duration: float,
     codes: dict[tuple[float, float], int] | None = None, labels: list[dict[str, Any]] | None = None,
+    breaks: list[float] | None = None,
 ) -> list[Place]:
     """Every place each phrase is said, in time order.
 
@@ -149,12 +180,15 @@ def find_places(
     ``um`` finds every hesitation the transcript holds as a word, in any
     spelling, and with ``labels`` every um sound too; each of those places
     says where it sits (``_position``). No other sound is ever a place.
+    ``breaks`` are the times a reel gives way to its next clip
+    (``reels.clip_markers``): the first thing said in a clip opens a line.
     """
     said = SaidOrder.of(words)
     quiet = SilenceIndex(silences)
     plain = [None if is_event(w) else plain_text(str(w["word"])) for w in said.tokens]
     ums = [_is_um(w, labels) for w in said.tokens]
     codes = codes or {}
+    out = [bool(codes.get((round(float(w["start"]), 3), round(float(w["end"]), 3)), 0)) for w in said.tokens]
     places = []
     for parts in phrases:
         n = len(parts)
@@ -168,6 +202,7 @@ def find_places(
             end = round(max(float(w["end"]) for w in chosen), 3)
             floor, ceiling = said.neighbours(picked, duration)
             owners = [codes.get((round(float(w["start"]), 3), round(float(w["end"]), 3)), 0) for w in chosen]
+            position, after_cut = _position(said.tokens, ums, i, out, breaks) if um else ("", False)
             places.append(Place(
                 phrase=" ".join(parts), id=pick_id(start, end), start=start, end=end,
                 before=_quote(said.tokens[max(0, i - CONTEXT_WORDS):i], labels), said=_quote(chosen, labels, lengths=True),
@@ -175,8 +210,7 @@ def find_places(
                 quiet_before=round(max(0.0, start - floor), 2), quiet_after=round(max(0.0, ceiling - end), 2),
                 out_by=OUT_BY.get(owners[0], "") if all(owners) else "",
                 why_not_clean=why_not_clean(picked, said, quiet, duration),
-                position=_position(said.tokens, ums, i) if um else "",
-                sound=um and is_event(chosen[0]),
+                position=position, sound=um and is_event(chosen[0]), after_cut=after_cut,
             ))
     return sorted(places, key=lambda p: (p.start, p.end))
 
@@ -190,10 +224,11 @@ def _line(place: Place) -> str:
     notes = (f" OUT:{place.out_by}" if place.out_by else "") + ("" if place.clean else f" NOT CLEAN: {place.why_not_clean}")
     if place.position:
         # An um: where it sits and the quiet either side come first, in words, since they decide it.
+        where = POSITION_TEXT[place.position] + (f" {AFTER_A_CUT}" if place.after_cut else "")
+        said = " ".join(part for part in (place.before, f"[{place.said}]", place.after) if part)
         return (
-            f"{place.id} {clock(place.start)} {POSITION_TEXT[place.position]}, "
-            f"QUIET {place.quiet_before:.2f}s BEFORE, {place.quiet_after:.2f}s AFTER: "
-            f"{place.before} [{place.said}] {place.after}{notes}"
+            f"{place.id} {clock(place.start)} {where}, "
+            f"QUIET {place.quiet_before:.2f}s BEFORE, {place.quiet_after:.2f}s AFTER: {said}{notes}"
         )
     return (
         f"{place.id} {clock(place.start)} {place.before} [{place.said}] {place.after} "
@@ -210,9 +245,11 @@ HOW_TO_READ = (
 # Added when "um" was asked for.
 HOW_TO_READ_UMS = (
     "An um line says, right after the clock, where the um sits, then QUIET with the seconds of quiet before it "
-    f"and after it, in place of q. {POSITION_TEXT[OPENS]}: it is the first thing said after a sentence end, or "
-    f"after a pause long enough for read_transcript to print one. {POSITION_TEXT[INSIDE]}: words run on either "
-    "side of it. "
+    f"and after it, in place of q. {POSITION_TEXT[OPENS]}: it is the first thing said after a sentence end, "
+    "after a pause long enough for read_transcript to print one, or in a clip of a reel. "
+    f"{POSITION_TEXT[INSIDE]}: words run on either side of it. {AFTER_A_CUT}: the words right before it are out "
+    "of the saved edit already, so it sits where the cut leaves it, after the last word that still plays; "
+    "QUIET BEFORE is still the quiet in the video as it was shot. "
     "[(um 0.5s)] is an um heard between two words that the transcript has no word for, with its length; it is "
     "picked by its id like a word. No rule takes an um out: only your pick does, so read each one."
 )

@@ -723,7 +723,8 @@ def test_the_filler_likes_switch_in_both_states():
       return [but({}), but({ left_in: 1 }), but({ left_in: 0 }), but({ ready: false, count: 0, picked: 0, left_in: 0 }),
               Core.likesView({ key: 'likes', count: 3 }),
               but({ count: 5, said: 40, words: [['um', 2], ['like', 3]] }), but({ count: 1, said: 9, words: [['um', 1]] }),
-              but({ count: 4, said: 9, words: [['like', 3], ['you know', 1]] })];
+              but({ count: 4, said: 9, words: [['like', 3], ['you know', 1]] }),
+              but({ count: 4, said: 9, words: [['like', 1], ['so', 2], ['other', 1]] })];
     """)
     assert out[0] == {"ready": True, "line": "picked by Claude · 77 kept",
                       "more": "5 stay in because cutting them would clip the word beside them."}
@@ -735,6 +736,7 @@ def test_the_filler_likes_switch_in_both_states():
     assert out[5]["line"] == "2 ums, 3 likes picked by Claude · 35 kept"
     assert out[6]["line"] == "1 um picked by Claude · 8 kept"
     assert out[7]["line"] == '3 likes, 1 "you know" picked by Claude · 5 kept'
+    assert out[8]["line"] == '1 like, 2 "so", 1 other picked by Claude · 5 kept', "only an um and a like are counted as nouns"
 
 
 # ── the example the page runs from with ?example=1 ──────────────────────────

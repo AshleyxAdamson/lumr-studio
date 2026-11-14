@@ -722,6 +722,16 @@ def _picks_for_set_edit(
     return sorted(kept.values(), key=lambda k: k["start"]), rejected
 
 
+# What set_edit says of the picks while their switch is off. The switch was named Filler likes and held
+# only the likes before it held the ums, and an edit or a usual saved with it off still has it off.
+PICKS_SWITCHED_OFF = (
+    f"The creator switched {edits.PICK_LABEL} off, on the page or in their usual, so no pick is taken out: "
+    "every um and like you picked still plays, whatever out counts. A switch turned off while it read "
+    "Filler likes and held only the likes is still off, and holds the ums now too. Tell the creator that "
+    f"your picks play until they switch {edits.PICK_LABEL} on, on the page. The list is saved for when it goes on."
+)
+
+
 def _picks_report(made: Any, picks: list[dict[str, Any]], rejected: list[dict[str, Any]], switch_on: bool) -> dict[str, Any]:
     """What became of the picked filler words, for set_edit's answer."""
     became = {p["id"]: p for p in made.outcome.picks}
@@ -744,10 +754,7 @@ def _picks_report(made: Any, picks: list[dict[str, Any]], rejected: list[dict[st
         "rejected": rejected,
     }
     if not switch_on:
-        report["note"] = (
-            f"The creator switched {edits.PICK_LABEL} off on the page, so no pick is taken out. "
-            "The list is saved for when it goes on."
-        )
+        report["note"] = PICKS_SWITCHED_OFF
     return report
 
 
@@ -893,6 +900,10 @@ def find_words(
     model wrote as a word and the ones it left out, which the transcript
     holds as sounds. Each of those lines opens with where the um sits (it
     opens a sentence, or is inside one) and the quiet before and after it.
+    Where it sits is read off what plays: a word the saved edit removes is
+    not said, and on a reel the first thing said in a clip opens a line.
+    The ums the speech model left out are sounds, so the answer carries
+    ``sounds_note`` while the transcript was never looked through for them.
     """
     phrases = check_phrases(words)
     project = open_project(video_path)
@@ -901,8 +912,10 @@ def find_words(
         raise StudioError(f"start {start} is outside the video (0 to {duration:.2f}).")
     ctx = treatments.load_context(project, duration=duration, silences=silences, labels_for=labels)
     codes = treatments.removal_codes(ctx) if ctx.edit.get("cuts") else {}
-    places = find_places(ctx.words, phrases, ctx.silences, duration, codes, ctx.sounds)
-    return {**pack_places(places, phrases, start=start), "word_times": ctx.times}
+    reel = reels.reel_for(project.video)
+    breaks = [at for at, _line in reels.clip_markers(reel)] if reel else None
+    places = find_places(ctx.words, phrases, ctx.silences, duration, codes, ctx.sounds, breaks)
+    return _with_sounds_note(project, {**pack_places(places, phrases, start=start), "word_times": ctx.times})
 
 
 def _saved_removed(video_path: str) -> tuple[Project, float, list[tuple[float, float]]]:

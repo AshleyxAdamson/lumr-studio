@@ -526,19 +526,24 @@ def picks_by_word(texts: list[str]) -> list[list[Any]]:
     return [[word, n] for word, n in sorted(tally.items(), key=lambda item: (item[0] != UM, -item[1]))]
 
 
+# The words a count says as a noun: "1 um", "3 likes". The page says the same (``countedWords``).
+COUNTED_AS_NOUNS = (UM, "like")
+
+
 def counted(by_word: list[list[Any]]) -> str:
     """Counts by word as a creator would say them: ``2 ums, 3 likes``. Empty for none.
 
-    A one-word filler takes a plural; a longer one is quoted as said.
+    An um and a "like" take a plural. Any other word or phrase is quoted as
+    said, so no count reads "2 sos" or "3 basicallys".
     """
     parts = []
     for word, n in by_word:
         if word == OTHER_PICKS:
             parts.append(f"{n} {OTHER_PICKS}")
-        elif " " in word:
-            parts.append(f'{n} "{word}"')
-        else:
+        elif word in COUNTED_AS_NOUNS:
             parts.append(f"{n} {word}{'' if n == 1 else 's'}")
+        else:
+            parts.append(f'{n} "{word}"')
     return ", ".join(parts)
 
 
@@ -929,6 +934,7 @@ def _work_out_placement(
 
 
 IS_A_SOUND_TO_KEEP = "it is a laugh or a long sound now, which only a cut over all of it takes"
+IS_A_WORD_NOW = "the um it named is not there now and a spoken word is; call find_words again and use its ids"
 
 
 def _placed_picks(
@@ -940,8 +946,10 @@ def _placed_picks(
     A pick in a span the creator kept, or on a word she brought back, stays
     in: what she did by hand wins. A pick that is not clean stays in. So
     does a pick on one of ``whole``, the laughs and long sounds: a sound
-    picked as an um that is judged a laugh since. The rest are placed the
-    way her own word cuts are.
+    picked as an um that is judged a laugh since. So does a pick saved as
+    an um sound (``UM_TEXT``) whose span holds a spoken word now, as it can
+    once the sounds were found again on other word times: a pick of an um
+    never takes a word. The rest are placed the way her own word cuts are.
     """
     out = []
     for pick in picks:
@@ -955,6 +963,8 @@ def _placed_picks(
                 entry["status"] = PICK_KEPT
             elif _first_overlap(start, end, whole or []):
                 entry["status"], entry["why"] = PICK_LEFT_IN, IS_A_SOUND_TO_KEEP
+            elif pick.get("text") == UM_TEXT and not all(is_event(w) for w in said.tokens[found.start:found.stop]):
+                entry["status"], entry["why"] = PICK_LEFT_IN, IS_A_WORD_NOW
             elif why:
                 entry["status"], entry["why"] = PICK_LEFT_IN, why
             else:

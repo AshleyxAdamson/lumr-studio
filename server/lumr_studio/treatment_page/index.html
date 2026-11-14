@@ -1474,10 +1474,11 @@ const Core = (function(){
 
   /* ── ums and likes: the ones Claude picked by reading ────────── */
 
-  /** What is out, counted by the word: "2 ums, 3 likes". `words` is [[word, count], ...] as the state sends it. */
+  /** What is out, counted by the word: "2 ums, 3 likes". `words` is [[word, count], ...] as the state sends it.
+      An um and a like take a plural; any other word is quoted as said, so no count reads "2 sos". */
   function countedWords(words){
-    return (words || []).filter(w => w && w[0] && w[1] > 0)
-      .map(w => w[1] + ' ' + (/ /.test(w[0]) ? '"' + w[0] + '"' : w[0] + (w[1] === 1 ? '' : 's'))).join(', ');
+    const said = w => w[0] === 'um' || w[0] === 'like' ? w[0] + (w[1] === 1 ? '' : 's') : w[0] === 'other' ? w[0] : '"' + w[0] + '"';
+    return (words || []).filter(w => w && w[0] && w[1] > 0).map(w => w[1] + ' ' + said(w)).join(', ');
   }
 
   /** What the Ums and likes switch says: {ready, line, more}. `line` sits under its

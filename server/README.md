@@ -306,6 +306,9 @@ exception is named in `creator_words.py` and tested in
   `(um 0.5s)`, and `find_words(["um"])` lists those sounds beside every
   spelling the transcript does hold (`sounds.UM_WORDS`), each with
   `OPENS A SENTENCE` or `INSIDE A SENTENCE` and the quiet before and after.
+  Where an um sits is read off what plays: a word the saved edit removes is
+  not said (`AFTER A CUT`), and the first thing said in a clip of a reel
+  opens a line.
   No rule takes one: `autocuts.JUDGED_BY_READING` keeps every spelling out
   of the pace, and no trim is made for an um sound. Only a pick does
   (`edit.parse_pick`), and of the sounds only an um can be picked. The
