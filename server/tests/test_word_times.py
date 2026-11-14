@@ -6,6 +6,7 @@ No test here loads a model or touches real footage. Aligning is a fake
 
 import dataclasses
 import json
+import os
 
 import pytest
 from lumr_studio.engine.audio_boundaries import Silence
@@ -90,6 +91,88 @@ def test_a_new_transcript_makes_the_aligned_times_stale(video):
     assert times.source == ESTIMATED and times.words[0]["word"] == "Hi"
     assert "transcript changed" in times.note
     assert word_times.source_of(project) == ESTIMATED
+
+
+def set_modified(path, ns):
+    os.utime(path, ns=(path.stat().st_atime_ns, ns))
+
+
+def saved_key(project):
+    return json.loads(word_times.aligned_path(project).read_text())["transcript"]
+
+
+def save_key(project, key):
+    path = word_times.aligned_path(project)
+    path.write_text(json.dumps({**json.loads(path.read_text()), "transcript": key}))
+
+
+def test_the_same_transcript_with_another_time_is_the_same_transcript(video):
+    """A copy to another Mac keeps a file's content and may change its time."""
+    project, _ = align(video)
+    assert sorted(saved_key(project)) == ["sha256", "size"], "saved by size and content, not by time"
+    stat = project.words_path.stat()
+    for ns in (stat.st_mtime_ns // 1_000_000_000 * 1_000_000_000, stat.st_mtime_ns + 86_400_000_000_000, 0):
+        set_modified(project.words_path, ns)
+        assert word_times.read(project).source == MEASURED
+        assert word_times.source_of(project) == MEASURED
+
+
+def test_a_transcript_that_changed_is_stale_whatever_its_size_and_time(video):
+    project, _ = align(video)
+    stat = project.words_path.stat()
+    words = make_words()
+    words[0]["word"] = "Jello"  # as long as "Hello": the file keeps its size
+    project.words_path.write_text(json.dumps(words))
+    set_modified(project.words_path, stat.st_mtime_ns)
+    assert (project.words_path.stat().st_size, project.words_path.stat().st_mtime_ns) == (stat.st_size, stat.st_mtime_ns)
+    times = word_times.read(project)
+    assert times.source == ESTIMATED and "transcript changed" in times.note
+
+
+def test_word_times_saved_by_an_earlier_build_still_read(video):
+    """Builds before the content hash saved the transcript's size and its time in nanoseconds."""
+    project, _ = align(video)
+    stat = project.words_path.stat()
+    assert stat.st_mtime_ns % 1_000_000_000, "the test needs a time with a fraction to lose"
+    save_key(project, {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns})
+    # rsync -a to another Mac kept the time to the whole second only.
+    set_modified(project.words_path, stat.st_mtime_ns // 1_000_000_000 * 1_000_000_000)
+    assert word_times.read(project).source == MEASURED
+    # Read once, the file names its transcript by content, so the next copy may do what it likes to the time.
+    assert saved_key(project) == word_times.transcript_key(project) and "sha256" in saved_key(project)
+    set_modified(project.words_path, stat.st_mtime_ns + 86_400_000_000_000)
+    assert word_times.read(project).source == MEASURED
+
+
+@pytest.mark.parametrize("change", ["a second later", "another size", "no time"])
+def test_an_earlier_builds_key_for_another_transcript_is_stale(video, change):
+    project, _ = align(video)
+    stat = project.words_path.stat()
+    key = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    if change == "a second later":
+        set_modified(project.words_path, stat.st_mtime_ns + 1_000_000_000)
+    elif change == "another size":
+        key["size"] += 1
+    else:
+        del key["mtime_ns"]
+    save_key(project, key)
+    times = word_times.read(project)
+    assert times.source == ESTIMATED and "transcript changed" in times.note
+    assert saved_key(project) == key, "a key that does not fit is left as it was"
+
+
+def test_an_earlier_builds_key_is_kept_in_a_folder_that_cannot_be_written(video, monkeypatch):
+    project, _ = align(video)
+    stat = project.words_path.stat()
+    old = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    save_key(project, old)
+
+    def refuse(*_a, **_k):
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(word_times, "write_text_atomic", refuse)
+    assert word_times.read(project).source == MEASURED and word_times.read(project).source == MEASURED
+    assert saved_key(project) == old
 
 
 @pytest.mark.parametrize("content", ["not json", "[]", '{"version": 1}', '{"version": 99, "words": []}', '{"version": 7, "words": [5]}'])

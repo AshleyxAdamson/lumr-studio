@@ -33,7 +33,14 @@ from lumr_studio.jobs import JOBS, JobHandle, JobRegistry
 from lumr_studio.joins import check_joins, join_rows
 from lumr_studio.look import render_join_picture
 from lumr_studio.pace import CUSTOM, describe_paces, get_pace
-from lumr_studio.project import Project, append_receipt, open_project, reserve_unique_path
+from lumr_studio.project import (
+    Project,
+    append_receipt,
+    found_after_a_move,
+    open_project,
+    project_for,
+    reserve_unique_path,
+)
 from lumr_studio.publish_kit import write_publish_kit
 from lumr_studio.render_jobs import (
     RENDER_KIND,
@@ -248,7 +255,8 @@ def assemble(name: str, pieces: list[dict[str, Any]], *, jobs: JobRegistry = JOB
     is overwritten: a different sequence is a different file.
     """
     plan = reels.plan_reel(name, pieces)
-    project = plan.project
+    # The reel's project, which exists before the reel does: the job needs one for its receipt.
+    project = project_for(plan.reel)
     running = jobs.latest(reels.KIND, project)
     if running is not None and running.status == "running":
         return {"job_id": running.job_id}
@@ -333,7 +341,10 @@ def get_edit(
     its job, so Claude can follow an export the creator started from the
     page. ``word_times`` says whether the word times are measured or
     estimated. A reel made by ``assemble`` also carries ``reel``: its name
-    and where each clip sits in it.
+    and where each clip sits in it. A video that moved keeps its project
+    (``project.project_for``): the first answer after the move says so under
+    ``moved_from``, and ``project_note`` names folders that might hold this
+    video's edit and were not used, so an empty edit is never the whole story.
     """
     project = open_project(video_path)
     duration = project.duration()
@@ -341,6 +352,11 @@ def get_edit(
     summary = edits.edit_summary(edit, duration, include_auto=include_auto)
     if project.words_path.exists():
         summary["word_times"] = word_times.source_of(project)
+    found = found_after_a_move(project)
+    if found:
+        summary["moved_from"] = found
+    if project.note:
+        summary["project_note"] = project.note
     reel = reels.reel_for(project.video)
     if reel:
         summary["reel"] = reel

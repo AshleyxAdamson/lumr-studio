@@ -461,8 +461,9 @@ def load_or_measure_labels(
 ) -> list[dict]:
     """Labels cached in ``<project.root>/sounds.json``, measured when the cache is stale.
 
-    The cache is keyed on the transcript file's size and mtime, so a
-    re-transcribe invalidates it. It also says which word times the labels
+    The cache is keyed on the transcript file's size and content
+    (``word_times.same_transcript``), so a re-transcribe invalidates it and
+    a copy to another Mac does not. It also says which word times the labels
     were judged on, and how those were made: a punchline is found from the
     words before a laugh, so when the word times change the sounds are
     judged again. The measures
@@ -485,7 +486,7 @@ def load_or_measure_labels(
             cached = json.loads(cache_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             cached = {}
-        if cached.get("version") == SOUNDS_VERSION and cached.get("transcript") == key:
+        if cached.get("version") == SOUNDS_VERSION and word_times.same_transcript(cached.get("transcript"), project):
             same_times = cached.get("word_times", word_times.ESTIMATED) == times
             if same_times and cached.get("word_times_made_as", _made_as_before(times)) == made_as:
                 return cached["labels"]

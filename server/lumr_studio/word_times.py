@@ -44,9 +44,11 @@ and never in LUMR_HOME.
 from __future__ import annotations
 
 import bisect
+import hashlib
 import json
 import logging
 import math
+import os
 import re
 import threading
 import time
@@ -636,25 +638,84 @@ def aligned_path(project: Project) -> Path:
     return project.root / ALIGNED_FILE
 
 
-def transcript_key(project: Project) -> dict[str, int] | None:
-    """Size and mtime of the project's transcript, or None when it is missing.
+# How a saved file names the transcript it was made from: the transcript's size and a hash of
+# its content. A copy to another Mac keeps both, whatever it does to the file's times.
+CONTENT_HASH = "sha256"
+# A file saved before the hash carries the transcript's modified time in nanoseconds in its
+# place. A copy may keep that time only to the second (``rsync -a`` to another Mac does), so
+# two times less than a second apart are the same time.
+MODIFIED_TIME = "mtime_ns"
+SAME_TIME_NS = 1_000_000_000
+
+# A few videos in one session.
+PARSED_FILES_KEPT = 4
+# The hash of each transcript last read, by path, with the state the file had: every page
+# request asks whether the saved word times still fit the transcript. The state holds the
+# change time too, which no write can put back, so new content is never taken for old.
+_hashed: dict[Path, tuple[tuple[int, ...], str]] = {}
+_hashed_lock = threading.Lock()
+
+
+def _content_hash(path: Path, stat: os.stat_result) -> str:
+    """The hash of the file at ``path``, read once for each state of the file. Raises as ``open`` does."""
+    state = (stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+    with _hashed_lock:
+        hit = _hashed.get(path)
+        if hit is not None and hit[0] == state:
+            return hit[1]
+    digest = hashlib.new(CONTENT_HASH, path.read_bytes()).hexdigest()
+    with _hashed_lock:
+        _hashed[path] = (state, digest)
+        while len(_hashed) > PARSED_FILES_KEPT:
+            _hashed.pop(next(iter(_hashed)))
+    return digest
+
+
+def transcript_key(project: Project) -> dict[str, Any] | None:
+    """Size and content hash of the project's transcript, or None when it is missing.
 
     Everything made from the transcript (aligned times, sound labels) is
-    saved with this, so a new transcript makes it stale.
+    saved with this, so a new transcript makes it stale. Compare a saved key
+    with ``same_transcript``, never with ``==``: a file saved by an earlier
+    build carries another key.
     """
+    path = project.words_path
     try:
-        stat = project.words_path.stat()
-    except FileNotFoundError:
+        stat = path.stat()
+        return {"size": stat.st_size, CONTENT_HASH: _content_hash(path, stat)}
+    except OSError:
         return None
-    return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
+def same_transcript(saved: Any, project: Project) -> bool:
+    """Whether ``saved``, the key a file was saved with, names the project's transcript as it is now.
+
+    A key with a content hash fits a transcript of that size and content,
+    whatever its times, so a project copied to another Mac keeps its
+    measured word times. A key from before the hash, ``{size, mtime_ns}``,
+    fits a transcript of that size modified within a second of then, since a
+    copy may keep the time only to the second. A transcript written again
+    has other content, or another size or time, and fits neither.
+    """
+    if not isinstance(saved, dict):
+        return False
+    path = project.words_path
+    try:
+        stat = path.stat()
+        if saved.get("size") != stat.st_size:
+            return False
+        if CONTENT_HASH in saved:
+            return saved[CONTENT_HASH] == _content_hash(path, stat)
+    except OSError:
+        return False
+    then = saved.get(MODIFIED_TIME)
+    return isinstance(then, int) and abs(then - stat.st_mtime_ns) < SAME_TIME_NS
 
 
 # The aligned file last read, by path, with the size and mtime it had. Every
 # page request reads the words; parsing 3000 of them each time is wasted work.
 _parsed: dict[Path, tuple[tuple[int, int], dict[str, Any]]] = {}
 _parsed_lock = threading.Lock()
-# A few videos in one session.
-PARSED_FILES_KEPT = 4
 
 
 def _parse_aligned(path: Path) -> dict[str, Any]:
@@ -700,6 +761,26 @@ def _as_the_aligner_gave(words: Words) -> Words:
     return _sounds_clear_of_words(sorted(out, key=lambda w: float(w["start"])))
 
 
+def _save_with_content_key(path: Path, project: Project, parsed: dict[str, Any]) -> None:
+    """Save the aligned file at ``path`` again with its transcript named by content.
+
+    For a file from before the hash whose older key still fits, once: after
+    this a copy that loses the transcript's time costs nothing. Only the key
+    changes, in the file and in ``parsed``, the copy held in memory, so a
+    folder that can't be written is not tried again on every read.
+    """
+    key = transcript_key(project)
+    if key is None:
+        return
+    parsed["transcript"] = key
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["transcript"] = key
+        write_text_atomic(path, json.dumps(data, ensure_ascii=False) + "\n")
+    except (OSError, ValueError) as why:
+        log.warning("the saved word times at %s keep their older transcript key: %s", path, why)
+
+
 def _usable(project: Project) -> tuple[dict[str, Any] | None, str]:
     """The saved aligned file's content when it fits the transcript, else None and why not.
 
@@ -712,8 +793,10 @@ def _usable(project: Project) -> tuple[dict[str, Any] | None, str]:
         data = _parse_aligned(path)
         if data.get("version") != ALIGNED_VERSION or not isinstance(data.get("words"), list):
             return None, NOTE_NOT_ALIGNED
-        if data.get("transcript") != transcript_key(project):
+        if not same_transcript(data.get("transcript"), project):
             return None, NOTE_TRANSCRIPT_CHANGED
+        if CONTENT_HASH not in data["transcript"]:
+            _save_with_content_key(path, project, data)
     except _CANT_READ as why:
         log.warning("the saved word times at %s can't be read, using the transcript's own: %s", path, why)
         return None, NOTE_NOT_ALIGNED

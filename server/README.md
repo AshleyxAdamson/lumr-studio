@@ -136,7 +136,7 @@ by `../hooks/hooks.json` at session start) against stub programs on a trimmed
 | `server.py` | MCP wiring only: tool names, annotations, input models, error mapping. Registers a tool only when `offering.py` offers it |
 | `offering.py` | The one list of tool names: the 12 editor tools, and the extras (publish kit, overlays) behind `LUMR_STUDIO_EXTRAS` |
 | `tools.py` | One plain function per tool; what the tests call |
-| `project.py` | Project folder, atomic writes, receipts, new export names |
+| `project.py` | Project folder, atomic writes, receipts, new export names. `project_for` is the one place a video's folder is chosen, and it finds the folder of a video that moved |
 | `transcript.py` | Load and validate `words.json`; pack it into phrase lines |
 | `edit.py` | Place, validate, merge and save cuts: Claude's, the creator's own, and Claude's picked filler words |
 | `word_times.py` | The one place that chooses the word times: measured when the words were aligned to the sound, else estimated |
@@ -205,7 +205,7 @@ exception is named in `creator_words.py` and tested in
 
 | File | Written by | Holds |
 |---|---|---|
-| `words-aligned.json` | the transcribe job | the transcript's words with measured times, each with the transcript's own times beside them, the size and date of the transcript they were made from, and what the soft ends of words took (`soft_room`, with a `warning` when the room misled it). A transcript that changed makes the file stale, and the plugin falls back to estimated times until it is measured again. |
+| `words-aligned.json` | the transcribe job | the transcript's words with measured times, each with the transcript's own times beside them, the size and content hash of the transcript they were made from (`word_times.same_transcript`; a file from an earlier build carries the size and modified time, and is still read), and what the soft ends of words took (`soft_room`, with a `warning` when the room misled it). A transcript that changed makes the file stale, and the plugin falls back to estimated times until it is measured again. A transcript that was only copied, to another folder or another Mac, does not. |
 | `plans.json` | `autocuts.plan_auto_cuts` | the automatic trims planned for the six stops, and for the last 12 slider settings. A plan depends only on the words, the measured silences and the two slider values, so it is made once. |
 
 ## Contract details I had to interpret

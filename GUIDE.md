@@ -149,6 +149,8 @@ Each video gets one project folder at `~/Lumr/studio/projects/<video name>-<id>/
 | `exports/` | the videos and previews you render |
 | `frames/` | the screenshots `frames` takes of your video |
 
+You can move a video to another folder, or copy your Lumr folder and your videos to another Mac. Keep each video's `.words.json` beside it. The project folder keeps its old name, and Lumr finds it by the video's file name and length: your edit and your measured word times open as you left them, and Claude tells you once that it found them. Nothing is moved or renamed. If two folders could be that video's, Lumr picks neither and Claude tells you which ones, so you can take one away.
+
 Lumr learns from the cuts you put back, the cuts you mark "Good cut" or "Wrong cut" on the review page, and the words you cut or bring back. It works that out from your saved edits, on your Mac, and keeps only a note in `taste.json` of what you asked it to forget. To forget something, ask Claude: one word, one kind of cut, or everything. Your videos and edits don't change.
 
 Clips you join go to `~/Lumr/studio/reels/<video name>/`: the joined video, and a small `.reel.json` file that records which seconds came from which clip. The joined video is a second full copy of your footage, so it takes as much disk space as the clips do. Nothing there is overwritten, Studio never deletes it, and your clips are never changed. To get the space back, delete the folder yourself. A file there ending in `.partial.mp4` is a join still running or one that was cut off, and is safe to delete once no `ffmpeg` is running.
