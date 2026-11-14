@@ -445,14 +445,17 @@ def test_bringing_back_every_word_of_claudes_cut_reads_as_put_back_and_can_be_le
     assert state["keeps"] == [] and why_of(state, THE_UM[0]) == treatment.REMOVED_BY_CLAUDE
 
 
-def um_trim(*_args, **_kwargs):
-    """A stand-in plan: at every pace one filler trim takes the "um" and the pause before it."""
-    return [{"start": 2.45, "end": 3.85, "reason": "filler: um (+1 more)", "kind": "fillers"}]
+def so_trim(*_args, **_kwargs):
+    """A stand-in plan: at every pace one filler trim takes the "so" and the pause before it."""
+    return [{"start": 2.45, "end": 3.85, "reason": "filler: so (+1 more)", "kind": "fillers"}]
 
 
 def test_a_word_brought_back_from_an_automatic_removal_stays_back_at_every_pace(video, monkeypatch):
-    monkeypatch.setattr(treatment, "plan_auto_cuts", um_trim)
-    ctx = edited(video, cuts=[], auto_tighten=True)
+    # The word at 3.4 is "so" here. An "um" is judged by reading, so no automatic removal takes one.
+    said = json.loads(video.with_suffix(".words.json").read_text())
+    video.with_suffix(".words.json").write_text(json.dumps([{**w, "word": "so"} if w["word"] == "um" else w for w in said]))
+    monkeypatch.setattr(treatment, "plan_auto_cuts", so_trim)
+    ctx = edited(video, cuts=[], auto_tighten=True, pace="fast")
     assert why_of(treatment.page_state(ctx), THE_UM[0]) == treatment.REMOVED_AUTO
     state = treatment.add_keep(ctx, exact(THE_UM))
     assert why_of(state, THE_UM[0]) == treatment.PLAYING and state["changed"]["words_back"] == 1

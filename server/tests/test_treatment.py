@@ -108,15 +108,32 @@ def test_turning_a_kind_off_drops_exactly_its_trims(words, monkeypatch, off):
     assert without.outcome.cuts == [c for c in everything.outcome.cuts if c["kind"] != off]
 
 
-def test_the_real_planner_files_an_um_under_fillers(words):
+def talk_with(filler: str) -> list[dict]:
     talk = spoken_run("Hello everyone and welcome.", 0.2) + spoken_run("Today we will talk about", 3.0)
-    talk += [{"word": "um", "start": 5.2, "end": 5.5}] + spoken_run("editing video for the web.", 5.6)
-    talk += spoken_run("Thanks for watching.", 9.0)
+    talk += [{"word": filler, "start": 5.2, "end": 5.5}] + spoken_run("editing video for the web.", 5.6)
+    return talk + spoken_run("Thanks for watching.", 9.0)
+
+
+def test_the_real_planner_files_a_filler_under_fillers(words):
+    # "mhm" is on ClipForge's list of sounds it takes wherever they are said, and it is no um: it says yes.
+    talk = talk_with("mhm")
     on = make_edit([], talk, 12.0, treatment=Treatment(pace="fast"), silences=[], sounds=[], keeps=[])
     off = make_edit([], talk, 12.0, treatment=Treatment(pace="fast", take_out=frozenset({"pauses", "repeats"})),
                     silences=[], sounds=[], keeps=[])
     assert [c["kind"] for c in on.outcome.cuts].count("fillers") == 1
     assert off.outcome.cuts == [c for c in on.outcome.cuts if c["kind"] != "fillers"]
+
+
+@pytest.mark.parametrize("name", list(PACES))
+@pytest.mark.parametrize("spelling", ["um", "Uhh,", "erm"])
+def test_the_real_planner_leaves_an_um_for_claude_to_judge(name, spelling):
+    # ClipForge plans a removal for an "um" at every level that takes fillers. The plugin shortens it
+    # around the word: an um is judged by reading, and goes only as a pick.
+    talk = talk_with(spelling)
+    made = make_edit([], talk, 12.0, treatment=Treatment(pace=name), silences=[], sounds=[], keeps=[])
+    assert not [c for c in made.outcome.cuts if c["start"] < 5.5 and 5.2 < c["end"]], "no cut touches the um"
+    assert "fillers" not in [c["kind"] for c in made.outcome.cuts]
+    assert treatment.taken_by_kind(made, talk)["fillers"].words == {}
 
 
 def test_no_kinds_on_means_no_trims(words):
@@ -197,7 +214,7 @@ def test_state_has_every_field_the_page_reads(video):
     assert state["reel"] is None, "a plain video is not joined from clips"
     assert [g["key"] for g in state["groups"]] == ["yours", "repeat", "false_start", "off_topic", "other"]
     assert [t["key"] for t in state["take_out"]] == ["pauses", "fillers", "repeats", "likes"]
-    assert [t["label"] for t in state["take_out"]] == ["Long pauses", "Filler words", "Stutters", "Filler likes"]
+    assert [t["label"] for t in state["take_out"]] == ["Long pauses", "Filler words", "Stutters", "Ums and likes"]
     assert state["custom"] is None and state["settings"]["fine"] == {"gap_length": 0.6, "rhythm": 3.0}
     assert set(state["fine_ranges"]) == {"gap_length", "rhythm"}
     assert [p["pace"] for p in state["paces"]] == SIX_STOPS
@@ -852,10 +869,9 @@ def test_no_pace_takes_a_word_that_is_no_filler(video, name):
     tools.set_edit(str(video), [], auto_tighten=True, pace=name, **HEARD)
     state = treatment.page_state(heard(video))
     assert state["word_times"] == "measured" and state["durations"]["saved"] > 10
-    assert [w[0] for w in state["words"] if w[3]] in ([], ["um,"]), "nothing goes but the filler"
+    assert [w[0] for w in state["words"] if w[3]] == [], "no word goes, and the um is judged by reading"
     assert not overlapping(state, short_word.TAKE), "the sound of \"take\" plays"
-    fillers = state["take_out"][1]
-    assert fillers["words"] == ([["um", 1]] if not plays(state, "um,") else []), "and the switch says so"
+    assert state["take_out"][1]["words"] == [], "and the switch says so"
 
 
 def test_a_removal_planned_over_a_word_is_shortened_around_it(video, monkeypatch):
@@ -870,34 +886,34 @@ def test_a_removal_planned_over_a_word_is_shortened_around_it(video, monkeypatch
 
 
 def test_switching_filler_words_off_brings_back_a_filler_inside_a_pause(video, monkeypatch):
-    short_word.on_video(video)
+    short_word.on_video(video, alone="so,")
     monkeypatch.setattr(treatment, "plan_auto_cuts", lambda *_a, **_k: [dict(PAUSE_OVER_THE_WORD_ALONE)])
     tools.set_edit(str(video), [], auto_tighten=True, pace="max", **HEARD)
     on = treatment.page_state(heard(video))
-    assert not plays(on, "um,") and [w[4] for w in on["words"] if w[0] == "um,"] == [1]
+    assert not plays(on, "so,") and [w[4] for w in on["words"] if w[0] == "so,"] == [1]
     pauses, fillers = on["take_out"][0], on["take_out"][1]
-    assert (fillers["count"], fillers["words"]) == (1, [["um", 1]]), "the switch covers a filler a pause took"
+    assert (fillers["count"], fillers["words"]) == (1, [["so", 1]]), "the switch covers a filler a pause took"
     assert pauses["count"] == 1 and on["paces"][-1]["trims"] == 1, "one removal, filed as a long pause"
     assert fillers["seconds"] == pytest.approx(0.1, abs=0.05), "the word's own length"
     assert pauses["seconds"] + fillers["seconds"] == pytest.approx(on["paces"][-1]["seconds_saved"], abs=0.11)
 
     off = treatment.change_treatment(heard(video), {"take_out": {"fillers": False}})
-    assert plays(off, "um,") and not overlapping(off, short_word.ALONE_ROOM), "the word is back, whole"
+    assert plays(off, "so,") and not overlapping(off, short_word.ALONE_ROOM), "the word is back, whole"
     assert len(off["removed"]) == 2, "and the pause either side of it still goes"
     assert off["changed"]["seconds"] > 0 and off["paces"][-1]["trims"] == 2
-    assert (off["take_out"][1]["count"], off["take_out"][1]["words"]) == (1, [["um", 1]]), "what it would take, on again"
+    assert (off["take_out"][1]["count"], off["take_out"][1]["words"]) == (1, [["so", 1]]), "what it would take, on again"
 
     again = treatment.change_treatment(heard(video), {"take_out": {"fillers": True}})
     assert again["removed"] == on["removed"]
 
 
 def test_with_long_pauses_off_the_filler_switch_counts_what_is_left_for_it(video, monkeypatch):
-    short_word.on_video(video)
-    named = {"start": 5.585, "end": 5.735, "reason": "filler: um", "kind": "fillers"}
+    short_word.on_video(video, alone="so,")
+    named = {"start": 5.585, "end": 5.735, "reason": "filler: so", "kind": "fillers"}
     monkeypatch.setattr(treatment, "plan_auto_cuts", lambda *_a, **_k: [dict(PAUSE_OVER_TAKE), dict(named)])
     tools.set_edit(str(video), [], auto_tighten=True, pace="max", **HEARD)
     state = treatment.change_treatment(heard(video), {"take_out": {"pauses": False}})
-    assert [w[0] for w in state["words"] if w[3]] == ["um,"]
+    assert [w[0] for w in state["words"] if w[3]] == ["so,"]
     assert state["take_out"][1]["count"] == 1 and state["paces"][-1]["trims"] == 1
     assert state["take_out"][0]["count"] == 2, "what Long pauses would take, on again: the quiet either side of \"take\""
 
@@ -1042,13 +1058,54 @@ def test_no_pace_takes_part_of_a_sound_of_the_transcript(name):
     assert part == [] and made.outcome.cuts, "the pause before it still goes"
 
 
-@pytest.mark.parametrize("name", ["natural", "standard"])
-def test_shortening_a_trim_for_its_pause_never_eats_into_the_filler_it_holds(name):
+# ── an um the transcript holds as a sound ─────────────────────────────────────
+#
+# A held "uhh" between two words is a sound of the transcript, labelled ``um``. No pace and no switch
+# takes one: it goes when Claude picked it, whole, and never in part.
+
+UM_WORDS_AROUND = [
+    {"word": "now", "start": 82.921, "end": 83.041}, {"word": "season,", "start": 83.041, "end": 83.938},
+    {"word": "[vocalization]", "start": 84.396, "end": 84.72, "type": "event"},
+    {"word": "after", "start": 84.72, "end": 85.142}, {"word": "Devon", "start": 85.142, "end": 85.543},
+    {"word": "winter,", "start": 85.543, "end": 86.103},
+]
+UM_QUIET = [Silence(82.0, 82.921), Silence(83.7713, 84.396), Silence(84.6801, 84.7743), Silence(84.8301, 84.9309),
+            Silence(85.4826, 85.5457), Silence(86.103, 88.0)]
+UM_SOUND = (84.396, 84.72)
+UM_LABEL = {"start": 84.396, "end": 84.72, "seconds": 0.32, "kind": "um", "confidence": "possible",
+            "voiced": 0.86, "bursts": 0, "punchline": None}
+UM_PICK = {"id": "w84.396-84.720", "start": 84.396, "end": 84.72}
+
+
+def touching(made, span):
+    return [c for c in made.outcome.cuts if c["start"] < span[1] and span[0] < c["end"]]
+
+
+@pytest.mark.parametrize("name", SIX_STOPS)
+@pytest.mark.parametrize("take_out", [frozenset(treatment.edits.SWITCHES), frozenset({"pauses"}), frozenset({"fillers", "repeats"})])
+def test_no_pace_and_no_switch_takes_an_um_sound_nobody_picked(name, take_out):
+    made = make_edit([], UM_WORDS_AROUND, 88.0, treatment=Treatment(pace=name, take_out=take_out), silences=UM_QUIET,
+                     sounds=[UM_LABEL], keeps=[])
+    assert touching(made, UM_SOUND) == [], f"the um plays whole at {name}"
+    assert treatment.taken_by_kind(made, UM_WORDS_AROUND)["fillers"].count == 0, "Filler words holds no um"
+
+
+@pytest.mark.parametrize("name", SIX_STOPS)
+def test_a_picked_um_sound_is_cut_whole_at_every_pace(name):
+    made = make_edit([], UM_WORDS_AROUND, 88.0, treatment=Treatment(pace=name), silences=UM_QUIET, sounds=[UM_LABEL],
+                     keeps=[], picks=[UM_PICK])
+    covering = [c for c in made.outcome.cuts if c["start"] <= UM_SOUND[0] and UM_SOUND[1] <= c["end"]]
+    assert [c["source"] for c in covering] == ["pick"], f"the um should be cut whole at {name}"
+    assert touching(made, UM_SOUND) == covering, "never only part of it"
+    off = make_edit([], UM_WORDS_AROUND, 88.0, silences=UM_QUIET, sounds=[UM_LABEL], keeps=[], picks=[UM_PICK],
+                    treatment=Treatment(pace=name, take_out=frozenset({"pauses", "fillers", "repeats"})))
+    assert touching(off, UM_SOUND) == [], "with Ums and likes off it plays, whatever the other switches say"
+
+
+def test_a_picked_um_that_runs_straight_on_from_a_word_is_left_in():
     # On the real take: "And" (ends 497.12) then a "[vocalization]" the transcript heard from 497.12 to
-    # 497.68, voiced 0.54. Measured -25 dB silence dips inside the sound itself (497.213-497.277,
-    # 497.330-497.649): leave_pauses used to read those as "air" it could give back from inside the
-    # trim, and the last check then found an edge inside the sound and moved it, dropping the cut. The
-    # trim is held now, the way her own cuts are, so shortening for the pause never reaches past it.
+    # 497.68, voiced 0.54, with no quiet between the two. The voice runs from the word into the um, so a
+    # cut there would clip "And". The pick stays in and says why; nothing takes a part of the sound.
     words = [
         {"word": "there.", "start": 496.31, "end": 496.57}, {"word": "And", "start": 496.953, "end": 497.12},
         {"word": "[vocalization]", "start": 497.12, "end": 497.68, "type": "event"},
@@ -1059,112 +1116,55 @@ def test_shortening_a_trim_for_its_pause_never_eats_into_the_filler_it_holds(nam
         Silence(496.219, 496.310), Silence(496.509, 496.953), Silence(497.213, 497.277),
         Silence(497.330, 497.649), Silence(497.649, 497.741), Silence(498.327, 498.402),
     ]
-    filler = {"start": 497.12, "end": 497.68, "seconds": 0.56, "kind": "sound", "confidence": "possible",
-              "voiced": 0.54, "punchline": None}
-    made = make_edit([], words, 500.0, treatment=Treatment(pace=name), silences=quiet, sounds=[filler], keeps=[])
-    sound = (497.12, 497.68)
-    covering = [c for c in made.outcome.cuts if c["start"] <= sound[0] + 0.002 and sound[1] - 0.002 <= c["end"]]
-    touching = [c for c in made.outcome.cuts if c["start"] < sound[1] and sound[0] < c["end"]]
-    assert covering, f"the umm still plays at {name}: {touching}"
-    assert touching == covering, "never only part of it"
+    um = {"start": 497.12, "end": 497.68, "seconds": 0.56, "kind": "um", "confidence": "possible",
+          "voiced": 0.54, "bursts": 0, "punchline": None}
+    for name in ("natural", "standard", "max"):
+        made = make_edit([], words, 500.0, treatment=Treatment(pace=name), silences=quiet, sounds=[um], keeps=[],
+                         picks=[{"id": "w497.120-497.680", "start": 497.12, "end": 497.68}])
+        assert [(p["status"], p["why"]) for p in made.outcome.picks] == [("left_in", "cutting it would clip the word before")]
+        assert touching(made, (497.12, 497.68)) == [], name
 
 
-def test_a_short_run_on_with_no_gap_from_a_word_is_its_tail_not_a_filler():
+def test_a_short_run_on_with_no_gap_from_a_word_is_its_tail_not_an_um():
     # On the real take: "in" (room-given end 299.44) runs straight into a "[vocalization]" the
     # transcript logged right at that instant, 299.44-299.559 (0.119 s), voiced 0.5, the edge of held.
-    # No gap at all and short: this is "in" decaying, not a fresh "uhh", so Filler words leaves it, at
-    # every pace (max included, the hardest).
+    # No gap at all and short: this is "in" decaying, not a fresh "uhh".
+    from lumr_studio.sounds import classify_events
+
     words = [
         {"word": "season", "start": 298.509, "end": 299.12}, {"word": "in", "start": 299.12, "end": 299.44},
         {"word": "[vocalization]", "start": 299.44, "end": 299.559, "type": "event"},
         {"word": "the", "start": 299.694, "end": 300.09}, {"word": "fields,", "start": 300.09, "end": 300.396},
     ]
-    quiet = [Silence(299.559, 299.694)]
-    label = {"start": 299.44, "end": 299.559, "seconds": 0.12, "kind": "sound", "confidence": "possible",
-             "voiced": 0.5, "punchline": None}
-    trims = autocuts.vocalization_filler_trims([label], words)
-    assert trims == [], "a run-on this short with no gap is the word's own tail"
-    made = make_edit([], words, 301.0, treatment=Treatment(pace="max"), silences=quiet, sounds=[label], keeps=[])
-    sound = (299.44, 299.559)
-    from_fillers = [c for c in made.outcome.cuts if c.get("kind") == "fillers"
-                    and c["start"] < sound[1] and sound[0] < c["end"]]
-    assert from_fillers == [], "not taken as a filler, whatever a pause trim later does with the same air"
+    held = {"bursts": 0, "burst_rate": 0.0, "voiced": 0.5}
+    assert [lb["kind"] for lb in classify_events(words, measures=[held])] == ["sound"]
+    # The same sound a little after the word is an um of its own.
+    apart = [dict(w) for w in words]
+    apart[2].update(start=299.5, end=299.62)
+    assert [lb["kind"] for lb in classify_events(apart, measures=[held])] == ["um"]
 
 
-def test_a_long_run_on_with_no_gap_from_a_word_is_still_a_filler():
+def test_a_long_run_on_with_no_gap_from_a_word_is_still_an_um():
     # The real "And" -> "[vocalization]" case above: no gap either (497.12 to 497.12), but 0.56 s, well
-    # past the short-run-on cutoff. It is a filler.
+    # past the short-run-on cutoff. It is an um, and find_words lists it.
+    from lumr_studio.sounds import classify_events
+
     words = [{"word": "And", "start": 496.953, "end": 497.12},
              {"word": "[vocalization]", "start": 497.12, "end": 497.68, "type": "event"},
              {"word": "we", "start": 497.68, "end": 498.009}]
-    label = {"start": 497.12, "end": 497.68, "seconds": 0.56, "kind": "sound", "confidence": "possible",
-             "voiced": 0.54, "punchline": None}
-    trims = autocuts.vocalization_filler_trims([label], words)
-    assert trims == [{"start": 497.12, "end": 497.68, "reason": "filler: sound", "kind": "fillers"}]
+    assert [lb["kind"] for lb in classify_events(words, measures=[{"bursts": 0, "burst_rate": 0.0, "voiced": 0.54}])] == ["um"]
 
 
-@pytest.mark.parametrize("name", SIX_STOPS)
-def test_a_filler_vocalization_is_removed_whole_by_filler_words(name):
-    # The same real "[vocalization]", trimmed to where it really sounds (word_times narrows 84.08-84.72
-    # to 84.396-84.72), measured voiced 0.86: an unmistakable held "uhh". Filler words takes it whole,
-    # whatever the pace; the pause around it is left to the pace as usual.
-    words = [{"word": "now", "start": 82.921, "end": 83.041}, {"word": "season,", "start": 83.041, "end": 83.938},
-             {"word": "[vocalization]", "start": 84.396, "end": 84.72, "type": "event"},
-             {"word": "after", "start": 84.72, "end": 85.142}, {"word": "Devon", "start": 85.142, "end": 85.543},
-             {"word": "winter,", "start": 85.543, "end": 86.103}]
-    quiet = [Silence(82.0, 82.921), Silence(83.7713, 84.396), Silence(84.6801, 84.7743), Silence(84.8301, 84.9309),
-             Silence(85.4826, 85.5457), Silence(86.103, 88.0)]
-    filler = {"start": 84.396, "end": 84.72, "seconds": 0.32, "kind": "sound", "confidence": "possible",
-              "voiced": 0.86, "punchline": None}
-    made = make_edit([], words, 88.0, treatment=Treatment(pace=name), silences=quiet, sounds=[filler], keeps=[])
-    sound = (84.396, 84.72)
-    covering = [c for c in made.outcome.cuts if c["start"] <= sound[0] and sound[1] <= c["end"]]
-    partial = [c for c in made.outcome.cuts if c["start"] < sound[1] and sound[0] < c["end"]
-               and not (c["start"] <= sound[0] and sound[1] <= c["end"])]
-    assert covering, f"the umm should be cut whole at {name}"
-    assert partial == [], "never only part of it"
+def test_a_breath_between_two_words_is_no_um_and_no_cut_takes_it():
+    # The same shape as the um above, but breathy, not held: voiced 0.2, under FILLER_VOICED_MIN.
+    from lumr_studio.sounds import classify_events
 
-
-def test_a_breath_like_vocalization_is_left_alone_by_filler_words():
-    # The same shape, but breathy, not held: voiced 0.2, under FILLER_VOICED_MIN. Filler words leaves it.
-    words = [{"word": "now", "start": 82.921, "end": 83.041}, {"word": "season,", "start": 83.041, "end": 83.938},
-             {"word": "[vocalization]", "start": 84.396, "end": 84.72, "type": "event"},
-             {"word": "after", "start": 84.72, "end": 85.142}]
+    words = UM_WORDS_AROUND[1:4]
     quiet = [Silence(82.0, 82.921), Silence(83.7713, 84.396), Silence(84.6801, 84.7743)]
-    breath = {"start": 84.396, "end": 84.72, "seconds": 0.32, "kind": "sound", "confidence": "possible",
-              "voiced": 0.2, "punchline": None}
-    made = make_edit([], words, 86.0, treatment=Treatment(pace="max"), silences=quiet, sounds=[breath], keeps=[])
-    sound = (84.396, 84.72)
-    touching = [c for c in made.outcome.cuts if c["start"] < sound[1] and sound[0] < c["end"]]
-    assert touching == [], "a breath is not a filler"
-
-
-def test_a_filler_vocalization_counts_and_lists_as_sound_on_the_page():
-    words = [{"word": "season,", "start": 83.041, "end": 83.938},
-             {"word": "[vocalization]", "start": 84.396, "end": 84.72, "type": "event"},
-             {"word": "after", "start": 84.72, "end": 85.142}]
-    quiet = [Silence(83.7713, 84.396), Silence(84.6801, 84.7743)]
-    filler = {"start": 84.396, "end": 84.72, "seconds": 0.32, "kind": "sound", "confidence": "possible",
-              "voiced": 0.86, "punchline": None}
-    made = make_edit([], words, 86.0, treatment=Treatment(pace="max"), silences=quiet, sounds=[filler], keeps=[])
-    taken = treatment.taken_by_kind(made, words)["fillers"]
-    assert taken.count == 1
-    assert taken.listed() == [[treatment.SOUND_FILLER_LABEL, 1]]
-
-
-def test_the_filler_words_switch_off_leaves_the_vocalization_in():
-    words = [{"word": "season,", "start": 83.041, "end": 83.938},
-             {"word": "[vocalization]", "start": 84.396, "end": 84.72, "type": "event"},
-             {"word": "after", "start": 84.72, "end": 85.142}]
-    quiet = [Silence(83.7713, 84.396), Silence(84.6801, 84.7743)]
-    filler = {"start": 84.396, "end": 84.72, "seconds": 0.32, "kind": "sound", "confidence": "possible",
-              "voiced": 0.86, "punchline": None}
-    off = frozenset(treatment.edits.SWITCHES) - {"fillers"}
-    made = make_edit([], words, 86.0, treatment=Treatment(pace="max", take_out=off), silences=quiet,
-                     sounds=[filler], keeps=[])
-    sound = (84.396, 84.72)
-    assert not [c for c in made.outcome.cuts if c["start"] < sound[1] and sound[0] < c["end"]], \
-        "the switch is off; the umm stays"
+    labels = classify_events(words, measures=[{"bursts": 0, "burst_rate": 0.0, "voiced": 0.2}])
+    assert [lb["kind"] for lb in labels] == ["sound"]
+    made = make_edit([], words, 86.0, treatment=Treatment(pace="max"), silences=quiet, sounds=labels, keeps=[])
+    assert touching(made, UM_SOUND) == [], "a breath is no um, and no cut takes a part of it"
 
 
 @pytest.mark.parametrize("pace", ["standard", "max"])
@@ -1194,13 +1194,15 @@ def like_id(video):
 
 
 @pytest.mark.parametrize("name", list(PACES))
-def test_no_pace_takes_a_like(video, monkeypatch, name):
-    short_word.on_video(video, alone="like,")
-    named = {"start": 5.585, "end": 5.735, "reason": "filler: like", "kind": "fillers"}
+@pytest.mark.parametrize("alone", ["like,", "um,", "Uhh"])
+def test_no_pace_takes_a_like(video, monkeypatch, name, alone):
+    # Nor an um, in any spelling: both are judged by reading.
+    short_word.on_video(video, alone=alone)
+    named = {"start": 5.585, "end": 5.735, "reason": f"filler: {alone}", "kind": "fillers"}
     monkeypatch.setattr(treatment, "plan_auto_cuts", lambda *_a, **_k: [dict(PAUSE_OVER_THE_WORD_ALONE), named])
     tools.set_edit(str(video), [], auto_tighten=True, pace=name, **HEARD)
     state = treatment.page_state(heard(video))
-    assert plays(state, "like,") and not overlapping(state, short_word.ALONE_ROOM)
+    assert plays(state, alone) and not overlapping(state, short_word.ALONE_ROOM)
     fillers = state["take_out"][1]
     assert (fillers["count"], fillers["words"], set(fillers["by_pace"].values())) == (0, [], {0})
     assert state["removed"], "the pause beside it still goes"
@@ -1216,11 +1218,11 @@ def test_a_like_is_claudes_to_pick_and_the_creators_to_switch(video, monkeypatch
     assert (result["picks"]["out"], result["picks"]["left_in"]) == (1, [])
     on = treatment.page_state(heard(video))
     assert [w[4] for w in on["words"] if w[0] == "like,"] == [treatment.REMOVED_AS_PICKED]
-    assert on["take_out"][3]["count"] == 1 and on["take_out"][1]["count"] == 0, "Filler likes holds it, Filler words does not"
+    assert on["take_out"][3]["count"] == 1 and on["take_out"][1]["count"] == 0, "Ums and likes holds it, Filler words does not"
     assert len(on["removed"]) == 1, "the picked word and the pause around it go as one"
 
     no_fillers = treatment.change_treatment(heard(video), {"take_out": {"fillers": False}})
     assert no_fillers["removed"] == on["removed"], "Filler words has no say over it"
     off = treatment.change_treatment(heard(video), {"take_out": {"likes": False}})
-    assert plays(off, "like,") and not overlapping(off, short_word.ALONE_ROOM), "with Filler likes off the pace takes none of it"
+    assert plays(off, "like,") and not overlapping(off, short_word.ALONE_ROOM), "with Ums and likes off the pace takes none of it"
     assert off["changed"]["likes"] == -1 and len(off["removed"]) == 2

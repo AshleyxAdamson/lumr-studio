@@ -718,10 +718,12 @@ def test_the_line_under_the_track_names_a_setting_of_her_own():
 @needs_node
 def test_the_filler_likes_switch_in_both_states():
     out = js("""
-      const k = { key: 'likes', label: 'Filler likes', count: 35, seconds: 5.6, picked: 41, said: 112, left_in: 5, kept_by_you: 1, ready: true };
+      const k = { key: 'likes', label: 'Ums and likes', count: 35, seconds: 5.6, picked: 41, said: 112, left_in: 5, kept_by_you: 1, ready: true };
       const but = more => Core.likesView(Object.assign({}, k, more));
       return [but({}), but({ left_in: 1 }), but({ left_in: 0 }), but({ ready: false, count: 0, picked: 0, left_in: 0 }),
-              Core.likesView({ key: 'likes', count: 3 })];
+              Core.likesView({ key: 'likes', count: 3 }),
+              but({ count: 5, said: 40, words: [['um', 2], ['like', 3]] }), but({ count: 1, said: 9, words: [['um', 1]] }),
+              but({ count: 4, said: 9, words: [['like', 3], ['you know', 1]] })];
     """)
     assert out[0] == {"ready": True, "line": "picked by Claude · 77 kept",
                       "more": "5 stay in because cutting them would clip the word beside them."}
@@ -729,6 +731,10 @@ def test_the_filler_likes_switch_in_both_states():
     assert out[2]["more"] == ""
     assert out[3] == {"ready": False, "line": "Ask Claude to find them.", "more": ""}
     assert out[4] == {"ready": True, "line": "picked by Claude", "more": ""}
+    # What is out is counted by the word: the switch holds ums and likes.
+    assert out[5]["line"] == "2 ums, 3 likes picked by Claude · 35 kept"
+    assert out[6]["line"] == "1 um picked by Claude · 8 kept"
+    assert out[7]["line"] == '3 likes, 1 "you know" picked by Claude · 5 kept'
 
 
 # ── the example the page runs from with ?example=1 ──────────────────────────
@@ -838,7 +844,7 @@ def test_the_example_has_the_round_five_shape():
     likes = state["take_out"][3]
     assert set(likes) == {"key", "label", "count", "seconds", "by_pace", "words", "picked", "said", "left_in", "kept_by_you",
                           "ready", "word"}
-    assert likes["label"] == "Filler likes" and likes["ready"] is True and likes["word"] == "like"
+    assert likes["label"] == "Ums and likes" and likes["ready"] is True and likes["word"] == "like"
     assert likes["picked"] == likes["count"] + likes["left_in"] + likes["kept_by_you"]
     assert likes["said"] > likes["picked"] > likes["count"] > 0 and likes["left_in"] > 0
     assert state["settings"]["take_out"]["likes"] is True
@@ -1834,7 +1840,7 @@ def test_the_filler_likes_switch_cannot_be_pressed_until_claude_has_picked():
     assert "(ready ? '' : ' aria-disabled=\"true\"')" in drawn
     assert "b.getAttribute('aria-disabled') === 'true') return;" in html
     assert "S.take_out.map(k =>" in drawn, "three switches from a server of before, four from this one"
-    assert "Filler likes" not in markup() and "Filler words" not in markup(), "the labels come from the state"
+    assert "Ums and likes" not in markup() and "Filler words" not in markup(), "the labels come from the state"
 
 
 def test_what_the_pace_took_out_is_struck_quietly():
@@ -1999,15 +2005,15 @@ def test_previous_and_next_go_through_the_cuts_that_take_words_and_skip_pure_pau
     # at each made Next a nudge. Now it stops where words go: Claude's cuts, hers, picked likes, fillers.
     out = js("""
       const words = [['so', 1, 1.3, 1, 1], ['um', 5.1, 5.4, 1, 1], ['(laugh)', 9, 10, 1, 1], ['this', 12, 12.4, 0, 0],
-                     ['that', 20, 20.5, 1, 2], ['like,', 30, 30.3, 1, 4]];
-      const R = [[0.9, 1.35], [3, 3.8], [5.05, 5.5], [9.4, 9.9], [15, 16], [19.9, 22], [30, 30.3], [40, 41]];
+                     ['that', 20, 20.5, 1, 2], ['like,', 30, 30.3, 1, 4], ['(um)', 34, 34.5, 1, 4], ['(sound)', 36, 36.4, 1, 1]];
+      const R = [[0.9, 1.35], [3, 3.8], [5.05, 5.5], [9.4, 9.9], [15, 16], [19.9, 22], [30, 30.3], [34, 34.5], [36, 36.4], [40, 41]];
       const rows = [{ by: 'claude', state: 'kept_out', start: 19.9, end: 22 }, { by: 'claude', state: 'put_back', start: 40, end: 41 },
                     { by: 'you', state: 'kept_out', start: 15, end: 16 }];
       return { cuts: Core.hopCuts(R, words, rows), pauses: Core.hopCuts([[3, 3.8], [8, 9]], [['a', 1, 2, 0, 0]], []),
                none: Core.hopCuts([], [], []) };
     """)
-    assert out["cuts"] == [[0.9, 1.35], [5.05, 5.5], [15, 16], [19.9, 22], [30, 30.3]], \
-        "words go there, or a cut of hers or Claude's is there; a pause, part of a laugh, or a cut put back is skipped"
+    assert out["cuts"] == [[0.9, 1.35], [5.05, 5.5], [15, 16], [19.9, 22], [30, 30.3], [34, 34.5]], \
+        "words go there, or a cut of hers or Claude's, or an um Claude picked; a pause, any other sound, or a cut put back is skipped"
     assert out["pauses"] == [[3, 3.8], [8, 9]], "with no cut that takes words, every range"
     assert out["none"] == []
 

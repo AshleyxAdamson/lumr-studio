@@ -142,7 +142,7 @@ by `../hooks/hooks.json` at session start) against stub programs on a trimmed
 | `word_times.py` | The one place that chooses the word times: measured when the words were aligned to the sound, else estimated |
 | `aligner.py` | The production aligner: wav2vec 2.0 base 960h, CTC forced alignment in 40 s windows, with the tail pad and start shift named for why |
 | `models.py` | The two models' pins (host, license, size, sha256) and the one downloader: `.part`, check, rename, resume |
-| `word_finder.py` | Every place a word is said, packed for Claude to pick the fillers (`find_words`) |
+| `word_finder.py` | Every place a word is said, packed for Claude to pick the fillers (`find_words`). Every um too, written or heard, with where it sits in its sentence and the quiet either side |
 | `autocuts.py` | Automatic pause/filler micro-cuts via `microcut_pacing`, filed by what each takes, and kept in `plans.json` |
 | `analysis.py` | The `analyze_take` report |
 | `retakes.py` | Repeated-phrase (retake) candidates |
@@ -155,7 +155,7 @@ by `../hooks/hooks.json` at session start) against stub programs on a trimmed
 | `reels.py` | The `assemble` job: joins clips into a reel (copy when whole clips match in every detail, else one encode in whole frames, with any clip in HDR or wide color turned into standard color), writes the `.reel.json` sequence file beside it, and finds it again (`reel_for`) for `get_edit` and `read_transcript` |
 | `publish_kit.py` | Chapter rules and the `publish-kit/` files. An extra: its tools (`chapter_times`, `save_publish_kit`) list only with `publish_kit` on |
 | `joins.py` | The self-check: every join read the way a viewer hears it, with a fix for Claude and a plain why for the creator |
-| `sounds.py` | Likely laughs told apart from other sounds |
+| `sounds.py` | The sounds between the words: finding them, and telling laughs, ums and other sounds apart |
 | `look.py` | One picture of a join, for Claude |
 | `pace.py` | The six pace stops, the two sliders, and the pause each setting leaves |
 | `treatment.py` | The page's state and every change the page can make |
@@ -180,7 +180,7 @@ creator's footage stays on the creator's machine: the server binds to
 | Fine tune: two sliders, the pace then reads Custom | `fine_ranges`, `settings.fine`, `custom`, `POST api/treatment {fine}` |
 | Four take-out switches with counts, and "Make this my usual" | `take_out[]`, `usual`, `POST api/treatment {take_out}`, `POST api/usual` |
 | Filler words names the words it takes | `take_out[1].words` |
-| Filler likes: Claude's picks, all on or off | `take_out[3]`, `settings.take_out.likes` |
+| Ums and likes: Claude's picks, all on or off, counted by the word | `take_out[3]` (`words` holds the counts), `settings.take_out.likes` |
 | Cuts: the creator's own first, then Claude's in four groups, one needs-a-look count | `groups[]`, `rows[]`, `rows[].by`, `cut_counts`, `need_a_look`, `POST api/cut`, `POST api/cut/remove` |
 | Play, Previous and Next between clusters, Original and Edited | `clusters[]`, `removed` |
 | Three samples and "New samples" | `samples[]`, `POST api/samples` |
@@ -232,7 +232,8 @@ exception is named in `creator_words.py` and tested in
   end up to 0.05 s past the video's end is clamped.
 - **`get_edit` stays short.** It lists Claude's cuts, as
   `{start, end, seconds, reason}`. What the creator did on the page is under
-  `creator`, and Claude's picked filler words under `picks`. Automatic trims
+  `creator`, and Claude's picked filler words and ums under `picks`, counted
+  by the word (`counts`: "2 ums, 3 likes"). Automatic trims
   are summarized as
   `auto: {count, seconds_removed}`, alongside `auto_tighten` and `gap_length`.
   `include_auto=true` lists them too, capped at 50, with `not_shown` counting
@@ -283,7 +284,8 @@ exception is named in `creator_words.py` and tested in
   `engine.paths.silences_for`, which caches under `LUMR_HOME` with the file
   names ClipForge uses. The first call on a long video waits for ffmpeg.
 - **`read_transcript` packing.** Hard line breaks come at pauses of 0.5 s or
-  more (with a `(pause N)` marker), at events (their own line), and where the
+  more (with a `(pause N)` marker), at events (their own line, except an um,
+  which reads among the words), and where the
   cut state flips (so a line is wholly `CUT` or wholly kept). Between those,
   whole sentences (ending `.`, `?` or `!`) are joined into lines of about 6 to
   12 s. Only a sentence longer than 20 s is broken: at the comma nearest its
@@ -298,8 +300,18 @@ exception is named in `creator_words.py` and tested in
   0.038), while evenly spread sentences sit near (n-1)/n, 0.8 to 0.9. Then
   `transcribe`, `analyze_take` and `set_edit` add a `warning`. `set_edit`
   still saves.
+- **Ums.** An um is judged by reading, like "like". The speech model writes
+  few of them, so `sounds.classify_events` labels each held hesitation
+  between two words `um`, `read_transcript` prints it in its sentence as
+  `(um 0.5s)`, and `find_words(["um"])` lists those sounds beside every
+  spelling the transcript does hold (`sounds.UM_WORDS`), each with
+  `OPENS A SENTENCE` or `INSIDE A SENTENCE` and the quiet before and after.
+  No rule takes one: `autocuts.JUDGED_BY_READING` keeps every spelling out
+  of the pace, and no trim is made for an um sound. Only a pick does
+  (`edit.parse_pick`), and of the sounds only an um can be picked. The
+  server holds no threshold for which ums go; that is the skill's.
 - **`analyze_take`.** Fillers are clipforge's um/uh family (`detect_fillers`
-  level 1). Retakes are the same run of four or more words said again within
+  level 1). It reports them and cuts none. Retakes are the same run of four or more words said again within
   60 s. clipforge's own repeat detector only finds doubled single words and
   filters them for cutting, so it can't report retakes. Retakes are reported
   only, never cut.

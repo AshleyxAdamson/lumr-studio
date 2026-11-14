@@ -274,7 +274,7 @@ h2 .count .mine{color:var(--user)}
 .switch[aria-checked="false"]:not([aria-disabled="true"]) .n::after{content:' off'; color:var(--text3)}
 .switch .hint{display:block; font-size:12px; color:var(--text2); text-wrap:pretty}
 .switch .few{display:block; font-size:12px; color:var(--text3); text-wrap:pretty}
-/* a switch that can't be pressed yet: Claude has not picked the likes */
+/* a switch that can't be pressed yet: Claude has not picked the ums and likes */
 .switch[aria-disabled="true"]{cursor:default}
 .switch[aria-disabled="true"]:hover{background:none}
 .switch[aria-disabled="true"] .track{opacity:.5}
@@ -956,14 +956,14 @@ const Core = (function(){
   }
 
   /** The cuts Previous and Next go through: the removed ranges that take a spoken word, or that hold a
-      cut of Claude's or hers. A range that takes only a pause, or only part of a laugh, is skipped: at a
+      cut of Claude's or hers, or an um Claude picked. A range that takes only a pause, or only part of a laugh, is skipped: at a
       standard pace most ranges are pauses a few seconds apart, and stopping at each is a nudge, not a
       skip. With no such range, every range. `ranges` normalized; `words` as the page shows them
       (struckWords), `rows` as the state sends them. */
   function hopCuts(ranges, words, rows){
     const hit = new Set();
     const mark = (a, b) => { for(let i = lastStartingBy(ranges, b); i >= 0 && ranges[i][1] > a; i--) if(Math.min(b, ranges[i][1]) > Math.max(a, ranges[i][0])) hit.add(i); };
-    (words || []).forEach(w => { if(w[3] && !IS_SOUND.test(w[0])) mark(+w[1], +w[2]); });
+    (words || []).forEach(w => { if(w[3] && (!IS_SOUND.test(w[0]) || w[4] === WHY.pick)) mark(+w[1], +w[2]); });
     (rows || []).forEach(r => { if(r.by === 'you' || r.state !== 'put_back') mark(+r.start, +r.end); });
     return hit.size ? ranges.filter((r, i) => hit.has(i)) : ranges;
   }
@@ -1292,7 +1292,7 @@ const Core = (function(){
 
   /* ── cutting and keeping words by hand ───────────────────────── */
 
-  /* A word's fifth value: who took it out. `pick` is a filler like that Claude picked. */
+  /* A word's fifth value: who took it out. `pick` is an um or a filler like that Claude picked. */
   const WHY = { plays: 0, automatic: 1, claude: 2, you: 3, pick: 4 };
   /* A laugh or a sound, written among the words as "(laugh)". It is not counted as a word. */
   const IS_SOUND = /^\(.*\)$/;
@@ -1303,7 +1303,7 @@ const Core = (function(){
 
   function middle(w){ return (w[1] + w[2]) / 2; }
 
-  /** Who took a word out: 0 it plays, 1 automatic, 2 Claude, 3 you, 4 Claude's pick of a filler like. Words with
+  /** Who took a word out: 0 it plays, 1 automatic, 2 Claude, 3 you, 4 Claude's pick of an um or a filler like. Words with
       four values come from before that was sent: a removed one counts as automatic. */
   function whyOut(w){ return w.length > 4 ? w[4] : (w[3] ? WHY.automatic : WHY.plays); }
 
@@ -1472,16 +1472,22 @@ const Core = (function(){
              summary: c ? shown(c.summary) : '' };
   }
 
-  /* ── filler likes: the ones Claude picked by reading ─────────── */
+  /* ── ums and likes: the ones Claude picked by reading ────────── */
 
-  /** What the Filler likes switch says: {ready, line, more}. `line` sits under its
+  /** What is out, counted by the word: "2 ums, 3 likes". `words` is [[word, count], ...] as the state sends it. */
+  function countedWords(words){
+    return (words || []).filter(w => w && w[0] && w[1] > 0)
+      .map(w => w[1] + ' ' + (/ /.test(w[0]) ? '"' + w[0] + '"' : w[0] + (w[1] === 1 ? '' : 's'))).join(', ');
+  }
+
+  /** What the Ums and likes switch says: {ready, line, more}. `line` sits under its
       name, `more` is added for the pointer and the keyboard. */
   function likesView(k){
     if(k.ready === false) return { ready: false, line: 'Ask Claude to find them.', more: '' };
-    /* every time the word is said and stays in: the ones Claude did not pick, and the picked ones that are not out */
+    /* every time an um or a like is said and stays in: the ones Claude did not pick, and the picked ones that are not out */
     const kept = typeof k.said === 'number' ? Math.max(0, k.said - (k.count || 0)) : null;
-    const n = k.left_in || 0;
-    return { ready: true, line: 'picked by Claude' + (kept == null ? '' : ' · ' + kept + ' kept'),
+    const n = k.left_in || 0, counted = countedWords(k.words);
+    return { ready: true, line: (counted ? counted + ' ' : '') + 'picked by Claude' + (kept == null ? '' : ' · ' + kept + ' kept'),
              /* the word it would clip can be the one before or the one after, so the sentence names neither */
              more: !n ? '' : n === 1 ? '1 stays in because cutting it would clip the word beside it.'
                : n + ' stay in because cutting them would clip the word beside them.' };
@@ -1563,7 +1569,7 @@ const Core = (function(){
             ['hard', 'Hard', 'Almost no pause is left between sentences, and cuts can land a few words apart.'],
             ['max', 'Max', 'Every pause that can go does, with only a very short one left at each join, so some joins will sound choppy.']],
     kinds: [['pauses', 'Long pauses'], ['fillers', 'Filler words'], ['repeats', 'Stutters']],
-    likes: ['likes', 'Filler likes'],
+    likes: ['likes', 'Ums and likes'],
   };
   const r1 = n => Math.round(n * 10) / 10, r2 = n => Math.round(n * 100) / 100;
   const range = (a, b) => clock(a) + ' to ' + clock(b);
@@ -1785,7 +1791,7 @@ const Core = (function(){
       if(k[0] === 'fillers') kind.words = tally(list.map(t => t[4]));
       return kind;
     });
-    /* the filler likes: the count is the same at every pace, since Claude picked them and no pace did */
+    /* the picked likes: the count is the same at every pace, since Claude picked them and no pace did */
     const clean = talk.picks.filter(p => p.clean), byPace = {};
     X.paces.forEach(p => { byPace[p[0]] = out.length; });
     s.take_out.push({ key: X.likes[0], label: X.likes[1], count: out.length, seconds: r1(out.reduce((a, p) => a + W[p.i][2] - W[p.i][1], 0)),
@@ -2008,7 +2014,7 @@ const DOUBLE_CLICK_MS = 500;           /* two clicks on one word this close toge
 const UNDO_SHOWS_MS = 10000;           /* Undo stays in the top line this long after she cuts, keeps or brings back words */
 const FILLERS_SHOWN = 4;               /* words named under the filler switch; the rest show on hover or focus */
 const WORDS_UNDER = 'fillers';         /* the one switch that names the words it takes out */
-const LIKES = 'likes';                 /* the switch for the filler likes Claude picked */
+const LIKES = 'likes';                 /* the switch for the ums and filler likes Claude picked */
 const FINE_ASK_MS = 200;               /* while she drags a slider the page asks for a new state this often at most: five times a second */
 const FINE_OPEN_KEY = 'lumr-studio.fine-tune-open';   /* where the browser keeps whether Fine tune was left open */
 const LABEL_GAP_PX = 6;                /* the names under the pace stops need this much room between them to all show */
@@ -2347,7 +2353,7 @@ function noneHint(k){
 }
 function renderTakeOut(){
   $('takeList').innerHTML = S.take_out.map(k => {
-    /* the filler likes are Claude's picks: until Claude has picked, the switch is off and can't be pressed */
+    /* the ums and likes are Claude's picks: until Claude has picked, the switch is off and can't be pressed */
     const likes = k.key === LIKES ? C.likesView(k) : null, ready = !likes || likes.ready;
     const on = ready && takeOn(k.key);
     const hint = likes ? '' : noneHint(k);

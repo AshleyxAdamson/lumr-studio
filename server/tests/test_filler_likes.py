@@ -1,4 +1,4 @@
-"""Filler likes: Claude finds every place a word is said, picks the fillers by reading, and the creator has one switch.
+"""Picked likes: Claude finds every place a word is said, picks the fillers by reading, and the creator has one switch.
 
 Synthetic words only. The talk says "like" four times: a verb, a clean filler, one
 that runs into its neighbours, and a sentence starter.
@@ -285,7 +285,7 @@ def test_set_edit_takes_picks_under_a_name_of_their_own(talk):
     ctx, result = picked(talk, [FILLER, WEDGED, STARTER], cuts=[OPENING_LINE])
     assert [c["reason"] for c in result["applied"]] == [OPENING_LINE["reason"]]
     assert result["picks"] == {
-        "picked": 3, "switch_on": True, "out": 2,
+        "picked": 3, "switch_on": True, "out": 2, "counts": "3 likes", "out_counts": "2 likes",
         "left_in": [{"id": WEDGED, "clock": "0:05", "text": "like", "why": "cutting it would clip the word before"}],
         "kept_by_the_creator": [], "rejected": [],
     }
@@ -325,7 +325,7 @@ def test_get_edit_lists_the_picks_apart_from_the_cuts(talk):
     picked(talk, [FILLER, STARTER], cuts=[OPENING_LINE])
     summary = tools.get_edit(str(talk))
     assert [c["reason"] for c in summary["cuts"]] == [OPENING_LINE["reason"]]
-    assert summary["picks"] == {"switch_on": True, "picked": 2, "picks": [
+    assert summary["picks"] == {"switch_on": True, "picked": 2, "by_word": [["like", 2]], "counts": "2 likes", "picks": [
         {"id": FILLER, "clock": "0:02", "text": "like,", "reason": "a pause word"},
         {"id": STARTER, "clock": "0:08", "text": "Like,", "reason": "a pause word"},
     ]}
@@ -344,7 +344,7 @@ def test_before_claude_has_picked_the_switch_is_not_ready(talk):
     state = treatment.page_state(ctx_for(talk))
     assert [t["key"] for t in state["take_out"]] == ["pauses", "fillers", "repeats", "likes"]
     assert likes(state) == {
-        "key": "likes", "label": "Filler likes", "count": 0, "seconds": 0, "by_pace": {name: 0 for name in PACES},
+        "key": "likes", "label": "Ums and likes", "count": 0, "seconds": 0, "by_pace": {name: 0 for name in PACES},
         "words": [], "picked": 0, "said": 4, "left_in": 0, "kept_by_you": 0, "ready": False, "word": "like",
     }
     assert state["settings"]["take_out"]["likes"] is True
@@ -523,5 +523,5 @@ def test_get_edit_says_when_she_switched_the_picks_off(talk):
     summary = tools.get_edit(str(talk))
     assert summary["creator"]["take_out"] == {"likes": False} and summary["picks"]["switch_on"] is False
     result = tools.set_edit(str(talk), [], picks=[pick(FILLER)], **QUIET)
-    assert result["picks"]["switch_on"] is False and result["picks"]["out"] == 1 and "switched Filler likes off" in result["picks"]["note"]
+    assert result["picks"]["switch_on"] is False and result["picks"]["out"] == 1 and "switched Ums and likes off" in result["picks"]["note"]
     assert treatment.page_state(ctx_for(talk))["removed"] == [], "her switch stays off through a new pick list"

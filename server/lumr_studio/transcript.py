@@ -23,6 +23,11 @@ from typing import Any
 from lumr_studio.errors import StudioError
 
 EVENT_TYPE = "event"
+# The name of a held hesitation, an "um" or "uh". The one name for it
+# everywhere: the ``kind`` of a sound label (``sounds.classify_events``), the
+# packed transcript's ``(um 0.5s)``, and the word ``find_words`` lists every
+# hesitation under, written by the speech model or heard between its words.
+UM = "um"
 
 # A gap at least this long between words ends a phrase and prints a pause line.
 PHRASE_PAUSE_SECONDS = 0.5
@@ -196,11 +201,13 @@ def _span(run: Run) -> float:
 
 
 def _runs(
-    words: list[dict[str, Any]], removed: list[tuple[float, float]], pause: float, breaks: list[float] | None = None
+    words: list[dict[str, Any]], removed: list[tuple[float, float]], pause: float, breaks: list[float] | None = None,
+    inline: frozenset[int] = frozenset(),
 ) -> list[tuple[Run, bool]]:
     """Split entries at the hard boundaries: a pause, an event, a flip in cut state, a time in ``breaks``.
 
-    Returns ``(entries, cut)`` pairs; an event is a run of its own.
+    Returns ``(entries, cut)`` pairs; an event is a run of its own, except
+    one in ``inline`` (by ``id``), which sits among the words like a word.
     """
     runs: list[tuple[Run, bool]] = []
     current: Run = []
@@ -213,7 +220,7 @@ def _runs(
             runs.append((current, current_cut))
             current = []
         previous = started
-        if is_event(entry):
+        if is_event(entry) and id(entry) not in inline:
             if current:
                 runs.append((current, current_cut))
             runs.append(([entry], cut))
@@ -282,22 +289,30 @@ LABEL_MATCH_SECONDS = 0.0015
 
 
 def label_text(label: dict[str, Any]) -> str:
-    """How a sound label reads in the packed text: ``(laugh 3.5s)``, ``(laugh? 1.6s)`` or ``(sound 0.2s)``."""
+    """How a sound label reads in the packed text: ``(laugh 3.5s)``, ``(laugh? 1.6s)``, ``(um 0.5s)`` or ``(sound 0.2s)``."""
     seconds = float(label["seconds"])
     if label.get("kind") == "laugh":
         mark = "laugh" if label.get("confidence") == "likely" else "laugh?"
         return f"({mark} {seconds:.1f}s)"
+    if label.get("kind") == UM:
+        return f"({UM} {seconds:.1f}s)"
     return f"(sound {seconds:.1f}s)"
 
 
-def _entry_text(entry: dict[str, Any], labels: list[dict[str, Any]] | None) -> str:
-    """The entry's word, or its label's text for an event that has a label."""
+def label_of(entry: dict[str, Any], labels: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """The sound label of an event, matched by start time, or None for a word or an event without one."""
     if labels and is_event(entry):
         start = float(entry["start"])
         for label in labels:
             if abs(float(label["start"]) - start) <= LABEL_MATCH_SECONDS:
-                return label_text(label)
-    return entry["word"].strip()
+                return label
+    return None
+
+
+def _entry_text(entry: dict[str, Any], labels: list[dict[str, Any]] | None) -> str:
+    """The entry's word, or its label's text for an event that has a label."""
+    label = label_of(entry, labels)
+    return label_text(label) if label else entry["word"].strip()
 
 
 def build_phrases(
@@ -317,10 +332,13 @@ def build_phrases(
 
     ``labels`` (from ``sounds.classify_events``) replaces an event's
     ``[vocalization]`` with what it likely is. Events without a matching label,
-    and every event when ``labels`` is None, keep their word.
+    and every event when ``labels`` is None, keep their word. An event
+    labelled ``UM`` is no line of its own: it reads in its sentence, where
+    it is said, like a word the speech model left out.
     """
     phrases: list[Phrase] = []
-    for run, cut in _runs(words, removed or [], pause, breaks):
+    inline = frozenset(id(w) for w in words if (label_of(w, labels) or {}).get("kind") == UM)
+    for run, cut in _runs(words, removed or [], pause, breaks, inline):
         pieces = [p for s in _sentences(run) for p in _split_long(s, MAX_SENTENCE_SECONDS)]
         for line in _pack_line_groups(pieces, LINE_MIN_SECONDS, LINE_MAX_SECONDS):
             phrases.append(Phrase(
@@ -360,7 +378,8 @@ def pack_transcript(
 
     ``removed`` (source-time ranges) marks cut phrases with ``CUT``; pass None to
     leave cuts unmarked. ``labels`` (sound labels) prints each labelled event as
-    ``(laugh 3.5s)``, ``(laugh? 1.6s)`` or ``(sound 0.2s)``; pass None to print
+    ``(laugh 3.5s)``, ``(laugh? 1.6s)`` or ``(sound 0.2s)`` on a line of its
+    own, and an um as ``(um 0.5s)`` in its sentence; pass None to print
     ``[vocalization]``. When the lines would exceed ``budget_chars``, only the
     first part is packed. ``markers`` are ``(time, text)`` lines to print
     where a reel gives way from one clip to the next: each inside the window

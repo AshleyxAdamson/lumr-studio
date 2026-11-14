@@ -182,9 +182,10 @@ def test_a_giggle_in_a_gap_becomes_a_sound_of_the_transcript_and_reads_as_a_laug
     labels = tools.measured_labels(project, word_times.load_words(project))
     assert (labels[0]["kind"], labels[0]["confidence"]) == ("laugh", "likely")
     assert labels[0]["voiced"] > 0.5, "this giggle is pitched all the way: the old rule called it a hesitation"
-    assert labels[1]["kind"] == "sound" and is_filler(labels[1])
+    assert labels[1]["kind"] == "um" and is_filler(labels[1]), "the held \"uhh\" is an um"
     read = tools.read_transcript(str(bare_take))
     assert "(laugh 2." in read["text"] and "sounds_note" not in read
+    assert "lunch (um 0." in read["text"], "and it reads in its sentence"
     assert tools.transcribe(str(bare_take), aligner=aligner, silences=no_silences, jobs=jobs)["status"] == "exists"
 
 
@@ -227,11 +228,11 @@ def test_at_every_pace_with_every_switch_on_nothing_removed_overlaps_the_giggle(
         result = tighten(take, pace)
         assert taken(take, laugh[0]) == 0, pace
         assert taken(take, GIGGLE) == 0, pace
-    # The hardest pace did cut around it: the word said twice, the silent pause, and the "uhh", which
-    # the Filler words switch takes whole. A held hesitation is the one sound a rule may cut.
-    assert result["removed_seconds"] > 2.0
+    # The hardest pace did cut around it: the word said twice and the silent pause. The "uhh" plays:
+    # no rule takes an um, written or heard. It goes when Claude picks it (test_ums).
+    assert result["removed_seconds"] > 1.5
     assert taken(take, QUIET_PAUSE) > 1.0
-    assert taken(take, UHH) == pytest.approx(UHH[1] - UHH[0], abs=0.1)
+    assert taken(take, UHH) == 0 and taken(take, (5.5, 5.8)) == 0
 
 
 def test_room_tone_and_a_steady_tone_give_no_sound(take, synthetic_master, tmp_path):

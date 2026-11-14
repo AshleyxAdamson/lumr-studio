@@ -5,9 +5,8 @@ the edit recipe in ``treatment.py`` (which applies them), so the count Claude
 sees is the count it gets.
 
 Every trim carries a ``kind``, the creator's name for it: ``pauses``,
-``fillers`` (named for what it removes: "like", "so", "you know" and the
-like, far more often than an "um") or ``repeats`` (repeated words, which
-ClipForge calls stutters).
+``fillers`` (named for what it removes: "and", "so", "you know" and the
+like) or ``repeats`` (repeated words, which ClipForge calls stutters).
 The kind comes from the label ClipForge puts at the head of the trim's
 reason, the same one its own ``classify`` reads. The treatment page turns
 each kind on or off.
@@ -33,12 +32,16 @@ silence to the detector. So every trim is read against the words it holds.
   reads. The plugin keeps no list of its own.
 * The first of a word said twice belongs to Stutters the same way, at the
   paces where ClipForge cuts them.
-* A word that is judged by reading (``JUDGED_BY_READING``, today "like") is
-  never taken, though ClipForge lists it as a filler. No rule can tell "not
-  feeling like I know the way" from "into like three
-  sections". Claude reads each one and picks the fillers, and the creator
-  has the Filler likes switch for those. A rule and a judgment never share
-  a word.
+* A word that is judged by reading (``JUDGED_BY_READING``: "like", and "um"
+  in every spelling) is never taken, though ClipForge lists it as a filler.
+  No rule can tell "not feeling like I know the way" from "into like three
+  sections", or the "um" that opens a line from the one that carries a
+  thought across a pause. Claude reads each one and picks the ones that do
+  not help, and the creator has the Ums and likes switch for those. A rule
+  and a judgment never share a word.
+* An um the speech model wrote no word for is a sound of the transcript
+  (``sounds.UM``). No trim is planned over a sound, and none is added for
+  one: it goes only as a pick, like the word.
 
 Planning depends only on its inputs, so results are kept: in a small
 in-process cache, and in ``plans.json`` in the project folder when the caller
@@ -77,7 +80,7 @@ from lumr_studio.engine.microcut_pacing import (
 )
 from lumr_studio.errors import StudioError
 from lumr_studio.project import write_json_atomic
-from lumr_studio.sounds import is_filler
+from lumr_studio.sounds import UM_WORDS
 from lumr_studio.transcript import is_event, plain_text
 
 log = logging.getLogger(__name__)
@@ -108,7 +111,12 @@ SHORTEST_PIECE_SECONDS = 0.1
 # carried the sentence: "ask what it was like." Said twice in a row it is
 # still judged by reading: one of the two pairs on the test footage is the
 # end of one sentence and the start of the next ("like. Like,").
-JUDGED_BY_READING = frozenset({"like"})
+#
+# An "um", in every spelling (``sounds.UM_WORDS``), is judged the same way.
+# Some hold a sentence together ("and, um, the thing is") and some only open
+# a line, and the creator wants the first kind left in. The Filler words
+# switch took all of them or none.
+JUDGED_BY_READING = frozenset({"like"}) | UM_WORDS
 
 # Every word and two-word filler ClipForge counts as a filler at some level,
 # less the words judged by reading. The plugin keeps no list of its own. A
@@ -126,7 +134,8 @@ PLANS_FILE = "plans.json"
 # 4: a trim named for a filler that takes no filler is filed as a pause.
 # 5: no trim takes a word that no switch owns, and a filler is one by the pace's own list.
 # 6: no trim takes a word that is judged by reading ("like").
-PLANS_VERSION = 6
+# 7: "um" is judged by reading too, in every spelling.
+PLANS_VERSION = 7
 # Plans kept in the file beside the six stops': the settings the creator
 # tried last with the sliders. One plan is about 60 KB at the hardest
 # settings, so twelve keep the file near 1 MB.
@@ -454,59 +463,3 @@ def plan_auto_cuts(
         while len(_cache) > PLAN_CACHE_SIZE:
             _cache.popitem(last=False)
     return copy.deepcopy(planned)
-
-
-# A sound with no gap at all from the word right before it, and this short
-# or shorter, is that word's own voice running on, not a fresh sound: on the
-# real take "in" (aligned end 299.44) ran on 0.119 s into a "[vocalization]"
-# logged right there, voiced 0.5, the edge of held. Longer than this a
-# run-on is its own filler, held or not: the measured "uhh" after "And" ran
-# on 0.169 s and is one. Matches ``GAP_LENGTH_MIN``, the shortest pause any
-# pace cuts and the same gap ``word_times.RUNS_ON_SECONDS`` calls no gap.
-WORD_TAIL_MAX_SECONDS = GAP_LENGTH_MIN
-# How close a sound's start must sit to the word before it to call it no gap
-# at all. Times are saved to the millisecond; this gives a little past that.
-WORD_TAIL_TOUCH_SECONDS = 0.002
-
-
-def _is_word_tail(sound: dict[str, Any], spoken_ends: list[float]) -> bool:
-    """Whether ``sound`` is the trailing voice of the spoken word right before it, not a sound of its own.
-
-    True when some word ends within ``WORD_TAIL_TOUCH_SECONDS`` of where
-    ``sound`` starts, no gap at all, and ``sound`` is
-    ``WORD_TAIL_MAX_SECONDS`` or shorter.
-    """
-    if float(sound["end"]) - float(sound["start"]) > WORD_TAIL_MAX_SECONDS:
-        return False
-    start = float(sound["start"])
-    return any(abs(end - start) <= WORD_TAIL_TOUCH_SECONDS for end in spoken_ends)
-
-
-def vocalization_filler_trims(sounds: list[dict[str, Any]], words: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """``[{start, end, reason, kind}]``: one whole-removal trim for every filler vocalization among ``sounds``.
-
-    ClipForge's own planner never proposes a cut over a "[vocalization]" (a
-    sound of the transcript is protected end to end, see ``word_times.py``),
-    so a held "umm" or "uhh" needs a trim of its own. A sound label already
-    holds nothing but its audible span (``word_times._sounds_clear_of_words``
-    trims it to where it sounds, past any silent lead-in or tail the
-    transcript's loose timing left on it), so taking it whole takes exactly
-    what is heard and nothing of a neighbouring word; the pause it sat in is
-    left to ``pace.leave_pauses`` like any other trim's, held so that shortening
-    never eats into it (``treatment.make_edit`` adds these spans to ``hers``).
-    Filed under ``FILLER_TRIM_KIND``, the switch "um" and "so" answer to, so
-    one switch covers every filler, said or made with the voice alone.
-
-    Left alone: a sound too short to be worth a cut once trimmed
-    (``SHORTEST_PIECE_SECONDS``); a breath or a laugh train
-    (``sounds.is_filler``); and a short run-on with no gap from the word
-    before it, which is that word's own tail, not a sound of its own
-    (``_is_word_tail``, ``words``).
-    """
-    spoken_ends = [float(w["end"]) for w in words if not is_event(w)]
-    return [
-        {"start": float(s["start"]), "end": float(s["end"]), "reason": "filler: sound", "kind": FILLER_TRIM_KIND}
-        for s in sounds
-        if is_filler(s) and not _is_word_tail(s, spoken_ends)
-        and float(s["end"]) - float(s["start"]) >= SHORTEST_PIECE_SECONDS
-    ]

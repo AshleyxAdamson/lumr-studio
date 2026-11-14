@@ -108,7 +108,7 @@ Think of the video as having a spine: the parts the story can't lose.
 **Safe to cut, once clearly identified.**
 
 - False starts and restarts. Keep the clean version.
-- Runs of filler: several "um" or "you know" in a row. One filler word inside a natural sentence is never a cut of its own. A single "like" is a pick (step 5).
+- Runs of filler: several "you know" or "I mean" in a row. One filler word inside a natural sentence is never a cut of its own. A single "um" or "like" is a pick (step 5).
 - Dead air well beyond a natural breath.
 - Tangents that don't serve the spine and aren't funny or personal.
 - Repeated takes. Keep the last complete take unless an earlier one is clearly stronger.
@@ -155,7 +155,7 @@ There are six stops: natural, standard, fast, tight, hard, max. Leave `pace` out
 
 Every pace leaves a pause at each join: the most between sentences, less at a comma, the least inside a clause. From `hard` on that pause is very short. No automatic trim takes any part of a laugh, likely or possible, or of a sound that lasts a second or more, at any pace: those lines of the transcript, `(laugh 3.5s)`, `(laugh? 1.6s)` and `(sound 1.4s)`, always play whole. A trim can still shorten a pause near a laugh. That shows up in `joins` as a `clips_beat` row on an automatic trim. Read those rows in step 6 and pass on their fix, which asks the creator to keep that stretch on the page. If any answer carries `sounds_note`, the transcript was never checked for laughs: call `transcribe` again and wait on its job before you go on.
 
-Say what the hard stops cost before you use one. `hard` leaves almost no pause between sentences. `max` cuts every pause it can reach, several each second of talk in places, and some joins will sound choppy. Both take more filler words, such as "and", "so" and "you know". No pace takes a "like": that word is yours to pick (step 5). Offer the page so the creator hears it before they export: Next steps through each cut that takes words; plain pauses are skipped.
+Say what the hard stops cost before you use one. `hard` leaves almost no pause between sentences. `max` cuts every pause it can reach, several each second of talk in places, and some joins will sound choppy. Both take more filler words, such as "and", "so" and "you know". No pace takes an "um" or a "like": those are yours to pick (step 5). Offer the page so the creator hears it before they export: Next steps through each cut that takes words; plain pauses are skipped.
 
 When the creator says it feels rushed or choppy, go down a level. When they say it drags, go up one. Tell them which level you used and what it saved.
 
@@ -163,9 +163,43 @@ You can only name one of the six stops. When the creator wants something between
 
 With `word_times: "estimated"` the stops from `fast` up remove little more than `standard`. Say so if the creator asks for a harder cut and it barely changes.
 
-## 5. Pick the filler likes
+## 5. Pick the ums and the filler likes
 
-No rule can tell "I like jazz" from "divide this into like three sections", so the pace never takes a "like". You can tell, by reading, and your picks are the only way one goes without the creator's hand. Do this after you have read the whole transcript and before you present the plan.
+Two words are yours to judge, one at a time: "um" and "like". No pace and no switch takes either. Your picks are the only way one goes without the creator's hand. Do this after you have read the whole transcript and before you present the plan.
+
+### The ums
+
+Some ums help. An um tucked between two words is part of how the sentence flows, and taking it out wrecks the sentence. An um that starts a sentence, or sits beside a clear pause, is dead air with a voice in it. The creator wants the second kind gone and the first kind left alone.
+
+Call `find_words` with `["um"]`. It lists every um in the video: the ones the transcript wrote as a word, such as `[Um,]`, and the ones the speech model left out, shown as `[(um 0.5s)]`. Most ums are the second kind, so this list is the only place you see them all. Each line tells you two things right after the time:
+
+- `OPENS A SENTENCE` or `INSIDE A SENTENCE`.
+- `QUIET 0.62s BEFORE, 0.10s AFTER`: the seconds of quiet on each side of the um.
+
+Read each line and decide that one um.
+
+| The um | Example | Verdict |
+|---|---|---|
+| Starts a sentence | "...shape the dough. [(um 0.5s)] Then let it rest" | goes |
+| Has a clear pause beside it: about half a second of quiet or more, on at least one side | "and the oven, [um,] is the part" with `QUIET 0.90s BEFORE, 0.08s AFTER` | goes |
+| Tucked between words, with a short gap on both sides | "let it rest and, [(um 0.4s)] the thing is" with `QUIET 0.08s BEFORE, 0.06s AFTER` | stays |
+| Sets up a joke or a hard line: the creator leans on it for timing | "and then it, [um,] fell on the floor" before a laugh | stays |
+| Not an um at all: a "hmm" or "ah" said on purpose, as an answer or a reaction | "[Ah,] there's the crust I wanted" | stays |
+| `NOT CLEAN` | any | stays: the cut would clip the word beside it |
+
+A second of quiet is an easy call. Half a second still counts. Well under half a second on both sides means the um is in the flow of the sentence, so it stays. When you are unsure, it stays.
+
+Leave some in. A video with every um gone sounds cut up, and the creator asked for the obvious ones only. If your reading takes every um in the list, read the short-gap ones again.
+
+Skip a line that says `OUT:claude` or `OUT:creator`: it is gone already. A line that says `OUT:pick` you picked before; pick it again if it still goes, since a new list replaces the old one.
+
+Give each pick a few words of reason, such as "starts the sentence" or "a second of quiet before it".
+
+### The likes
+
+No rule can tell "I like jazz" from "divide this into like three sections", so the pace never takes a "like". You can tell, by reading.
+
+If the creator says they don't want likes cut, leave every "like" in. Skip the rest of this part, pick none, and say so when you present the plan.
 
 Call `find_words` with `["like"]`. It lists every place the word is said, with six words either side. Read each line and decide.
 
@@ -185,9 +219,13 @@ When unsure, keep. A wrong cut changes what the creator said. A missed filler co
 
 Skip a line that says `OUT:claude` or `OUT:creator`: it is gone already. A line that says `OUT:pick` you picked before; pick it again if it is filler, since a new list replaces the old one. A "like" never says `OUT:pace`; another word you look up can, and you can still pick it. A line that says `NOT CLEAN` you can pick too; the server leaves it in, since cutting it would clip the word beside it, and counts it for the creator.
 
-Hand your picks to `set_edit` as `picks`, in the same call as your cuts (step 6): each one the `id` from `find_words` and a few words of reason, such as "pause word" or "hedge before a number". Picks are not cuts. Never put a single filler word in `cuts`.
+### Hand them in
+
+Hand your picks to `set_edit` as `picks`, the ums and the likes in one list, in the same call as your cuts (step 6): each one the `id` from `find_words` and a few words of reason, such as "pause word" or "hedge before a number". Picks are not cuts. Never put a single um or filler word in `cuts`.
 
 If the creator cut likes by hand that you had kept (see `creator.cut_words` and `creator.cuts` in `get_edit`), that is a lesson. Look at which kind they cut, and pick that kind this time.
+
+If the creator cut ums by hand that you had left in, or brought back ums you picked (`creator.brought_back`), that is a lesson too. Look at the quiet beside those ums, and move your line toward theirs.
 
 If `word_times` is `estimated`, most picks will be left in as not clean. Pick anyway, and tell the creator why few come out.
 
@@ -200,7 +238,7 @@ Read the result:
 - `rejected`: fix each one using the reason given, or drop it.
 - `adjusted`: the server moved an edge to a word boundary. Fine.
 - `joins`: the self-check. Read every flagged row. Each shows the words either side of the join and what would fix it.
-- `picks`: how many of your picked likes are out, which were left in and why, which the creator kept, and which ids were refused. For a refused id, call `find_words` again and use its ids. When you call `set_edit` again to fix cuts, leave `picks` out: the saved ones stay.
+- `picks`: how many of your picked ums and likes are out (`out_counts` says it by word, such as "5 ums, 30 likes"), which were left in and why, which the creator kept, and which ids were refused. For a refused id, call `find_words` again and use its ids. When you call `set_edit` again to fix cuts, leave `picks` out: the saved ones stay.
 
 For each flagged join, decide: fix it, drop the cut, or keep it because it's right. A `splice` on a retake is right. A `removes_laugh` almost never is.
 
@@ -222,7 +260,9 @@ Then:
 - The current length and the new length.
 - Any join still flagged, in plain words: "Cut 7 ends mid-sentence. I kept it since the next line restarts the thought. Listen to that one."
 - Jokes you noticed and kept, in one line, so the creator knows you saw them.
-- The likes, in one or two sentences: how many times the word is said, how many you picked as filler, and how many stay in. Say that the page has a switch for all of them (Filler likes) and that a double-click brings any one back or cuts one you kept. Such as: "You say 'like' 112 times. I picked 41 that are filler; the other 71 mean something, so they stay. On the page, Filler likes switches all 41 on or off, and you can double-click any single one."
+- The ums, in one or two sentences: how many you found, how many go, and that the rest are the ones inside your sentences, left on purpose. Name where the kept ones are when there are only a few, so the creator can overrule you. Such as: "I found 11 ums. 6 start a sentence or sit beside a pause, so they go. The other 5 are tucked inside sentences, at 2:40, 7:15 and three more places, and I left them in so the sentences still flow."
+- The likes, in one or two sentences: how many times the word is said, how many you picked as filler, and how many stay in. Such as: "You say 'like' 112 times. I picked 41 that are filler; the other 71 mean something, so they stay." If the creator asked for no likes cut, say that you left every one in.
+- The switch, once, for both: the page has one switch for all of your picks (Ums and likes), and a double-click brings any one back or cuts one you kept.
 
 Use the `clock` value on each cut for the times you show. Never work out minutes and seconds yourself.
 
@@ -246,7 +286,7 @@ Under the box, one line: "It runs on your machine only. Or answer here, such as 
 On a yes, call `review` and give them the address with these steps:
 
 1. Press Next to go to each cut in turn, then Play to hear it. The bar under the video shows where the most changed; press a block on it to play that stretch.
-2. If it feels rushed or drags, move the pace. For a setting between two stops, open Fine tune under it and move the two sliders. Under Take out, turn off anything you want left in. Filler likes switches off the likes I picked.
+2. If it feels rushed or drags, move the pace. For a setting between two stops, open Fine tune under it and move the two sliders. Under Take out, turn off anything you want left in. Ums and likes switches off the ums and likes I picked.
 3. Open my cuts by kind. Put back any you want to keep.
 4. A word you want gone? Double-click it. Double-click a struck word to bring it back. Drag across words to cut or keep a part.
 5. Found a moment that must stay? Select it and press "Keep".
@@ -265,7 +305,7 @@ Their changes are already in the saved edit. If you call `set_edit` again, leave
 
 **Their own pace.** When `creator.fine` is there, they set the pace with the two sliders and it reads `custom`. The two values are theirs. Leave `pace` and `gap_length` out of every `set_edit`, or you replace their setting with a stop. Tell them what you saw in plain words, such as "You set it to cut pauses from 0.35 seconds, with 0.85 seconds of speech kept between cuts." Name a pace only when they ask you for one.
 
-**Their switch.** `creator.take_out.likes: false` means they switched your picked likes off. Leave it. You can still hand in a better pick list; it is saved for when they switch it on.
+**Their switch.** `creator.take_out.likes: false` means they switched your picked ums and likes off. Leave it. You can still hand in a better pick list; it is saved for when they switch it on.
 
 A cut the creator put back, and any part they kept, stays that way. `set_edit` rejects a cut there. A cut of yours over a word they brought back splits around that word. Pass `override_keeps` only when the creator tells you to cut it after all.
 
