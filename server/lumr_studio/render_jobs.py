@@ -15,6 +15,12 @@ A full render has two ways in: Claude's ``render`` tool and the Export video
 button on the treatment page. Both call ``start_full_render``, so both land in
 the same job registry and only one runs per video at a time.
 ``export_status`` is the page's reading of that job.
+
+A full render is made at a quality (quality.py): ``standard``, which runs
+the commands it always ran, or ``master``, which only ``render`` asks for.
+A master render with overlays writes its first pass as a working file that
+loses nothing, so the pass that draws is its one encode. A preview has no
+quality. The result of a full render says what was made (``what_was_made``).
 """
 
 from __future__ import annotations
@@ -64,6 +70,17 @@ from lumr_studio.overlays import (
     work_dir,
 )
 from lumr_studio.project import Project, reserve_unique_path
+from lumr_studio.quality import (
+    MASTER,
+    QUALITIES,
+    STANDARD,
+    WORKING_SOUND_ARGS,
+    WORKING_VIDEO_ARGS,
+    Quality,
+    check_quality,
+    file_facts,
+)
+from lumr_studio.reels import ENCODE, reel_for
 from lumr_studio.timeline import edited_duration, source_spans_for_window, to_edited_time
 from lumr_studio.word_times import words_if_any
 
@@ -295,11 +312,17 @@ class Cut:
     seconds: float  # the picture's length, which is the file's
     has_sound: bool
     crf: int
+    sound: tuple[str, ...] = AUDIO_ARGS  # how the sound is encoded
+    # Written as a working file that loses nothing (quality.py); ``crf`` and ``sound`` are then unused.
+    working: bool = False
 
 
-def plan_cut(plan: RenderPlan, *, fps: float | None, has_sound: bool) -> Cut:
+def plan_cut(
+    plan: RenderPlan, *, fps: float | None, has_sound: bool, sound: tuple[str, ...] = AUDIO_ARGS, working: bool = False
+) -> Cut:
     """The one-pass cut of ``plan``'s kept pieces. Pure.
 
+    ``sound`` and ``working`` say how it is written (see ``Cut``).
     Raises StudioError when the kept pieces hold less than one frame.
     """
     rate = frame_rate(fps)
@@ -315,19 +338,32 @@ def plan_cut(plan: RenderPlan, *, fps: float | None, has_sound: bool) -> Cut:
         source=plan.source, out=plan.out_path, graph=";".join(chains), read_at=float(read_at),
         read_seconds=float(_exact(plan.kept[-1][1]) - read_at) + READ_MARGIN,
         seconds=float(Fraction(picture.frames) / rate), has_sound=has_sound, crf=plan.crf,
+        sound=sound, working=working,
     )
 
 
+def picture_args(crf: int, working: bool) -> list[str]:
+    """How the picture is written: x264 at ``crf``, or as a working file that loses nothing."""
+    return list(WORKING_VIDEO_ARGS) if working else [*X264_ARGS, "-crf", str(crf)]
+
+
 def cut_command(cut: Cut, graph_args: list[str]) -> list[str]:
-    """The ffmpeg argv of ``cut``. The encode is ClipForge's (render.build_ffmpeg_cmd), setting for setting."""
+    """The ffmpeg argv of ``cut``.
+
+    At standard quality the encode is ClipForge's (render.build_ffmpeg_cmd),
+    setting for setting. A working file has no ``+faststart``: it is read
+    once and removed, and moving its index to the front would write the
+    whole file a second time.
+    """
     seek = ["-ss", f"{cut.read_at:.6f}"] if cut.read_at else []
-    sound = ["-map", "[outa]", *AUDIO_ARGS] if cut.has_sound else []
+    sound = ["-map", "[outa]", *(WORKING_SOUND_ARGS if cut.working else cut.sound)] if cut.has_sound else []
+    finish = [] if cut.working else ["-movflags", "+faststart"]
     return [
         "ffmpeg", "-y", "-nostdin", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
         *seek, "-t", f"{cut.read_seconds:.6f}", "-i", str(cut.source),
         *graph_args,
-        "-map", "[outv]", *X264_ARGS, "-crf", str(cut.crf),
-        *sound, "-movflags", "+faststart", str(cut.out),
+        "-map", "[outv]", *picture_args(cut.crf, cut.working),
+        *sound, *finish, str(cut.out),
     ]
 
 
@@ -384,16 +420,34 @@ def _cut_in_one_pass(cut: Cut, handle: JobHandle, share: float, ffmpeg: Ffmpeg) 
         )
 
 
-def _cut_the_slow_way(plan: RenderPlan, handle: JobHandle, job_label: str, share: float) -> None:
+def written_as(cmd: list[str], crf: int, sound: tuple[str, ...], working: bool) -> list[str]:
+    """ClipForge's ffmpeg argv with its encode settings swapped for these. Pure.
+
+    ClipForge's command ends with its settings, from ``-c:v`` on, and then the
+    output file. Its own settings are the standard ones, so this is only for
+    a cut written another way: with another sound setting, or as a working file.
+    """
+    start = cmd.index("-c:v")
+    finish = [] if working else ["-movflags", "+faststart"]
+    return [*cmd[:start], *picture_args(crf, working), *(WORKING_SOUND_ARGS if working else sound), *finish, cmd[-1]]
+
+
+def _cut_the_slow_way(
+    plan: RenderPlan, handle: JobHandle, job_label: str, share: float,
+    sound: tuple[str, ...] = AUDIO_ARGS, working: bool = False,
+) -> None:
     """ClipForge's own encode of ``plan``, for an ffmpeg too old for the one pass.
 
     It reads from the first kept piece on, so a preview late in the video
-    doesn't decode everything before it.
+    doesn't decode everything before it. ClipForge's command runs as it is
+    unless ``sound`` or ``working`` ask for another way of writing it.
     """
     seek = plan.kept[0][0]
     moved = replace(plan, kept=[(s - seek, e - seek) for s, e in plan.kept])
 
     def seeking_runner(cmd: list[str], **kwargs: Any) -> subprocess.Popen:
+        if working or tuple(sound) != AUDIO_ARGS:
+            cmd = written_as(cmd, plan.crf, sound, working)
         return subprocess.Popen(with_input_seek(cmd, seek) if seek > 0 else cmd, **kwargs)
 
     progress = RenderProgress(job_id=job_label)
@@ -405,19 +459,25 @@ def _cut_the_slow_way(plan: RenderPlan, handle: JobHandle, job_label: str, share
         )
 
 
-def cut_edit(plan: RenderPlan, handle: JobHandle, job_label: str, share: float = 1.0) -> str | None:
+def cut_edit(
+    plan: RenderPlan, handle: JobHandle, job_label: str, share: float = 1.0,
+    *, sound: tuple[str, ...] = AUDIO_ARGS, working: bool = False,
+) -> str | None:
     """Cut ``plan``'s kept pieces out of its source into ``plan.out_path``.
 
     ``share`` is the part of the job's progress the cut fills, from 0.
+    ``sound`` is how the sound is encoded; ``working`` writes a working file
+    that loses nothing instead, for a pass that follows (quality.py).
     Returns a note for Claude when it ran the slow way, else None.
     Raises StudioError when ffmpeg fails.
     """
     ffmpeg = this_ffmpeg()
     if not ffmpeg.splits_sound:
-        _cut_the_slow_way(plan, handle, job_label, share)
+        _cut_the_slow_way(plan, handle, job_label, share, sound, working)
         return OLD_FFMPEG_NOTE
     source = probe_media(plan.source)
-    _cut_in_one_pass(plan_cut(plan, fps=source.fps, has_sound=source.has_sound), handle, share, ffmpeg)
+    cut = plan_cut(plan, fps=source.fps, has_sound=source.has_sound, sound=sound, working=working)
+    _cut_in_one_pass(cut, handle, share, ffmpeg)
     return None
 
 
@@ -455,15 +515,22 @@ def _first_pass_target(project: Project, out: Path, overlays: list[dict[str, Any
 
 
 def _draw_overlays(
-    base: Path, out: Path, items: list[Any], crf: int, handle: JobHandle, first_share: float
+    base: Path, out: Path, items: list[Any], crf: int, handle: JobHandle, first_share: float,
+    *, sound: tuple[str, ...] = AUDIO_ARGS, copy_sound: bool = True,
 ) -> dict[str, Any]:
-    """The second pass: ``items`` drawn over ``base`` into ``out``, filling the progress after ``first_share``."""
+    """The second pass: ``items`` drawn over ``base`` into ``out``, filling the progress after ``first_share``.
+
+    ``sound`` and ``copy_sound`` are ``overlay_render.overlay_command``'s: a
+    base that is a working file has its sound encoded here.
+    """
     if not items:
         base.replace(out)  # nothing lands in this stretch: the first pass is the result
         return {"drawn": [], "clip_sound_mixed": False}
     done = [0.0]
     handle.track(lambda: first_share + (1 - first_share) * done[0])
-    return lay_over(base, out, items, crf=crf, on_progress=lambda f: done.__setitem__(0, f))
+    return lay_over(
+        base, out, items, crf=crf, sound=sound, copy_sound=copy_sound, on_progress=lambda f: done.__setitem__(0, f),
+    )
 
 
 def _overlay_report(
@@ -482,17 +549,71 @@ def _overlay_report(
 # ── Full render and preview ───────────────────────────────────────────────────
 
 
+# How a finished video was made, by quality and by whether something was drawn over it. Claude passes it on.
+MADE = {
+    (STANDARD, False): "Standard quality: the picture and the sound were compressed once, straight from the video.",
+    (STANDARD, True): (
+        "Standard quality: the picture was compressed twice, once to cut the edit and once more to draw "
+        "the photos and clips over it."
+    ),
+    (MASTER, False): (
+        "Master quality: the picture and the sound were compressed once, straight from the video, "
+        "keeping far more of both than a standard export does."
+    ),
+    (MASTER, True): (
+        "Master quality: the edit was cut into a working file that loses nothing, then the picture and the "
+        "sound were compressed once, with the photos and clips drawn over it. The working file is gone again."
+    ),
+}
+REEL_HOLDS_IT_BACK = (
+    "This video is a reel that was joined at standard quality, so a master export of it can only be as good "
+    "as that reel, not as good as the clips. To get closer to the clips, join them again with assemble at "
+    "quality master, which makes a second reel beside this one, and take the edit across with carry_edit."
+)
+
+
+def reel_holds_back(video: Path, quality: Quality) -> str | None:
+    """What to say when ``video`` is a reel encoded at standard and a master export of it is asked for, else None."""
+    if not quality.is_master:
+        return None
+    reel = reel_for(video)
+    if reel is None or reel.get("how") != ENCODE or reel.get("quality") == MASTER:
+        return None
+    return REEL_HOLDS_IT_BACK
+
+
+def what_was_made(out: Path, quality: Quality, drawn_over: bool) -> dict[str, Any]:
+    """What the finished file is: ``{quality, size_mb, video_bitrate_mbps, made}``.
+
+    ``size_mb`` is megabytes on disk and ``video_bitrate_mbps`` the megabits
+    of picture the file holds for each second, both read from the file; one
+    that can't be read is left out. ``made`` says how the file was made.
+    """
+    facts = file_facts(out)
+    told: dict[str, Any] = {"quality": quality.name}
+    for key in ("size_mb", "video_bitrate_mbps"):
+        if key in facts:
+            told[key] = facts[key]
+    told["made"] = MADE[(quality.name, drawn_over)]
+    return told
+
+
 def render_full(
     project: Project,
     removed: list[tuple[float, float]],
     words: list[dict[str, Any]],
     handle: JobHandle,
+    quality: str = STANDARD,
 ) -> dict[str, Any]:
     """Render the whole edited video into ``exports/`` and describe the result.
 
     ``removed`` is the saved, already finalized edit, so it renders verbatim.
     Saved overlays are drawn in a second pass; the result then carries ``overlays``.
+    ``quality`` is ``standard`` or ``master`` (quality.py). At master, a
+    first pass that is followed by drawing writes a working file that loses
+    nothing, so the picture and the sound are compressed once either way.
     """
+    made_at = check_quality(quality)
     overlays = _saved_overlays(project)
     out = reserve_unique_path(project.exports_dir, f"{project.video.stem}-edit-{_stamp()}", ".mp4")
     target = _first_pass_target(project, out, overlays)
@@ -505,15 +626,19 @@ def render_full(
             words=words,
             out_dir=target.parent,
             out_name=target.name,
+            crf=made_at.crf,
         )
         placements = place_on_edit(overlays, plan.kept, words) if overlays else []
         items = items_for_render(placements)
         share = first_pass_share(plan.kept) if items else 1.0
+        working = made_at.working_file and bool(items)
         started = time.monotonic()
-        note = cut_edit(plan, handle, out.stem, share)
+        note = cut_edit(plan, handle, out.stem, share, sound=made_at.sound, working=working)
         if overlays:
             passes = [time.monotonic() - started]
-            drawn = _draw_overlays(target, out, items, plan.crf, handle, share)
+            drawn = _draw_overlays(
+                target, out, items, plan.crf, handle, share, sound=made_at.sound, copy_sound=not working,
+            )
             passes.append(time.monotonic() - started - passes[0])
     except BaseException:
         out.unlink(missing_ok=True)
@@ -529,7 +654,11 @@ def render_full(
         "kept_segments": len(plan.kept),
         "resolution": plan.out_resolution,
         "source_note": plan.source_note,
+        **what_was_made(out, made_at, bool(items)),
     }
+    held_back = reel_holds_back(project.video, made_at)
+    if held_back:
+        result["reel_note"] = held_back
     if note:
         result["note"] = note
     if overlays:
@@ -553,8 +682,8 @@ EXPORT_FAILED = (
     "If it stops again, ask Claude what went wrong."
 )
 
-# The work a full render does: ``render_full``, or a stand-in in tests.
-RenderWork = Callable[[Project, list[tuple[float, float]], list[dict[str, Any]], JobHandle], dict[str, Any]]
+# The work a full render does: ``render_full``, or a stand-in in tests. A master render also passes ``quality=``.
+RenderWork = Callable[..., dict[str, Any]]
 
 
 def start_full_render(
@@ -563,22 +692,33 @@ def start_full_render(
     jobs: JobRegistry,
     duration: float | None = None,
     render: RenderWork | None = None,
+    quality: str = STANDARD,
 ) -> tuple[str, bool]:
     """Start the full render of the saved edit, unless one is already running for this video.
 
     Returns ``(job_id, started)``. When a render of this video is running,
     whoever started it, nothing new starts and its id comes back with False.
-    The job remembers what its edit removes (``about.edit_mark``).
-    Raises StudioError when the saved edit can't be read.
+    The job remembers what its edit removes (``about.edit_mark``). A
+    standard render is started as it always was. A master one also passes
+    ``quality=`` to the work and remembers it (``about.quality``).
+    Raises StudioError when the saved edit can't be read or ``quality`` is not one.
     """
     work = render or render_full
+    made_at = check_quality(quality).name
+    asked = {} if made_at == STANDARD else {"quality": made_at}
     edit = edits.load_edit(project, project.duration() if duration is None else duration)
     removed = edits.removed_spans(edit)
     words = words_if_any(project)
     return jobs.start_one(
-        RENDER_KIND, project, lambda handle: work(project, removed, words, handle),
-        about={"edit_mark": edit_mark(edit)},
+        RENDER_KIND, project, lambda handle: work(project, removed, words, handle, **asked),
+        about={"edit_mark": edit_mark(edit), **asked},
     )
+
+
+def quality_of(job: Job) -> str:
+    """The quality a full render was started at. One whose job doesn't say was standard."""
+    named = job.about.get("quality")
+    return named if named in QUALITIES else STANDARD
 
 
 def edit_mark(edit: dict[str, Any]) -> str:

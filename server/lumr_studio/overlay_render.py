@@ -329,9 +329,19 @@ def build_graph(
     return Graph(inputs=inputs, filter=";".join(chains), video="vout", audio=audio)
 
 
-def overlay_command(base: Path, out: Path, graph: Graph, *, crf: int) -> list[str]:
-    """The ffmpeg argv for the pass. Audio is copied as is unless a clip's sound is mixed in."""
-    audio = ["-map", f"[{graph.audio}]", *AUDIO_ARGS] if graph.audio else ["-map", "0:a?", "-c:a", "copy"]
+def overlay_command(
+    base: Path, out: Path, graph: Graph, *, crf: int, sound: tuple[str, ...] = AUDIO_ARGS, copy_sound: bool = True
+) -> list[str]:
+    """The ffmpeg argv for the pass. Audio is copied as is unless a clip's sound is mixed in.
+
+    ``sound`` is how the sound is encoded when it is. ``copy_sound=False`` is
+    for a base that is a working file (quality.py): its sound was never
+    encoded, so this pass encodes it whether or not a clip is mixed in.
+    """
+    if graph.audio:
+        audio = ["-map", f"[{graph.audio}]", *sound]
+    else:
+        audio = ["-map", "0:a?", "-c:a", "copy"] if copy_sound else ["-map", "0:a?", *sound]
     return [
         "ffmpeg", "-y", "-nostdin", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
         "-i", str(base), *graph.inputs,
@@ -405,16 +415,21 @@ def lay_over(
     items: list[Item],
     *,
     crf: int,
+    sound: tuple[str, ...] = AUDIO_ARGS,
+    copy_sound: bool = True,
     on_progress: Callable[[float], None] = lambda _f: None,
     runner: Callable[..., Any] = subprocess.Popen,
     probe: Callable[[Path], Media] = probe_media,
 ) -> dict[str, Any]:
-    """Draw ``items`` over ``base`` into ``out``. Raises StudioError when ffmpeg fails."""
+    """Draw ``items`` over ``base`` into ``out``. Raises StudioError when ffmpeg fails.
+
+    ``sound`` and ``copy_sound`` are ``overlay_command``'s.
+    """
     media = probe(base)
     frame, fps = frame_facts(media)
     graph = build_graph(items, frame, fps, base_audio="0:a" if media.has_sound else None)
     run_ffmpeg(
-        overlay_command(base, out, graph, crf=crf), out,
+        overlay_command(base, out, graph, crf=crf, sound=sound, copy_sound=copy_sound), out,
         total=float(media.duration or 0), on_progress=on_progress, runner=runner,
     )
     return {"drawn": [i.overlay["id"] for i in items], "clip_sound_mixed": graph.audio is not None}

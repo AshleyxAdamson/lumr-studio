@@ -33,9 +33,13 @@ The plugin gives Claude 15 tools and five skills, `tight-cut`, `assemble-takes`,
 | Original and Edited | Switch between your recording and the edit. |
 | The bar | The whole video along the bottom. Each amber block is a stretch where lots was cut close together; hover one and it says "More cuts here" and how many edits it holds. The shade shows the same: a few, many, or the most. Press the play button on a block to hear that stretch. Click or drag anywhere else on the bar to move. |
 | Clips | When the video was joined from several clips: a thin line on the bar where each clip starts, with the clip's number beside it where there is room, "Clip 2 of 4" beside the clock, and the clip's name before its first word. Click that word to go to the clip. |
-| Export video | The one filled button, upper right. It shows a percent while it runs, then the file's name with "Copy path". |
+| Export video | The one filled button, upper right. It shows a percent while it runs, then the file's name with "Copy path". It makes a standard export; a master one is asked for through Claude. |
 
 Struck words say who took them out: dim for the pace, red for Claude, teal for you. When you're done, tell Claude, and it reads what you changed.
+
+An export comes in two qualities. The Export video button makes the standard one: it looks good and stays small. When a video is finished and you're about to upload it, ask Claude for a master export. That one is for uploading: as close to your footage as an export gets, and a much bigger file, about as big as the part of your footage the edit keeps and around two to three times a standard export. Claude tells you what your footage is and how big the file will be before it starts, and what it made when it's done. A master export doesn't replace a standard one: each is its own file in `exports/`.
+
+A video joined from several clips can only export as well as the joined video itself. When the clips matched and were joined as they are, nothing was lost. When they had to be cut or matched, the joined video was compressed once, and you can ask Claude to join them again at master quality before a master export. That makes a second joined video beside the first, about as big as the clips, and Claude takes your edit across to it.
 
 ## What you need
 
@@ -152,7 +156,7 @@ Each video gets one project folder at `~/Lumr/studio/projects/<video name>-<id>/
 | `edit.json` | your saved edit, with the pace and switches it was built with |
 | `words-aligned.json` | your transcript's words with times measured from the sound. Made once per video. If the transcript changes, it's made again. |
 | `plans.json` | the automatic removals planned for each of the six stops and for the last 12 slider settings you tried, so the page answers fast |
-| `exports/` | the videos and previews you render |
+| `exports/` | the videos and previews you render, standard and master side by side |
 | `frames/` | the screenshots `frames` takes of your video |
 
 You can move a video to another folder, or copy your Lumr folder and your videos to another Mac. Keep each video's `.words.json` beside it. The project folder keeps its old name, and Lumr finds it by the video's file name and length: your edit and your measured word times open as you left them, and Claude tells you once that it found them. Nothing is moved or renamed. If two folders could be that video's, Lumr picks neither and Claude tells you which ones, so you can take one away.

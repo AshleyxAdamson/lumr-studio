@@ -242,7 +242,7 @@ def test_the_render_tool_starts_nothing_while_an_export_runs_and_says_so(project
     assert render.running.wait(5) and len(render.calls) == 1
     render.finish(jobs, page_job)
     again = tools.render(str(project.video), jobs=jobs)
-    assert again["job_id"] != page_job and set(again) == {"job_id"}
+    assert again["job_id"] != page_job and set(again) == {"job_id", "quality"}
 
 
 def test_job_status_sees_an_export_the_page_started(project, jobs, render):
@@ -259,7 +259,7 @@ def test_get_edit_names_the_latest_export_so_claude_can_follow_it(project, jobs,
     assert "export" not in tools.get_edit(video, jobs=jobs)
     job_id, _ = start_full_render(project, jobs=jobs, render=render)
     assert tools.get_edit(video, jobs=jobs)["export"] == {
-        "job_id": job_id, "status": "running", "edit_changed_since": False,
+        "job_id": job_id, "status": "running", "edit_changed_since": False, "quality": "standard",
     }
     render.finish(jobs, job_id)
     assert tools.get_edit(video, jobs=jobs)["export"]["status"] == "done"

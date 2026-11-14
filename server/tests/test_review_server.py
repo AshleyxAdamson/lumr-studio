@@ -658,6 +658,17 @@ def test_post_export_starts_the_render_of_the_saved_edit(treated, video, jobs, r
     assert (now["state"], now["progress"], now["message"]) == ("running", 0.42, "Exporting. 42% done.")
 
 
+def test_export_video_on_the_page_is_a_standard_export_and_the_route_takes_no_quality(treated, video, jobs, render):
+    status, _h, _body = post_json(treated + "api/export", {"quality": "master"})
+    assert status == 400 and running_job(jobs, video) is None, "the route has no such field, and nothing started"
+    status, _h, body = post_json(treated + "api/export", {})
+    assert status == 200 and export_of(body)["state"] == "running"
+    assert render.running.wait(5), "the work was called as it always was: with no quality"
+    job = running_job(jobs, video)
+    assert "quality" not in job.about and render_jobs.quality_of(job) == "standard"
+    assert tools.get_edit(str(video), jobs=jobs)["export"]["quality"] == "standard"
+
+
 def test_a_post_while_one_runs_answers_the_running_one_and_starts_nothing(treated, video, jobs, render):
     post_json(treated + "api/export", {})
     first = running_job(jobs, video).job_id
@@ -671,7 +682,7 @@ def test_a_post_while_one_runs_answers_the_running_one_and_starts_nothing(treate
 def test_a_render_claude_started_counts_as_the_running_export(treated, video, jobs, render, monkeypatch):
     monkeypatch.setattr(render_jobs, "render_full", render)
     claude = tools.render(str(video), jobs=jobs)
-    assert set(claude) == {"job_id"}
+    assert set(claude) == {"job_id", "quality"}
     assert render.running.wait(5)
     assert export_of(call(treated + "api/export")[2])["state"] == "running"
     assert export_of(post_json(treated + "api/export", {})[2])["state"] == "running"
