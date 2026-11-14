@@ -189,10 +189,10 @@ def test_a_word_whose_end_runs_on_through_a_pause_stays_with_the_footage_it_star
     # A raw transcript stretches the last word before a pause up to the next word. Found on a real
     # video: a clip excerpt ended inside such a pause, the word's middle fell past the excerpt, the
     # word was left out, and a cut then slid back over it.
-    words = [{"word": "across,", "start": 11.2, "end": 16.0}, {"word": "and", "start": 16.0, "end": 16.2}]
+    words = [{"word": "crust,", "start": 11.2, "end": 16.0}, {"word": "and", "start": 16.0, "end": 16.2}]
     moved, _ = fill_from(words, MAP, [(0.0, 35.0)])
     assert moved == [
-        {"word": "across,", "start": 11.2, "end": 12.0},   # with the footage it starts in, and no further
+        {"word": "crust,", "start": 11.2, "end": 12.0},   # with the footage it starts in, and no further
         {"word": "and", "start": 21.0, "end": 21.2},
     ]
 
