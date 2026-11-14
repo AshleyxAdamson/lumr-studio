@@ -185,6 +185,24 @@ def test_a_word_never_reaches_past_the_footage_it_came_with():
     assert moved == [{"word": "edge", "start": 11.7, "end": 12.0}]
 
 
+def test_a_word_whose_end_runs_on_through_a_pause_stays_with_the_footage_it_starts_in():
+    # A raw transcript stretches the last word before a pause up to the next word. Found on a real
+    # video: a clip excerpt ended inside such a pause, the word's middle fell past the excerpt, the
+    # word was left out, and a cut then slid back over it.
+    words = [{"word": "across,", "start": 11.2, "end": 16.0}, {"word": "and", "start": 16.0, "end": 16.2}]
+    moved, _ = fill_from(words, MAP, [(0.0, 35.0)])
+    assert moved == [
+        {"word": "across,", "start": 11.2, "end": 12.0},   # with the footage it starts in, and no further
+        {"word": "and", "start": 21.0, "end": 21.2},
+    ]
+
+
+def test_a_word_that_starts_before_all_the_footage_goes_by_its_middle():
+    late = time_map(sequence(("a", 0, 30)), sequence(("a", 5, 30)))
+    moved, _ = fill_from([{"word": "half", "start": 4.8, "end": 5.6}, {"word": "gone", "start": 4.0, "end": 4.9}], late, [(0.0, 25.0)])
+    assert moved == [{"word": "half", "start": 0.0, "end": 0.6}]
+
+
 def test_footage_that_played_twice_in_the_old_video_fills_its_place_once():
     old = sequence(("a", 0, 10), ("a", 0, 10))
     words = [{"word": "hi", "start": 1.0, "end": 1.4}, {"word": "hi", "start": 11.0, "end": 11.4}]

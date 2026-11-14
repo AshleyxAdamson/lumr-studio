@@ -585,7 +585,9 @@ When `to_video` has no transcript, the job writes `<to_video>.words.json` from
 words that already exist, in this order:
 
 1. `from_video`'s raw words, sound events (`"type": "event"`) included, each
-   moved with the stretch its middle sits in and never reaching past it.
+   moved with the stretch it starts in and never reaching past it. The start
+   decides because a raw transcript runs a word's end on through the pause
+   after it; a word that starts before every stretch goes by its middle.
 2. For a stretch still without words, the words of the clip it came from,
    when that clip has a `.words.json` of its own beside it.
 3. For what is left, the speech model, run on that stretch alone. Stretches

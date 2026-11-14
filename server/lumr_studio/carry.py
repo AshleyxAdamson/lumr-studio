@@ -264,6 +264,12 @@ def _mid(word: dict[str, Any]) -> float:
     return (float(word["start"]) + float(word["end"])) / 2
 
 
+def _anchor(word: dict[str, Any], stretches: list[Stretch]) -> float:
+    """The moment that says which footage a word belongs to: its start, or its middle when it starts in no stretch."""
+    start = float(word["start"])
+    return start if any(s.old_start <= start < s.old_end for s in stretches) else _mid(word)
+
+
 def _without(spans: list[Span], holes: list[Span]) -> list[Span]:
     return [piece for a, b in spans for piece in edits.span_without(a, b, holes)]
 
@@ -272,11 +278,16 @@ def fill_from(words: Words, stretches: list[Stretch], free: list[Span]) -> tuple
     """The words of one transcript moved into the parts of the new video that have none yet.
 
     ``words`` are on the times ``stretches`` map from; ``free`` are the new
-    video's seconds still without words. A word goes with the stretch its
-    middle sits in, keeps every other key it has (a sound stays a sound) and
-    never reaches past the footage it came with. Returns the moved words in
-    time order and what of ``free`` is still without words. Footage that
-    played twice in the old video fills its place once.
+    video's seconds still without words. A word goes with the stretch it
+    starts in, keeps every other key it has (a sound stays a sound) and
+    never reaches past the footage it came with. A word that starts before
+    every stretch goes with the one its middle sits in. The start decides
+    because a raw transcript runs a word's end on through the pause after
+    it, as far as the next word of the sentence: by its middle, the last
+    word before a pause would belong to footage several seconds later, and
+    a clip that ends in that pause would lose its last word. Returns the
+    moved words in time order and what of ``free`` is still without words.
+    Footage that played twice in the old video fills its place once.
     """
     out: Words = []
     for s in stretches:
@@ -285,10 +296,10 @@ def fill_from(words: Words, stretches: list[Stretch], free: list[Span]) -> tuple
         if not holes:
             continue
         for word in words:
-            mid = _mid(word)
-            if not s.old_start <= mid < s.old_end:
+            at = _anchor(word, stretches)
+            if not s.old_start <= at < s.old_end:
                 continue
-            hole = next((h for h in holes if h[0] <= mid + s.shift < h[1]), None)
+            hole = next((h for h in holes if h[0] <= at + s.shift < h[1]), None)
             if hole is None:
                 continue
             a = min(max(float(word["start"]) + s.shift, hole[0]), hole[1])
