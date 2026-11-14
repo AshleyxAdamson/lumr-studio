@@ -442,6 +442,236 @@ def test_clips_with_different_pixel_shapes_are_encoded(jobs, tmp_path):
     assert run_assemble(jobs, "shapes", whole(red, blue))["how"] == "encode"
 
 
+# ── clips in HDR or wide color come out in standard color ─────────────────────
+
+HLG, PQ = "arib-std-b67", "smpte2084"
+
+
+def make_hdr_clip(
+    path: Path, *, color: str, transfer: str = HLG, primaries: str = "bt2020", frequency: int = 300, seconds: float = 3.0,
+) -> Path:
+    """A solid 320x240 25 fps HEVC clip, 10-bit, tagged BT.2020 with an HDR transfer, as a phone records HDR.
+
+    ``color`` is the signal itself, such as ``0xC04040``: three quarters red
+    and one quarter green and blue, in HLG or PQ, in BT.2020 colors.
+    ``primaries="unknown"`` leaves that tag out, as a careless re-encode does.
+    Skips the test where this ffmpeg can't write such a clip or can't convert one.
+    """
+    encoders = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True).stdout
+    if " libx265 " in encoders:
+        encoder = ["-c:v", "libx265", "-x265-params", "log-level=error"]
+    elif " hevc_videotoolbox " in encoders:
+        encoder = ["-c:v", "hevc_videotoolbox", "-profile:v", "main10"]
+    else:
+        pytest.skip("this ffmpeg has no HEVC encoder to write an HDR clip with")
+    if not reels.can_convert_color():
+        pytest.skip("this ffmpeg has no scale_vt filter")
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", (
+                f"color=c={color}:size=320x240:rate=25:duration={seconds},format=gbrp,"
+                "scale=out_color_matrix=bt2020nc:out_range=tv,format=yuv420p10le,"
+                f"setparams=color_primaries={primaries}:color_trc={transfer}:colorspace=bt2020nc:range=tv"
+            ),
+            "-f", "lavfi", "-i", f"sine=frequency={frequency}:sample_rate=48000:duration={seconds}",
+            "-ac", "2", "-c:a", "aac", *encoder, "-tag:v", "hvc1", str(path),
+        ],
+        check=True,
+    )
+    return path
+
+
+def color_at(video: Path, seconds: float) -> tuple[int, int, int]:
+    """The red, green and blue of the frame at ``seconds``, averaged over the picture."""
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-ss", f"{seconds:.3f}", "-i", str(video), "-frames:v", "1",
+         "-vf", "scale=1:1:flags=area,format=rgb24", "-f", "rawvideo", "-"],
+        capture_output=True, check=True,
+    ).stdout
+    return tuple(raw[:3])
+
+
+def color_tags(video: Path) -> tuple[str, str, str]:
+    streams = reels.probe_streams(video)
+    return streams.color_space, streams.color_transfer, streams.color_primaries
+
+
+BT709 = ("bt709", "bt709", "bt709")
+# What macOS (QuickTime, avconvert) shows for the HLG signal 0xC04040. Written out as bt709 unchanged it reads (188, 61, 61).
+HLG_PATCH, HLG_PATCH_SHOWN = "0xC04040", (198, 0, 41)
+
+
+@pytest.mark.parametrize("tags, kind", [
+    ({"color_transfer": HLG}, "HDR"),
+    ({"color_transfer": PQ}, "HDR"),
+    ({"color_transfer": "bt709", "color_primaries": "bt2020"}, "wide color"),
+    ({"color_space": "bt2020nc"}, "wide color"),
+    ({"color_transfer": "bt709", "color_primaries": "bt709", "color_space": "bt709"}, None),
+    ({}, None),
+])
+def test_a_clip_is_hdr_or_wide_color_by_its_color_tags(video, tags, kind):
+    assert streams_with(reels.check_pieces(whole(video))[0], **tags).converted_from == kind
+
+
+def test_a_sequence_with_an_hdr_clip_is_never_copied_and_color_tags_alone_do_not_stop_a_copy(video):
+    plain = reels.check_pieces(whole(video))[0]
+    hdr = streams_with(plain, color_transfer=HLG, color_primaries="bt2020", color_space="bt2020nc")
+    assert reels.how_to_join([plain, plain]) == "copy"
+    assert reels.how_to_join([hdr, hdr]) == "encode"
+    assert reels.how_to_join([plain, hdr]) == "encode"
+    assert reels.how_to_join([plain, streams_with(plain, color_space="bt709")]) == "copy"
+
+
+def test_an_hdr_sequence_has_its_own_id(video):
+    plain = reels.check_pieces(whole(video))
+    hdr = [streams_with(plain[0], color_transfer=PQ)]
+    assert reels.sequence_id("demo", hdr) != reels.sequence_id("demo", plain)
+    assert reels.sequence_id("demo", hdr) == reels.sequence_id("demo", [streams_with(plain[0], color_transfer=HLG)])
+
+
+def test_only_a_sequence_with_an_hdr_clip_is_sent_through_the_converter(video):
+    plain = reels.check_pieces(whole(video, video))
+    command = reels.encode_command(plain, Path("out.mp4"))
+    assert not any(word in " ".join(command) for word in ("scale_vt", "hwupload", "setparams", "color_matrix", "-init_hw_device"))
+
+    command = reels.encode_command([plain[0], streams_with(plain[1], color_transfer=HLG)], Path("out.mp4"))
+    graph = command[command.index("-filter_complex") + 1].split(";")
+    assert command.index("-init_hw_device") < command.index("-i")
+    assert "scale_vt" not in graph[0] and "in_color_matrix=smpte170m:out_color_matrix=bt709" in graph[0]
+    assert "scale_vt=color_matrix=bt709:color_primaries=bt709:color_transfer=bt709" in graph[2]
+    assert all("setparams=color_primaries=bt709:color_trc=bt709" in graph[i] for i in (0, 2))
+
+
+def test_an_hdr_clip_that_leaves_a_color_tag_out_is_read_as_bt2020(video):
+    plain = reels.check_pieces(whole(video))[0]
+    whole_tags = streams_with(plain, color_transfer=HLG, color_primaries="bt2020", color_space="bt2020nc")
+    assert reels.to_standard_color(whole_tags) == reels.TO_STANDARD_COLOR
+    bare = streams_with(plain, color_transfer=PQ, color_primaries="unknown")
+    assert reels.to_standard_color(bare) == "setparams=color_primaries=bt2020:colorspace=bt2020nc," + reels.TO_STANDARD_COLOR
+    wide = streams_with(plain, color_space="bt2020nc")  # not HDR: nothing says what its other tags should be
+    assert reels.to_standard_color(wide) == reels.TO_STANDARD_COLOR
+
+
+def test_an_hdr_clip_without_its_primaries_still_comes_out_in_standard_color(jobs, tmp_path):
+    bare = make_hdr_clip(tmp_path / "bare.mov", color=HLG_PATCH, primaries="unknown", seconds=2)
+    assert color_tags(bare) == ("bt2020nc", HLG, "")
+    result = run_assemble(jobs, "bare", whole(bare))
+    assert color_at(Path(result["reel"]), 1.0) == pytest.approx(HLG_PATCH_SHOWN, abs=8)
+    assert color_tags(Path(result["reel"])) == BT709
+
+
+@pytest.mark.parametrize("tagged, size, read_as", [
+    ("bt709", (320, 240), "bt709"), ("bt470bg", (1920, 1080), "bt470"), ("", (1920, 1080), "bt709"),
+    ("unknown", (1280, 720), "bt709"), ("", (720, 576), "smpte170m"),
+])
+def test_a_plain_clip_that_does_not_name_its_matrix_is_read_as_players_read_it(video, tagged, size, read_as):
+    piece = streams_with(reels.check_pieces(whole(video))[0], color_space=tagged, width=size[0], height=size[1])
+    assert reels.matrix_of(piece) == read_as
+
+
+def test_whether_this_ffmpeg_can_convert_is_read_from_its_filter_list():
+    def listing(*names):
+        lines = "Filters:\n" + "".join(f" .. {name}            V->V       Does something.\n" for name in names)
+        return lambda *_a, **_kw: subprocess.CompletedProcess([], 0, stdout=lines, stderr="")
+
+    def no_ffmpeg(*_a, **_kw):
+        raise FileNotFoundError("ffmpeg")
+
+    assert reels.can_convert_color(run=listing("scale", "scale_vt", "tonemap")) is True
+    assert reels.can_convert_color(run=listing("scale", "scale_vtb", "tonemap")) is False
+    assert reels.can_convert_color(run=no_ffmpeg) is False
+
+
+def test_an_hdr_clip_is_refused_in_plain_words_when_this_ffmpeg_cannot_convert_it(video):
+    def hdr(path):
+        return dataclasses.replace(reels.probe_streams(path), color_transfer=HLG)
+
+    with pytest.raises(StudioError, match=r"talk\.mp4 was recorded in HDR.*no scale_vt filter.*brew install ffmpeg.*avconvert"):
+        reels.plan_reel("no converter", whole(video), streams_of=hdr, can_convert=lambda: False)
+    assert reels.plan_reel("no converter", whole(video), can_convert=lambda: False).how == "copy"  # a plain clip never asks
+
+
+def test_a_failed_join_with_an_hdr_clip_says_what_to_try_and_leaves_nothing_behind(video):
+    def hdr(path):
+        return dataclasses.replace(reels.probe_streams(path), color_transfer=HLG)
+
+    plan = reels.plan_reel("fails in hdr", whole(video), streams_of=hdr, can_convert=lambda: True)
+    said = {}
+
+    def broken(cmd, out, *, check, **_kw):
+        said["check"] = check
+        out.write_bytes(b"half")
+        raise StudioError("ffmpeg could not join the clips")
+
+    with pytest.raises(StudioError, match="could not join"):
+        reels.builder(plan, run=broken)(JobHandle())
+    assert "turning talk.mp4 from HDR into standard color is what failed" in said["check"] and "avconvert" in said["check"]
+    assert list(plan.reel.parent.iterdir()) == []
+
+
+def test_an_hdr_clip_joined_with_a_plain_one_comes_out_in_standard_color(jobs, tmp_path):
+    blue = make_tone_clip(tmp_path / "blue.mp4", color="blue", frequency=3000, seconds=4)
+    hdr = make_hdr_clip(tmp_path / "phone.mov", color=HLG_PATCH)
+    before = (hdr.read_bytes(), hdr.stat().st_mtime_ns)
+    assert color_tags(hdr) == ("bt2020nc", HLG, "bt2020")
+    pieces = [{"clip": str(blue), "start": 0.5, "end": 3.3}, {"clip": str(hdr), "start": 0.52, "end": 2.6}, {"clip": str(blue)}]
+
+    result = run_assemble(jobs, "phone and camera", pieces)
+    reel = Path(result["reel"])
+
+    assert result["how"] == "encode"
+    assert color_tags(reel) == BT709 and reels.probe_streams(reel).pix_fmt == "yuv420p"
+    assert color_at(reel, result["pieces"][1]["reel_start"] + 1) == pytest.approx(HLG_PATCH_SHOWN, abs=8)
+    # The plain clip looks as it did: both read by the same reader, the clip by its size and the reel by its bt709 tag.
+    assert color_at(reel, 1.0) == pytest.approx(color_at(blue, 1.0), abs=6)
+    # The pieces still start where the sequence file says, to the frame.
+    assert [(p["reel_start"], p["reel_end"]) for p in result["pieces"]] == [(0.0, 2.8), (2.8, 4.88), (4.88, 8.88)]
+    assert picture_changes(reel) == pytest.approx([2.8, 4.88], abs=0.001)
+    assert stream_seconds(reel)["video"] == pytest.approx(8.88, abs=0.03)
+
+    assert [p.get("converted_from") for p in result["pieces"]] == [None, "HDR", None]
+    assert "converted_from" not in result["pieces"][0]
+    assert result["note"].startswith(reels.USE_THE_REEL)
+    assert "phone.mov was recorded in HDR; the joined video shows it in standard color." in result["note"]
+    record = reels.read_sequence(Path(result["sequence_file"]))
+    assert [p.get("converted_from") for p in record["pieces"]] == [None, "HDR", None]
+    assert set(reels.reel_for(reel)["pieces"][1]) == {"clip", "reel_start", "reel_end"}
+
+    # The clip is as it was, and the reel's folder holds the reel and its sequence file and no working copy.
+    assert (hdr.read_bytes(), hdr.stat().st_mtime_ns) == before
+    assert sorted(p.name for p in reel.parent.iterdir()) == sorted([reel.name, Path(result["sequence_file"]).name])
+    assert sorted(p.name for p in tmp_path.iterdir() if p.is_file()) == ["blue.mp4", "phone.mov"]
+
+    again = tools.assemble("phone and camera", pieces, jobs=jobs)
+    assert again == {**result, "status": "exists"}
+
+
+@pytest.mark.parametrize("transfer, shown", [(HLG, 98), (PQ, 185)])
+def test_two_hdr_clips_alone_are_encoded_into_standard_color(jobs, tmp_path, transfer, shown):
+    """Mid grey, 0x808080: left as it was it reads about 126 in both; macOS shows 98 for HLG and 185 for PQ."""
+    one = make_hdr_clip(tmp_path / "one.mov", color="0x808080", transfer=transfer, seconds=2)
+    two = make_hdr_clip(tmp_path / "two.mov", color="0x808080", transfer=transfer, frequency=3000, seconds=2)
+
+    result = run_assemble(jobs, "phone only", whole(one, two))
+    reel = Path(result["reel"])
+
+    assert result["how"] == "encode"
+    assert color_tags(reel) == BT709 and reels.probe_streams(reel).pix_fmt == "yuv420p"
+    for piece in result["pieces"]:
+        assert color_at(reel, piece["reel_start"] + 1) == pytest.approx((shown, shown, shown), abs=6)
+        assert piece["converted_from"] == "HDR"
+    assert "one.mov, two.mov were recorded in HDR; the joined video shows them in standard color." in result["note"]
+    assert tone_changes(reel) == pytest.approx([2.0], abs=0.03)
+
+
+def test_a_reel_with_no_hdr_clip_says_nothing_about_color(video, jobs):
+    result = run_assemble(jobs, "plain", [{"clip": str(video), "end": 4}])
+    assert result["note"] == reels.USE_THE_REEL
+    assert set(result["pieces"][0]) == {"clip", "start", "end", "reel_start", "reel_end"}
+    assert "converted_from" not in reels.read_sequence(Path(result["sequence_file"]))["pieces"][0]
+
+
 def test_a_copied_reel_whose_pieces_come_out_wrong_is_built_again_as_an_encode(video, tmp_path):
     plan = reels.plan_reel("second try", whole(video, second_copy(video)))
     assert plan.how == "copy"

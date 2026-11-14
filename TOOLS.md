@@ -248,7 +248,8 @@ video like any other, so a reel that moved keeps its project the same way.
 that are not letters or digits turned into one `-`. `id` is the first 8 hex
 characters of a sha1 over the name and, for each piece, the resolved clip
 path, the clip's size in bytes, its modified time in nanoseconds, and the
-piece's start and end. The same sequence of clips gives the same file name.
+piece's start and end, and one fixed mark when a clip of the sequence is
+turned into standard color (see `assemble`). The same sequence of clips gives the same file name.
 A different sequence gives a different one. A reel is never overwritten, and Studio never deletes one. The folder holds a
 full copy of the footage, so it grows with every different sequence; the
 creator clears it by deleting the folder or a reel and its `.reel.json`.
@@ -400,12 +401,25 @@ reel: the running sum of the piece lengths. `reel` is an absolute path.
 `sequence_file` is the path of the `.reel.json` file. `how` is `copy` or
 `encode`. `note` says: use `reel` as `video_path` for every other tool.
 
+A piece whose clip was recorded in HDR or in wide color also carries
+`converted_from`, `"HDR"` or `"wide color"`. The reel shows that clip in
+standard color (bt709), so it matches the other clips; see "Clips in HDR or
+wide color" below. Other pieces have no such field. When any piece carries it,
+`note` adds a sentence to pass on, such as "phone.mov was recorded in HDR; the
+joined video shows it in standard color. The clip itself was not changed."
+Tell the creator in one sentence. The sequence file's piece carries the same
+field, so an `exists` answer says the same.
+
 Calling it twice with the same clips (same paths, sizes, modified times,
 starts and ends) is safe. The second call answers `exists` and writes nothing.
 
 Errors say what was wrong, in plain words: a clip is missing, a file is not a
 video, a clip has no sound, `start` or `end` is out of range or `end` is not
-after `start`, the name is not allowed, or the list is empty. If a reel file
+after `start`, the name is not allowed, or the list is empty. A clip in HDR
+or wide color on a Mac whose ffmpeg has no `scale_vt` filter is refused
+before anything is built, and the message says to install the current ffmpeg
+with Homebrew or to make a standard color copy of the clip with `avconvert`.
+If a reel file
 sits in the folder with no sequence file, the call fails and names the file.
 It was not finished, and the tool will not build over it.
 
@@ -420,7 +434,9 @@ It was not finished, and the tool will not build over it.
   the first nine but not on a time base or the audio profile can't be copied
   together: the second clip's time stamps would be read in the wrong unit. So
   one piece with a `start` or an `end`, or one clip that differs in any of
-  these, makes the whole reel an encode.
+  these, makes the whole reel an encode. So does one clip in HDR or wide
+  color, and so do two such clips alone: a copy would keep the picture as it
+  was recorded.
 - **Encode.** Otherwise one ffmpeg run joins them. Each piece is trimmed and
   its timestamps reset, then scaled and padded to the first clip's size and
   set to the first clip's frame rate, and its sound is resampled to 48 kHz
@@ -434,6 +450,31 @@ It was not finished, and the tool will not build over it.
   preset medium, CRF 16, yuv420p, with AAC at 256k and `+faststart`. CRF 16
   because this file is encoded again at export. A clip with non-square
   pixels is scaled as if its pixels were square.
+- **Clips in HDR or wide color.** A phone records HDR by default, and its
+  picture written out as it is looks flat and grey beside a camera's. A clip
+  is HDR when ffprobe gives its `color_transfer` as `arib-std-b67` (HLG) or
+  `smpte2084` (PQ). It is wide color when it is not HDR and its
+  `color_primaries` is `bt2020` or its `color_space` is `bt2020nc` or
+  `bt2020c`. A sequence with such a clip is always an encode, and the reel is
+  standard color throughout: 8-bit, with `color_space`, `color_transfer` and
+  `color_primaries` all `bt709`. In the same ffmpeg run, before the piece is
+  scaled, its frames go to macOS (`hwupload`, then `scale_vt` with matrix,
+  primaries and transfer set to bt709, then `hwdownload`), which converts
+  them the way QuickTime and `avconvert` do. An HDR clip that leaves its
+  primaries or its matrix out is read as BT.2020 first, because macOS leaves
+  a frame alone when a tag is missing. The other pieces of that reel are
+  brought to the bt709 matrix by the scale they already go through (a clip
+  that names no matrix is read as bt709 when it is HD and as smpte170m when
+  it is smaller, the way players read it) and every piece is tagged bt709.
+  The reel's range, full or video, is still the one ffmpeg settles on for the
+  join, as in any encode. No working copy is made, the clip is not changed,
+  and the piece times are the same whole frames as in any encode. This needs
+  the `scale_vt` filter, which Homebrew's ffmpeg has from 6.1 on. A sequence
+  with no such clip is built exactly as before and its tags are whatever the
+  clips carry. The id of a sequence with such a clip includes a mark of the
+  conversion, so a reel joined by an earlier version of Studio, with the HDR
+  picture written as it was, is not answered as `exists`: the sequence is
+  built again, in standard color, beside it.
 - The job is built to its own `<slug>-<id>.<random>.partial.mp4`, then moved
   to the reel's name with a hard link, which fails if the name is taken
   (a disk without hard links gets an exclusive create of the reel's name, which

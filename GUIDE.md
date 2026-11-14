@@ -36,7 +36,7 @@ Struck words say who took them out: dim for the pace, red for Claude, teal for y
 
 - A Mac with Apple Silicon (M1 or newer). Intel Macs aren't supported, and neither are Windows or Linux. The plugin's package list is locked to Apple Silicon, so it won't install anywhere else.
 - Claude Code 2.1.78 or newer. That release added the plugin data folder, `${CLAUDE_PLUGIN_DATA}`, where the plugin builds its Python environment. Without it the server fails to start, or builds the environment in the wrong place.
-- `uv` and `ffmpeg`, version 5 or newer. Homebrew installs both. Run `brew install uv ffmpeg`.
+- `uv` and `ffmpeg`, version 5 or newer. Homebrew installs both. Run `brew install uv ffmpeg`. Joining a clip recorded in HDR needs ffmpeg 6.1 or newer, which is what Homebrew installs today.
 - About 4 GB of free disk. The Python packages take about 950 MB. The two models take 2.85 GB.
 - The two models: Parakeet (2.47 GB) for the transcript and wav2vec 2.0 (0.38 GB) for word timing. They download the first time you transcribe a video, and only after you say yes. The plugin works without the word timing model and cuts less. [The models](#the-models) has the sources and licenses.
 
@@ -154,7 +154,7 @@ You can move a video to another folder, or copy your Lumr folder and your videos
 
 Lumr learns from the cuts you put back, the cuts you mark "Good cut" or "Wrong cut" on the review page, and the words you cut or bring back. It works that out from your saved edits, on your Mac, and keeps only a note in `taste.json` of what you asked it to forget. To forget something, ask Claude: one word, one kind of cut, or everything. Your videos and edits don't change.
 
-Clips you join go to `~/Lumr/studio/reels/<video name>/`: the joined video, and a small `.reel.json` file that records which seconds came from which clip. The joined video is a second full copy of your footage, so it takes as much disk space as the clips do. Nothing there is overwritten, Studio never deletes it, and your clips are never changed. To get the space back, delete the folder yourself. A file there ending in `.partial.mp4` is a join still running or one that was cut off, and is safe to delete once no `ffmpeg` is running.
+Clips you join go to `~/Lumr/studio/reels/<video name>/`: the joined video, and a small `.reel.json` file that records which seconds came from which clip. The joined video is a second full copy of your footage, so it takes as much disk space as the clips do. Nothing there is overwritten, Studio never deletes it, and your clips are never changed. A clip recorded in HDR, which is how a phone records unless you turn it off, is shown in standard color in the joined video, so it matches your other clips and doesn't come out flat and grey. Claude tells you when that happened. To get the space back, delete the folder yourself. A file there ending in `.partial.mp4` is a join still running or one that was cut off, and is safe to delete once no `ffmpeg` is running.
 
 The transcript itself stays beside your video, as `<video>.words.json`. It's the only file the plugin puts in your video's folder. Measured silences are cached under `~/Lumr/media_cache/`. The Python environment lives in the plugin's data folder, and Claude Code deletes it when you uninstall the plugin. The models stay in the shared caches (`~/.cache/huggingface` and `~/.cache/torch`) and survive an uninstall.
 
