@@ -174,7 +174,7 @@ When one cut covers a whole take and a broken-off try, use `repeat`.
 
 **Slates and "let's start over" lines go.** They were for you and the camera, not the viewer.
 
-**Asides that are whole thoughts stay.** A joke, a story beat, a thing only this creator would say. If one sits between two takes, cut around it: two cuts, not one. List every aside you kept, so the creator knows you saw it. An aside that is a half sentence, or the creator talking to themselves, goes with the take it sits in.
+**Asides that are whole thoughts stay.** A joke, a story beat, a thing only this creator would say. If one sits between two takes, cut around it: two cuts, not one. List every aside you kept, so the creator knows you saw it. An aside that is only a half sentence goes with the take it sits in. One you can't tell from a slate stays, and goes on that list.
 
 **Long silences go, and you list their places.** When the creator stops talking for several seconds and the recording keeps running, they usually left room for b-roll. Before you cut one, call `look` at its start and read the sound wave and the pictures. A silence can be a creator showing something to the camera, a laugh, or a sound you can't hear in the transcript. Keep any stretch where the words around it point at something shown ("look at this", "see"), or where the wave is loud with no word on it, and mention it to the creator. Cut the rest as `other`. Do this before you save the cut that removes it: with no cut near, `look` shows the plain footage, and once the silence is cut it shows the join and not what was inside. The creator needs to know where it was, so for each one keep a note of its reel time. After you save the draft in step 6, find where it falls in the edited video: call `look` with the silence's start time. The answer's `edited_at` is that place.
 
@@ -184,8 +184,8 @@ When one cut covers a whole take and a broken-off try, use `repeat`.
 
 Now the video has one take of each line. The rest is the same job as a tight cut, so go to the tight-cut skill and follow it from its step 4.
 
-- **Step 4, decide the cuts.** The retakes are done. Don't cut them twice. Look for what is left: filler runs, dead air, tangents. Set `auto_tighten` and the `pace` from what the creator asked for. If they didn't say how tight they want it, ask for that and nothing else. `set_edit` takes a `pace` only together with `auto_tighten` on. With it off, a `pace` is an error, and there are no automatic trims at all. Read "Before you turn automatic trimming on" below first.
-- **Step 5, pick the ums and the filler likes.** Call `find_words` with `["um"]` and read each line by that step's rules: an um that starts a sentence, or has about half a second of quiet or more on at least one side, goes. An um tucked between words with a short gap on both sides stays, and so does any you are unsure of. Leave some in. Your retake cuts are saved by now. A line that reads `OPENS A SENTENCE AFTER A CUT` is an um at the head of what a cut keeps: it goes. Then call `find_words` with `["like"]` and read each line. Check each pick against the script before you save it. A "like" that is part of a scripted line, such as "Like I could not just express myself", is not filler. Leave it in. If the creator says they don't want likes cut, leave every "like" in and say so.
+- **Step 4, decide the cuts.** The retakes are done. Don't cut them twice. Look for what is left: filler runs, dead air, padding. Set `auto_tighten` and the `pace` from what the creator asked for. If they didn't say how tight they want it, ask for that and nothing else. `set_edit` takes a `pace` only together with `auto_tighten` on. With it off, a `pace` is an error, and there are no automatic trims at all. Read "Before you turn automatic trimming on" below first.
+- **Step 5, pick the ums and the filler likes.** Call `find_words` with `["um"]` and read each line by that step's rules: an um that starts a sentence, or has about half a second of quiet or more on at least one side, goes. An um tucked between words with a short gap on both sides stays, and so does any you are unsure of. Leave some in. Your retake cuts are saved by now. A line that reads `OPENS A SENTENCE AFTER A CUT` is an um at the head of what a cut keeps: it goes. Then, only if the creator asked for likes to go, call `find_words` with `["like"]` and read each line. Check each pick against the script before you save it. A "like" that is part of a scripted line, such as "Like I could not just express myself", is not filler. Leave it in. If they didn't ask, leave every "like" in and say so.
 - **Step 6, save a draft and check it.** Call `set_edit`. Read `rejected`, `adjusted`, `joins`, and `picks`. Fix what is flagged, up to three times.
 
 **Before you turn automatic trimming on, check it against the laughs.** No automatic trim takes any part of a laugh or of a sound of a second or more that the transcript has a line for. A laugh with no line is a pause to it, and it can cut one the creator got on purpose. Do this with the list of laughs you made in step 3:
@@ -211,13 +211,14 @@ On joins that sit on a clip boundary, call `look` once. The room sound or the li
 Show these, in this order:
 
 1. **The take map** as a table, one row per script line, with these columns: the line, the takes found, the take kept, and why. Name a take by its clip and its first words, such as "clip 2, 'Last spring I started'". Use the `clock` value from the cuts for any time you show. Never work out minutes and seconds yourself.
-2. **The lengths.** The reel's length and the new length.
-3. **The asides you kept**, each in a few words with its time.
-4. **Script lines that were never said**, if any.
-5. **Where the silences were**, if you cut any. For each, the reel time and its place in the edited video, so the creator knows where to put b-roll.
-6. **Any join still flagged**, in plain words, and a `long_jump` on a retake cut only as "expected": "The cut at 4:12 ends mid-sentence. I kept it since the next take restarts the thought. Listen to that one."
-7. **The ums and the likes**, in a sentence or two each. For the ums: how many you found, how many go, and that the rest are the ones inside sentences, left on purpose. For the likes: how many times the word is said, how many you picked as filler, and how many stay in.
-8. **Automatic trimming and the laughs**, if a trim sat over a laugh: the laughs' times, and that they should press Keep on those spots on the page before they pick a pace there.
+2. **Every other cut that removes words**, numbered and shown the way `what-to-cut` shows a change.
+3. **The lengths.** The reel's length and the new length.
+4. **The asides you kept**, each in a few words with its time.
+5. **Script lines that were never said**, if any.
+6. **Where the silences were**, if you cut any. For each, the reel time and its place in the edited video, so the creator knows where to put b-roll.
+7. **Any join still flagged**, in plain words, and a `long_jump` on a retake cut only as "expected": "The cut at 4:12 ends mid-sentence. I kept it since the next take restarts the thought. Listen to that one."
+8. **The ums and the likes**, in a sentence or two each. For the ums: how many you found, how many go, and that the rest are the ones inside sentences, left on purpose. For the likes: that every one is left in, or, if they asked for likes to go, how many times the word is said, how many you picked as filler, and how many stay in.
+9. **Automatic trimming and the laughs**, if a trim sat over a laugh: the laughs' times, and that they should press Keep on those spots on the page before they pick a pace there.
 
 Then offer the page, and wait for a yes before you open it. A browser window the creator didn't ask for is a bad surprise. The offer is the one line the creator must not miss, so it goes last, in this box, exactly as drawn and inside a code block so it keeps its shape:
 

@@ -68,7 +68,7 @@ Call `get_edit`. If it carries `creator`, the creator has tuned this video on th
 
 If `creator` carries `rated`, they marked some of your cuts on the page: `rated.good` are cuts they said were right, and `rated.bad` are cuts they said were wrong. Never propose a `rated.bad` cut on this video again, even one you'd reword. Read `rated.good` as a sign the kind of cut is right for them.
 
-If `get_edit` carries `taste`, read its `lessons`. They come from this creator's changes on their other videos. Let them shape your proposal: propose fewer cuts of a kind they usually put back, pick more of a filler word they cut by hand, never cut a word they keep bringing back, and start from the pace they keep choosing if they have no usual saved. This video's own `creator` changes and the spine rules always win over taste. When you apply a lesson, tell the creator in one short line which one. For example: "You usually put back restated points, so I've left most of them in."
+If `get_edit` carries `taste`, read its `lessons`. They come from this creator's changes on their other videos. Let them shape your proposal: propose fewer cuts of a kind they usually put back, pick more of a filler word they cut by hand, never cut a word they keep bringing back, and start from the pace they keep choosing if they have no usual saved. This video's own `creator` changes and the spine rules always win over taste. When you apply a lesson, tell the creator in one short line which one. For example: "You keep choosing the fast pace, so I started there."
 
 `taste.lessons` may also say what they marked good or wrong ("Marked 4 restated-point cuts (repeat) good across 2 videos."). Propose a kind they rate good a bit more confidently. Propose a kind they rate wrong less often, and only where you're sure.
 
@@ -105,21 +105,20 @@ Think of the video as having a spine: the parts the story can't lose.
 - Emotional beats, such as a pause before a hard truth.
 - Asides that sound like the creator. These can look like dead weight in a transcript and are the opposite.
 
-**Optional.** Examples, side stories, and elaborations that support the spine, and a point the creator makes again later in the video. Leave these in unless the creator asked for a shorter video. Then propose them, each shown as it plays now and as it would play after, and cut only the ones they say.
+**Optional.** Examples, side stories, elaborations and tangents, and a point the creator makes again later in the video. Leave these in unless the creator asked for a shorter video. Then propose them the way `what-to-cut` shows a change, and cut only the ones they pick.
 
 **Safe to cut, once clearly identified.**
 
 - False starts and restarts. Keep the clean version.
 - Runs of filler: several "you know" or "I mean" in a row. One filler word inside a natural sentence is never a cut of its own. A single "um" or "like" is a pick (step 5).
 - Dead air well beyond a natural breath.
-- Tangents that don't serve the spine and aren't funny or personal.
-- Repeated takes. Keep the last complete take unless an earlier one is clearly stronger.
-- Padding: a tail that says its own sentence again and adds nothing. The test is in `what-to-cut`. Expect few.
+- Repeated takes. `what-to-cut` says which one plays.
+- Padding, by the test in `what-to-cut`.
 
 **Where a cut starts and ends.**
 
 - Cut whole sentences. Use the start and end times printed on the transcript lines. Those are sentence boundaries.
-- Cut inside a sentence only to fix a false start or a retake, where the words after the cut finish the sentence the words before it began.
+- Cut inside a sentence only to fix a false start or a retake, where the words after the cut finish the sentence the words before it began, or to take padding off its end, where the words before the cut already finish it.
 - Read the join aloud in your head: the last kept words, then the first kept words after. If it doesn't read as one person talking, move the cut.
 - Removing 20 seconds or more can lose the thread. Check that what follows still makes sense to someone who never heard the removed part.
 
@@ -127,9 +126,9 @@ Think of the video as having a spine: the parts the story can't lose.
 
 | `kind` | When |
 |---|---|
-| `repeat` | the creator says again what they already said: a restated point, a second take |
+| `repeat` | an earlier take, padding, or a point made again that the creator chose to lose |
 | `false_start` | a sentence started and dropped, then started again |
-| `off_topic` | a tangent, a plug, an aside that doesn't serve the video |
+| `off_topic` | a tangent or a side story the creator chose to lose |
 | `other` | anything else: dead air, a cough, a throat clear |
 
 Choose it from what you meant by the cut, not from words in your reason. If a line looks like a repeat but sets up a joke, it's spine, not a cut.
@@ -138,7 +137,7 @@ Choose it from what you meant by the cut, not from words in your reason. If a li
 
 | Good | Not this |
 |---|---|
-| You make the budget point again, a minute after the first time. | Redundant restatement of the budget point. |
+| The end of this line says again that the kitchen was cold. | Redundant restatement of the cold kitchen. |
 | This asks viewers to watch your older videos, and it breaks up the story. | Back-catalog plug, pitch tail before the CTA. |
 
 **Say it the way the page does.** Your choices are cuts, and so are the ones the creator makes by hand. The page has no name for the small automatic ones: it says what goes, such as long pauses, filler words, and stutters. Say those in chat too. The tools call them trims; keep that word out of what the creator reads.
@@ -206,7 +205,7 @@ Give each pick a few words of reason, such as "starts the sentence" or "a second
 
 No rule can tell "I like jazz" from "divide this into like three sections", so the pace never takes a "like". You can tell, by reading.
 
-If the creator says they don't want likes cut, leave every "like" in. Skip the rest of this part, pick none, and say so when you present the plan.
+Pick likes only when the creator asked for likes to go. Otherwise leave every "like" in: skip the rest of this part, pick none, and say so when you present the plan.
 
 Call `find_words` with `["like"]`. It lists every place the word is said, with six words either side. Read each line and decide.
 
@@ -255,12 +254,13 @@ For the two or three cuts you're least sure of, call `look` with the cut's start
 
 ## 7. Present the plan in chat
 
-Write a numbered cut list in the chat. For each cut, or each group of small trims on one line:
+Write a numbered cut list in the chat. Show each cut that removes words the way `what-to-cut` shows a change: the line as it plays now, with the words that go in brackets, and as it would play after. With it:
 
-- Start and end time in the source video.
+- Its time in the source video.
 - Length removed.
-- The words removed, quoted briefly.
 - A plain reason.
+
+A cut with no words in it, or a group of small ones, is one line: the time and the length.
 
 Then:
 
@@ -268,7 +268,7 @@ Then:
 - Any join still flagged, in plain words: "Cut 7 ends mid-sentence. I kept it since the next line restarts the thought. Listen to that one."
 - Jokes you noticed and kept, in one line, so the creator knows you saw them.
 - The ums, in one or two sentences: how many you found, how many go, and that the rest are the ones inside your sentences, left on purpose. Name where the kept ones are when there are only a few, so the creator can overrule you. Such as: "I found 11 ums. 6 start a sentence or sit beside a pause, so they go. The other 5 are tucked inside sentences, at 2:40, 7:15 and three more places, and I left them in so the sentences still flow."
-- The likes, in one or two sentences: how many times the word is said, how many you picked as filler, and how many stay in. Such as: "You say 'like' 112 times. I picked 41 that are filler; the other 71 mean something, so they stay." If the creator asked for no likes cut, say that you left every one in.
+- The likes. If you picked none, one sentence: every "like" is left in, and you can pick the filler ones if they ask. If they asked for likes to go, one or two sentences: how many times the word is said, how many you picked as filler, and how many stay in. Such as: "You say 'like' 112 times. I picked 41 that are filler; the other 71 mean something, so they stay."
 - The switch, once, for both: the page has one switch for all of your picks (Ums and likes), and a double-click brings any one back or cuts one you kept.
 
 Use the `clock` value on each cut for the times you show. Never work out minutes and seconds yourself.
@@ -305,7 +305,7 @@ If they'd sooner answer in chat, skip the page.
 
 They may answer in chat, on the page, or both.
 
-- **In chat.** "Put back 4" drops that cut. "Tighten the intro" means look at the opening again and cut harder there. Call `set_edit` with the new list, check `joins` again, and show what changed.
+- **In chat.** "Put back 4" drops that cut, and `what-to-cut` ("When the creator pushes back") says what it means for your other cuts. "Tighten the intro" asks for shorter pauses there: cut the waits between its sentences, and propose any cut of words. Call `set_edit` with the new list, check `joins` again, and show what changed.
 - **On the page.** When they say they're done, call `get_edit` and read `creator`. Tell them what you saw in plain words: the pace they chose, the switches they turned off, the cuts they put back, the cuts they marked good or wrong, the parts they kept, the words they brought back, and the cuts they made themselves. Then say what you take from it in one sentence, such as "You put back both repeated lines before jokes, so I'll leave setups alone."
 
 Their changes are already in the saved edit. If you call `set_edit` again, leave `pace` out so their pace stays, and don't send a cut they put back.

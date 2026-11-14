@@ -15,7 +15,7 @@ Lumr Studio is built around the join, where one kept word lands next to the next
 - **Pauses sized to where they fall.** Most tools delete pauses or cut every gap to one length. Lumr leaves the longest pause between sentences, a shorter one at a comma and the shortest inside a clause, so the edit keeps your rhythm.
 - **A reason for every cut.** Claude reads the whole take before it cuts anything, and every cut on the plan says why.
 - **Your jokes stay funny.** Laughs are picked out of the audio, and Claude keeps the punchline, the setup before it and the laugh after it.
-- **It knows which "like" is filler.** Claude reads each one. "I like jazz" stays, "into like three sections" goes, and when it's unsure the word stays.
+- **It knows which "like" is filler.** Ask for your likes to go and Claude reads each one. "I like jazz" stays, "into like three sections" goes, and when it's unsure the word stays.
 
 ### The standards, done properly
 
