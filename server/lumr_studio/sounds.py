@@ -1,32 +1,59 @@
-"""Tell likely laughs from hesitations among the transcript's sound events.
+"""Find the sounds between a take's words, and tell laughs from hesitations among them.
 
-Hammy marks every voiced sound in a gap between words as ``[vocalization]``.
-Some are the creator laughing after a joke; most are a breath, an "uhh", or
-the tail of a word. Claude reads the packed transcript without hearing it, so
-without a label it cuts jokes short and trims the pause a laugh needs.
+A sound is a transcript entry of ``type: "event"``: a laugh, a giggle, a
+breath, an "uhh". Claude reads the packed transcript without hearing it, and
+the pace reads the gap a sound sits in as a pause, so a sound that is not in
+the transcript gets cut like silence. Three steps, each in this module:
 
-The rule, measured on a 21 minute talking-head video with 98 events (the
-numbers behind each constant are next to it):
+1. Finding (``find_sounds``). The speech model writes words only. Its own
+   check for sounds (``speech/transcribe._detect_vocalizations``) loads the
+   video with librosa, which from 1.0 on opens only what libsndfile opens:
+   no mp4, no mov. The load fails, the check swallows the failure and
+   answers "no sounds", so every transcript made on Python 3.12 or later,
+   where 1.0 is the locked version, has none. Where the load does work the
+   check wants a pitch, which drops a breathy laugh. So the server looks
+   itself, with numpy and ffmpeg alone: the loudness of the whole take,
+   20 ms at a time, and every stretch between two words that is clearly
+   louder than the room becomes a sound. The numbers behind each constant
+   are next to it.
+2. Labelling (``classify_events``, ``measure_events``). The rule, measured on
+   two talking-head videos:
 
-* A laugh is a train of short bursts, about 4 to 5 a second, and breathy: the
-  "h" between the bursts has no pitch, so under half the sounding time is
-  voiced. A hesitation is one steady voiced blob (voiced share 0.8 to 1.0).
-* A laugh follows a sentence end, the punchline.
+   * A laugh is a train of short bursts, about 4 to 5 a second. Some laughs
+     are breathy (the "h" between the bursts has no pitch, so under half the
+     sounding time is voiced), a giggle is pitched most of the way through.
+     Neither is a steady sound: a hesitation is one voiced blob.
+   * A laugh follows a sentence end, the punchline.
 
-``classify_events`` applies the rule. ``measure_events`` gets the numbers from
-the video with ffmpeg and numpy. ``load_or_measure_labels`` caches the result
-beside the project, and ``protected_spans`` turns laughs into the source spans
-an automatic trim must leave alone.
+3. Protecting (``protected_spans``, ``whole_spans``, ``is_filler``). The rule
+   every automatic cut goes by:
+
+   * A laugh, likely or possible, and any sound that lasts
+     ``LONG_SOUND_SECONDS`` or more is never taken, in whole or in part, by a
+     pause cut, by the Filler words switch, by the Stutters switch, or by an
+     edge of one of Claude's cuts that the server moved. Only a cut that was
+     asked for over the whole of it takes it out.
+   * A short plain sound (a breath, an "uhh", under a second and no laugh)
+     is never taken in part, and no pause cut is planned over one. The
+     Filler words switch takes it whole when it is a held hesitation
+     (``is_filler``): one steady voiced sound, no louder than the speech
+     around it. A breath stays, and so does anything in bursts or louder
+     than the speech.
+
+``load_or_measure_labels`` caches the labels beside the project.
 
 Without audio measures the labels fall back to length and position, which can
-only ever say "possible laugh". A wrong laugh label protects dead air, so the
-rule prefers missing a laugh to inventing one.
+only ever say "possible laugh". A wrong laugh label protects dead air and a
+missed one lets a cut through a laugh, so where the measures leave room for
+doubt the rule calls it a laugh.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import subprocess
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -35,8 +62,8 @@ import numpy as np
 
 from lumr_studio import word_times
 from lumr_studio.errors import StudioError
-from lumr_studio.project import Project, write_json_atomic
-from lumr_studio.transcript import _is_sentence_end, is_event
+from lumr_studio.project import Project, now_iso, write_json_atomic, write_text_atomic
+from lumr_studio.transcript import EVENT_TYPE, _is_sentence_end, is_event, load_transcript
 
 AudioMeasure = Callable[[Path, list[tuple[float, float]]], list[dict]]
 Decoder = Callable[[Path, float, float, int], np.ndarray]
@@ -230,6 +257,239 @@ def measure_events(
     return [measure_samples(decode(video, float(a), float(b), SAMPLE_RATE), SAMPLE_RATE) for a, b in spans]
 
 
+# ── Finding ───────────────────────────────────────────────────────────────────
+
+# The word every sound of the transcript carries, and what a sound found here
+# says about itself, so a second look can tell its own finds from the speech
+# model's and replace them.
+SOUND_WORD = "[vocalization]"
+FOUND_BY = "found_by"
+BY_LOUDNESS = "loudness"
+# A found sound also says how far its loudest window stands over the take's
+# loud speech, in dB (under it when negative). ``is_filler`` reads it.
+OVER_SPEECH = "over_speech_db"
+
+# Loudness of the take: one level for every 20 ms, windows side by side. A
+# laugh burst lasts 80 to 150 ms, four windows or more.
+FIND_WINDOW_SECONDS = 0.020
+# The room's own noise is the level the quietest tenth of the take sits
+# under, and loud speech the level the loudest tenth of the time inside
+# words sits over. On a 27 minute take in a quiet room they were -58 and
+# -13 dB.
+NOISE_PERCENTILE = 10.0
+SPEECH_PERCENTILE = 90.0
+# A window sounds when it is no more than this far under loud speech: as loud
+# as soft speech. On that take the line fell at -30 dB, where the 14 sounds
+# marked by hand between its words all stood out of their gaps, each within
+# 30 ms of the marks, laughs and giggles peaking -7 to -10 dB and
+# half-second "mm"s -14 to -17. A breath sits 25 dB or more under speech
+# and stays out.
+BELOW_SPEECH_DB = 17.0
+# In a loud room the line rises with the noise: a sound stands this far over
+# the room or it is not clearly a sound. A take with one steady level end to
+# end (a tone, a music bed) has nothing over the line and gets no sounds.
+ABOVE_NOISE_DB = 10.0
+# A sound needs this much time over the line: less is a click, a lip smack or
+# the stray end of a word. The half-second sounds on that take had 0.30 to
+# 0.48 s.
+MIN_LOUD_SECONDS = 0.3
+# Loud stretches less than this apart are one sound. A long laugh comes in
+# bouts with a breath between them: 0.86 s on that take, between a giggle's
+# body and its last soft bout. It is also the pause protected after a laugh
+# (``PAUSE_AFTER_LAUGH_SECONDS``), so a cut could not go between two closer
+# sounds anyway.
+SAME_SOUND_QUIET_SECONDS = 1.0
+# A found sound runs from its first loud window to its last, and this much
+# further each way for the soft start and end, never past the gap it is in.
+FOUND_PAD_SECONDS = 0.04
+# Audio is read from ffmpeg this many seconds at a time, so a two hour take
+# never sits in memory: only its levels do, 50 numbers a second.
+FIND_READ_SECONDS = 60
+# Sound decoded from start to end is counted in samples, and a video's clock
+# is its timestamps. They part where the sound has a hole: a reel copied
+# together from clips has one at every join, 10 to 20 ms each. On a reel of
+# four clips a laugh 25 minutes in was found 40 ms early, so the 40 ms before
+# it was guarded and its last 40 ms was not. This filter pads every hole of
+# 2 ms or more with silence, and the count keeps time with the clock.
+KEEP_TIME = "aresample=async=1:min_hard_comp=0.002:first_pts=0"
+
+FOUND_FILE = "sounds-found.json"
+# Bump when the way sounds are found changes, so every transcript is looked
+# through again.
+FOUND_VERSION = 1
+
+# What every tool that reads sounds says while a transcript was never looked
+# through. Written for Claude to act on.
+NOT_CHECKED = (
+    "This transcript was never checked for laughs and other sounds. None are marked and an "
+    "automatic cut can take one. Call transcribe on this video: it finds them without "
+    "transcribing again."
+)
+# What the join check says when a look found nothing.
+NONE_FOUND = "No laughs or other sounds were found between the words of this video."
+
+Loudness = Callable[[Path], np.ndarray]
+
+
+def loudness_of(video: Path) -> np.ndarray:
+    """The loudness of the whole ``video``: one level in dB relative to full scale for every ``FIND_WINDOW_SECONDS``.
+
+    Reads the video's sound through ffmpeg a minute at a time and keeps only
+    the levels. Level ``i`` is the sound at ``i * FIND_WINDOW_SECONDS`` on
+    the video's own clock, the one every cut is made on: ffmpeg fills each
+    hole in the sound's timestamps with silence (``KEEP_TIME``). Reads the
+    video, never writes. Raises StudioError when ffmpeg fails.
+    """
+    window = int(FIND_WINDOW_SECONDS * SAMPLE_RATE)
+    cmd = [
+        "ffmpeg", "-v", "error", "-nostdin", "-i", str(video),
+        "-vn", "-af", KEEP_TIME, "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "-",
+    ]
+    levels: list[np.ndarray] = []
+    with tempfile.TemporaryFile() as said:
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=said)
+        except FileNotFoundError:
+            raise StudioError("ffmpeg is not installed or not on PATH. Install ffmpeg to find sounds.") from None
+        left = b""
+        with proc:
+            while chunk := proc.stdout.read(2 * window * round(FIND_READ_SECONDS / FIND_WINDOW_SECONDS)):
+                data = left + chunk
+                whole = len(data) // (2 * window) * (2 * window)
+                left = data[whole:]
+                samples = np.frombuffer(data[:whole], dtype=np.int16).astype(np.float64) / 32768.0
+                levels.append(_level_db(samples.reshape(-1, window)))
+        if proc.returncode != 0:
+            said.seek(0)
+            detail = said.read().decode("utf-8", "replace").strip()[-300:]
+            raise StudioError(
+                f"ffmpeg could not read the sound of {video.name}: {detail} "
+                "Check that the source video plays and has an audio track."
+            )
+    return np.concatenate(levels) if levels else np.zeros(0)
+
+
+def _loud_runs(loud: np.ndarray, max_quiet: int) -> list[tuple[int, int, int]]:
+    """``(first, last, count)`` of each run of the sorted window indexes ``loud``, a run ending at a quiet of ``max_quiet`` windows or more."""
+    runs: list[tuple[int, int, int]] = []
+    for i in (int(i) for i in loud):
+        if runs and i - runs[-1][1] - 1 < max_quiet:
+            runs[-1] = (runs[-1][0], i, runs[-1][2] + 1)
+        else:
+            runs.append((i, i, 1))
+    return runs
+
+
+def find_in_gaps(levels: np.ndarray, words: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The sounds between the entries of ``words``, as new transcript entries sorted by start.
+
+    ``levels`` is ``loudness_of`` the take and ``words`` its transcript on
+    the best times there are, sounds it already holds included: nothing is
+    found where an entry sits. A stretch of a gap is a sound when it is
+    over the line (``BELOW_SPEECH_DB``, ``ABOVE_NOISE_DB``) for
+    ``MIN_LOUD_SECONDS`` or more, loud stretches under
+    ``SAME_SOUND_QUIET_SECONDS`` apart counting as one. Only gaps between
+    two entries are read: what sounds before the first word or after the
+    last is the camera being started and stopped more often than a laugh.
+    Pure: reads no file.
+    """
+    tokens = sorted(words, key=lambda w: float(w["start"]))
+    spoken = [w for w in tokens if not is_event(w)]
+    if not len(levels) or not spoken:
+        return []
+    hop = FIND_WINDOW_SECONDS
+    in_words = np.zeros(len(levels), dtype=bool)
+    for w in spoken:
+        in_words[round(float(w["start"]) / hop):round(float(w["end"]) / hop)] = True
+    if not in_words.any():
+        return []
+    noise = float(np.percentile(levels, NOISE_PERCENTILE))
+    speech = float(np.percentile(levels[in_words], SPEECH_PERCENTILE))
+    line = max(speech - BELOW_SPEECH_DB, noise + ABOVE_NOISE_DB)
+    max_quiet = round(SAME_SOUND_QUIET_SECONDS / hop)
+    found = []
+    at = float(tokens[0]["end"])
+    for token in tokens[1:]:
+        lo, hi = at, float(token["start"])
+        at = max(at, float(token["end"]))
+        if hi - lo < MIN_LOUD_SECONDS:
+            continue
+        first, last = math.ceil(lo / hop - 1e-6), math.floor(hi / hop + 1e-6)
+        loud = np.flatnonzero(levels[first:last] > line) + first
+        for a, b, count in _loud_runs(loud, max_quiet):
+            if count * hop < MIN_LOUD_SECONDS - 1e-6:
+                continue
+            found.append({
+                "word": SOUND_WORD,
+                "start": round(max(lo, a * hop - FOUND_PAD_SECONDS), 3),
+                "end": round(min(hi, (b + 1) * hop + FOUND_PAD_SECONDS), 3),
+                "type": EVENT_TYPE,
+                FOUND_BY: BY_LOUDNESS,
+                OVER_SPEECH: round(float(levels[a:b + 1].max()) - speech, 1),
+            })
+    return found
+
+
+def _found_before(project: Project) -> dict[str, Any] | None:
+    """What the last look through this very transcript saved, or None when it was never looked through as it is now."""
+    key = word_times.transcript_key(project)
+    try:
+        saved = json.loads((project.root / FOUND_FILE).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(saved, dict) or saved.get("version") != FOUND_VERSION:
+        return None
+    return saved if key is not None and saved.get("transcript") == key else None
+
+
+def sounds_checked(project: Project) -> bool:
+    """Whether the project's transcript, as it is now, was looked through for sounds."""
+    return _found_before(project) is not None
+
+
+def looked_on(project: Project) -> str | None:
+    """The word times the last look read its gaps from (``word_times.MEASURED`` or ``ESTIMATED``), or None when there was none.
+
+    A look on estimated times reads loose gaps: where a word's time runs
+    over a laugh, the laugh is not in a gap. So once the times are measured
+    the transcript is looked through again.
+    """
+    saved = _found_before(project)
+    return str(saved.get("word_times")) if saved else None
+
+
+def find_sounds(project: Project, *, loudness: Loudness = loudness_of) -> dict[str, Any]:
+    """Look through the project's transcript for sounds and write the ones found into it.
+
+    The gaps are read on the best word times there are
+    (``word_times.read``): measured ones say where the words really sound,
+    the transcript's own run long and hide half the sounds under words.
+    Sounds an earlier look found are replaced; the speech model's own stay.
+    The transcript file is written again only when its sounds changed, and
+    then everything made from it (measured word times, sound labels, plans)
+    is stale: the caller measures the word times again.
+
+    Answers ``{found, on, changed}``: how many sounds this look found, the
+    word times it read (``measured`` or ``estimated``), and whether the
+    transcript file was written. Raises StudioError when there is no
+    transcript or the video's sound can't be read; nothing is written then.
+    """
+    raw = load_transcript(project.words_path)
+    times = word_times.read(project)
+    theirs = [w for w in times.words if w.get(FOUND_BY) != BY_LOUDNESS]
+    found = find_in_gaps(loudness(project.video), theirs)
+    changed = [w for w in raw if w.get(FOUND_BY) == BY_LOUDNESS] != found
+    if changed:
+        kept = [w for w in raw if w.get(FOUND_BY) != BY_LOUDNESS]
+        merged = sorted(kept + found, key=lambda w: float(w["start"]))
+        write_text_atomic(project.words_path, json.dumps(merged, ensure_ascii=False, indent=2))
+    write_json_atomic(project.root / FOUND_FILE, {
+        "version": FOUND_VERSION, "made_at": now_iso(), "transcript": word_times.transcript_key(project),
+        "word_times": times.source, "found": len(found),
+    })
+    return {"found": len(found), "on": times.source, "changed": changed}
+
+
 # ── Classifying ───────────────────────────────────────────────────────────────
 
 # A likely laugh needs a train of at least this many bursts. The three events
@@ -240,13 +500,20 @@ LIKELY_MIN_BURSTS = 4
 # Laughter runs at roughly 4 to 6 bursts a second; the measured laughs ran at
 # 3.9 to 5.3.
 LAUGH_RATE = (3.0, 7.0)
-# Laughs are breathy but still pitched: the measured ones were voiced 0.31 to
-# 0.44 of their sounding time. Held "uhh" sounds and word tails measured 0.75
-# to 1.0; a plain breath or a near-silent gap measured 0.0.
+# A laugh has a voice in it: a plain breath, a near-silent gap or something
+# handled off camera measured 0.0 to 0.04 and is never a laugh, whatever its
+# bursts. Up to the second number a laugh is breathy: the laughs of the first
+# test video were voiced 0.31 to 0.44 of their sounding time, its held "uhh"
+# sounds and word tails 0.75 to 1.0. A giggle is pitched further up: on the
+# second video a 7 second one measured 0.69 and two short ones 0.66 and 0.73,
+# all in bursts. So the voiced share alone no longer rules a laugh out; the
+# bursts say it.
 LAUGH_VOICED = (0.15, 0.5)
-# A possible laugh (measured): after a punchline, breathy, and at least two
-# bursts in laugh spacing or this long. On the test video, breathy events
-# without a punchline were a throat clear and mid-sentence breaths.
+# A possible laugh (measured): after a punchline, and either at least two
+# bursts in laugh spacing or, when breathy, this long. Two or three bursts
+# of a pitched sound must also come at the rate of laughter. On the test
+# video, breathy events without a punchline were a throat clear and
+# mid-sentence breaths.
 POSSIBLE_MIN_BURSTS = 2
 POSSIBLE_MIN_SECONDS = 1.2
 # Without audio, only a long event right after a sentence end is a possible
@@ -318,13 +585,16 @@ def _judge(seconds: float, punchline: list[float] | None, measure: dict[str, Any
         return SOUND, POSSIBLE
     bursts = int(measure.get("bursts", 0))
     rate = float(measure.get("burst_rate", 0.0))
-    breathy = LAUGH_VOICED[0] <= float(measure.get("voiced", 1.0)) <= LAUGH_VOICED[1]
-    laugh_train = bursts >= LIKELY_MIN_BURSTS and LAUGH_RATE[0] <= rate <= LAUGH_RATE[1]
-    if not breathy:
+    voiced = float(measure.get("voiced", 1.0))
+    if voiced < LAUGH_VOICED[0]:
         return SOUND, POSSIBLE
-    if laugh_train:
+    breathy = voiced <= LAUGH_VOICED[1]
+    at_laugh_rate = LAUGH_RATE[0] <= rate <= LAUGH_RATE[1]
+    if bursts >= LIKELY_MIN_BURSTS and at_laugh_rate:
         return LAUGH, LIKELY if punchline else POSSIBLE
-    if punchline and (bursts >= POSSIBLE_MIN_BURSTS or seconds >= POSSIBLE_MIN_SECONDS):
+    if punchline and bursts >= POSSIBLE_MIN_BURSTS and (breathy or at_laugh_rate):
+        return LAUGH, POSSIBLE
+    if punchline and breathy and seconds >= POSSIBLE_MIN_SECONDS:
         return LAUGH, POSSIBLE
     return SOUND, POSSIBLE
 
@@ -336,10 +606,12 @@ def classify_events(words: list[dict[str, Any]], *, measures: list[dict] | None 
     ``measure_samples``-shaped dict per event in the same order; an empty dict
     means that event was not measured and is judged by length and position.
     Returns ``[{start, end, seconds, kind, confidence, voiced, bursts,
-    burst_rate, punchline}]``. ``confidence`` only matters for a laugh and is
-    ``possible`` for a sound. ``voiced``, ``bursts`` and ``burst_rate`` are
-    the measure, or None when the event was not measured (``is_filler``
-    reads all three). ``punchline`` is set for laughs only.
+    burst_rate, over_speech_db, punchline}]``. ``confidence`` only matters
+    for a laugh and is ``possible`` for a sound. ``voiced``, ``bursts`` and
+    ``burst_rate`` are the measure, or None when the event was not measured.
+    ``over_speech_db`` is what the finder wrote on the event (``OVER_SPEECH``),
+    or None for a sound it did not find. ``is_filler`` reads all four.
+    ``punchline`` is set for laughs only.
 
     Raises StudioError when ``measures`` does not have one entry per event.
     """
@@ -365,6 +637,7 @@ def classify_events(words: list[dict[str, Any]], *, measures: list[dict] | None 
             "voiced": round(float(measure["voiced"]), 2) if measure else None,
             "bursts": int(measure["bursts"]) if measure else None,
             "burst_rate": round(float(measure["burst_rate"]), 2) if measure else None,
+            OVER_SPEECH: words[i].get(OVER_SPEECH),
             "punchline": punchline if kind == LAUGH else None,
         })
     return sorted(labels, key=lambda label: label["start"])
@@ -379,25 +652,51 @@ def classify_events(words: list[dict[str, Any]], *, measures: list[dict] | None 
 # and 7 between the two, still a filler by ear. The line sits at the low end
 # of that middle band, so a breath never reads as one.
 FILLER_VOICED_MIN = 0.5
+# A sound this long or longer is never cut by a rule, laugh or not: a held
+# "uhh" lasts a few tenths of a second, and what goes on for a second is a
+# laugh the measures missed, a sigh, a cough, something the creator did. A
+# person decides about those.
+LONG_SOUND_SECONDS = 1.0
+# A hesitation trails along under the voice. A sound whose loudest window
+# stands more than this over the take's loud speech broke out of it: a short
+# laugh, an exclamation, a cough. On the second test video the eight plain
+# "mm"s and "uhh"s between sentences peaked 3.4 dB under loud speech to 1.6
+# over, and every laugh, giggle and snort 2.3 to 6.6 over: two of those were
+# one steady voiced burst of 0.6 s, which no other measure tells from an
+# "uhh". Only a sound the finder wrote says how loud it is (``OVER_SPEECH``).
+FILLER_MAX_OVER_SPEECH_DB = 2.0
+
+
+def is_long(label: dict[str, Any]) -> bool:
+    """Whether a sound lasts ``LONG_SOUND_SECONDS`` or more, by its own start and end."""
+    if "start" not in label or "end" not in label:
+        return float(label.get("seconds") or 0.0) >= LONG_SOUND_SECONDS
+    return round(float(label["end"]) - float(label["start"]), 3) >= LONG_SOUND_SECONDS
 
 
 def is_filler(label: dict[str, Any]) -> bool:
-    """Whether a sound label is a held "um" or "uh": a ``SOUND`` voiced ``FILLER_VOICED_MIN`` or more, and no laugh train.
+    """Whether a sound label is a held "um" or "uh", the one kind of sound the Filler words switch takes.
+
+    All of: a ``SOUND`` (no laugh, likely or possible), voiced
+    ``FILLER_VOICED_MIN`` or more, shorter than ``LONG_SOUND_SECONDS``, no
+    louder than ``FILLER_MAX_OVER_SPEECH_DB`` over the take's loud speech,
+    and one steady sound: under ``POSSIBLE_MIN_BURSTS`` bursts in laugh
+    spacing. A giggle is voiced like an "uhh" and comes in bursts, and one
+    too short or too far from a sentence end to be called a laugh still has
+    two; on the second test video two laughs of under a second had 2 and 3.
 
     Measured only: an event never measured (``voiced`` is None) answers
-    False, so nothing is cut on a guess. ``kind`` already keeps out a laugh
-    ClipForge would call likely or possible, but a giggle voiced 0.5 or more
-    still judges as ``SOUND`` (``_judge`` needs a breathy voice, under
-    ``LAUGH_VOICED``, to call one), so this reads the bursts and their rate
-    itself: a train of ``LIKELY_MIN_BURSTS`` or more in ``LAUGH_RATE`` is a
-    laugh whatever its voicing, and is never a filler.
+    False, so nothing is cut on a guess.
     """
     if label.get("kind") != SOUND or label.get("voiced") is None or label["voiced"] < FILLER_VOICED_MIN:
         return False
-    bursts, rate = label.get("bursts"), label.get("burst_rate")
-    if bursts is not None and rate is not None and bursts >= LIKELY_MIN_BURSTS and LAUGH_RATE[0] <= rate <= LAUGH_RATE[1]:
+    if is_long(label):
         return False
-    return True
+    over = label.get(OVER_SPEECH)
+    if over is not None and over > FILLER_MAX_OVER_SPEECH_DB:
+        return False
+    bursts = label.get("bursts")
+    return bursts is None or bursts < POSSIBLE_MIN_BURSTS
 
 
 # ── Protecting ────────────────────────────────────────────────────────────────
@@ -410,19 +709,35 @@ PAUSE_AFTER_LAUGH_SECONDS = 1.0
 PAUSE_BEFORE_PUNCHLINE_SECONDS = 1.0
 
 
+def whole_spans(labels: list[dict]) -> list[tuple[float, float]]:
+    """The sounds no automatic cut may take any part of, as ``(start, end)`` sorted by start.
+
+    Every laugh, likely or possible, and every sound of
+    ``LONG_SOUND_SECONDS`` or more. Each span is the sound itself, as the
+    transcript times it.
+    """
+    return sorted(
+        (float(label["start"]), float(label["end"]))
+        for label in labels if label["kind"] == LAUGH or is_long(label)
+    )
+
+
 def protected_spans(labels: list[dict], words: list[dict[str, Any]]) -> list[tuple[float, float]]:
     """Source spans an automatic trim must leave alone, sorted and merged.
 
     For each laugh (likely or possible): from the pause before its punchline,
     capped at ``PAUSE_BEFORE_PUNCHLINE_SECONDS`` (or from the laugh itself
     when it has no punchline), to the laugh's end plus the pause after it,
-    capped at ``PAUSE_AFTER_LAUGH_SECONDS``.
+    capped at ``PAUSE_AFTER_LAUGH_SECONDS``. For a sound of
+    ``LONG_SOUND_SECONDS`` or more that is no laugh: the sound itself.
     """
     starts = sorted(float(w["start"]) for w in words if not is_event(w))
     ends = sorted(float(w["end"]) for w in words if not is_event(w))
     spans: list[tuple[float, float]] = []
     for label in labels:
         if label["kind"] != LAUGH:
+            if is_long(label):
+                spans.append((float(label["start"]), float(label["end"])))
             continue
         end = float(label["end"])
         next_word = next((s for s in starts if s >= end), end)
@@ -445,7 +760,8 @@ def protected_spans(labels: list[dict], words: list[dict[str, Any]]) -> list[tup
 
 SOUNDS_FILE = "sounds.json"
 # Bump when the measures or the rule change, so old caches are rebuilt.
-SOUNDS_VERSION = 2
+# 3: a pitched laugh in bursts is a laugh, not only a breathy one.
+SOUNDS_VERSION = 3
 
 
 def _made_as_before(times: str) -> int | None:

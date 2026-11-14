@@ -40,6 +40,7 @@ Call `transcribe` with the path. If the models aren't on this Mac yet, it answer
 | `status: "downloading"` with a `job_id` | The creator said yes and the download started. Wait on `job_status`, and say how far along it is. When it's done, call `transcribe` again with the same path. |
 | `job_id` | Wait on `job_status`. Tell the creator it transcribes and then times the words, about a minute more for a 20 minute recording. |
 | `status: "aligning"` with a `job_id` | The transcript is there. The job times the words. Wait on it. |
+| `status: "finding_sounds"` with a `job_id` | The transcript and its word times are there. The job finds the laughs and other sounds between the words, which an older transcript was never checked for. Nothing is transcribed again. Wait on it. |
 | `status: "exists"` | Go on. |
 
 On `needs_models`, ask before you do anything else. In a few short lines say what would download, from `models`: each name, what it does, its size in MB, where it comes from (`source_host`) and its license, then the total. If you already told them about the models in step 0, keep this short and just ask. Then stop and wait for the answer.

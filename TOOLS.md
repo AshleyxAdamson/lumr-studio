@@ -114,6 +114,8 @@ had (see "A project after a move" below):
   overlays.json      the creator's photos and clips over the talk
   review.json        the creator's decisions from the round 2 review page, if any
   sounds.json        which sounds in the transcript are likely laughs
+  sounds-found.json  that this transcript was looked through for sounds, on which word
+                     times, and how many were found
   receipts.jsonl     one line per completed step
   carried.json       written by `carry_edit`: which project this video's edit came from
   shares.jsonl       one line per send the creator made with Help improve Lumr:
@@ -177,8 +179,10 @@ api/share/preview` under `review`.
 `LUMR_STUDIO_PROJECTS_DIR` overrides the projects root. Tests must set it.
 
 The transcript stays where the speech model writes it, beside the video, as
-`<video>.words.json`. The measured word times are the plugin's own and stay
-in the project folder.
+`<video>.words.json`. The server writes that file again once, to add the
+sounds it finds between the words (see "Sounds" under `transcribe`); the
+words in it never change. The measured word times are the plugin's own and
+stay in the project folder.
 
 ### A project after a move
 
@@ -673,26 +677,75 @@ Read only: no. Destructive: no. Long job.
 | `force` | bool, default false | re-transcribe even if a transcript exists |
 | `download_models` | bool, default false | fetch the models the last answer said were missing. Pass true only after the creator said yes. |
 
-One job transcribes and measures the word times, so Claude waits once.
+One job transcribes, measures the word times and finds the sounds between the
+words, so Claude waits once.
 
 | Answer | When |
 |---|---|
 | `{status: "needs_models", models, total_mb, note, ...}` | a model this call needs is not on the machine. Nothing has downloaded and nothing started. See "Models". |
 | `{status: "downloading", job_id, models}` | `download_models` was true and a model was missing. The job fetches it. See "Models". |
-| `{job_id}` | there is no transcript yet, or `force` is true. The job does both. |
-| `{status: "aligning", job_id, ...}` | the transcript is there and its word times are not measured yet. The job measures them. |
-| `{status: "exists", words_path, word_count, duration, word_times, ...}` | nothing to do. With `word_times: "estimated"` this machine can't measure them, and `word_times_note` says what is missing. |
+| `{job_id}` | there is no transcript yet, or `force` is true. The job does all three. |
+| `{status: "aligning", job_id, ...}` | the transcript is there and its word times are not measured yet. The job measures them and finds the sounds. |
+| `{status: "finding_sounds", job_id, note, ...}` | the transcript and its measured word times are there, and the transcript was never looked through for sounds: it was made before the plugin found them. The job finds them and measures the word times again from the ones it has. No model runs and nothing is transcribed again. |
+| `{status: "exists", words_path, word_count, duration, word_times, ...}` | nothing to do. With `word_times: "estimated"` this machine can't measure them, and `word_times_note` says what is missing. A transcript never looked through is looked through during this call, on the times it has, and the answer carries `sounds`. |
 
-The finished job's result carries `word_times`, and with `measured` also
-`aligning: {seconds, words_moved, saved_to, sounds, sounds_that_were_words}`. When a saved edit was placed
-again on the measured times it carries `edit: {before, now, note}` with the
-cut count and time removed before and now. Tell the creator when they differ:
-the measured times show pauses the estimates hid, so the same pace removes
-more.
+The finished job's result carries `word_times`, and when the job measured
+them also
+`aligning: {seconds, words_moved, saved_to, sounds, sounds_that_were_words}`.
+It carries `sounds: {found, on}` when it looked for sounds: how many it
+found, and the word times it read the gaps from (`measured` or `estimated`).
+When the video's sound could not be read it carries `sounds_note` instead,
+and the edit goes on without marked sounds. When a saved edit was placed
+again it carries `edit: {before, now, note}` with the cut count and time
+removed before and now. Tell the creator when they differ: measured times
+show pauses the estimates hid, so the same pace removes more, and marked
+sounds keep every laugh in, so it removes less.
 
 A job that could not measure the times still ends `done`, on estimated times,
 with `word_times_note` saying why. Go on with the edit and tell the creator
 in one sentence that the harder paces will do less.
+
+#### Sounds
+
+A laugh, a giggle, a breath or an "uhh" is an entry of the transcript with
+`type: "event"` and the word `[vocalization]`. The speech model writes words
+only, so the server finds the sounds itself (`sounds.find_sounds`):
+
+- It reads the loudness of the whole video, 20 ms at a time, through ffmpeg.
+  Nothing but numpy and ffmpeg is needed.
+- A stretch between two words is a sound when it is louder than a line for
+  0.3 s or more. The line sits 17 dB under the take's loud speech, and at
+  least 10 dB over the room's own noise. Loud stretches less than a second
+  apart are one sound. A breath, a click and room tone stay under it, and a
+  take with one steady level end to end has no sounds.
+- The gaps are read between measured words. The transcript's own times run
+  long and hide sounds under words: on a 27 minute take they hid 3 of 15 whole and
+  part of 5 more. So the job measures the word times, finds the sounds,
+  writes them into `<video>.words.json`, and measures once more from the
+  times it already has, so each word gets its room up to the sounds. On a
+  machine that can't measure word times the gaps are read on the
+  transcript's own times, and read again once the times are measured.
+- Each sound found carries `found_by: "loudness"` and `over_speech_db`, how
+  far its loudest moment stands over the take's loud speech. A later look
+  replaces only those; a sound the speech model wrote stays.
+
+`sounds-found.json` in the project folder says the transcript was looked
+through. While it does not, `read_transcript`, `analyze_take`, `get_edit`
+and `set_edit` carry `sounds_note`, and the `joins` text opens with the same
+sentence: this transcript was never checked for laughs, so an automatic cut
+can take one, and `transcribe` finds them without transcribing again. Call
+it before you go on.
+
+What no automatic cut may take, at any pace and with every switch on:
+
+| Sound | Pause cuts, Stutters, an edge of Claude's cut the server moved | Filler words switch |
+|---|---|---|
+| a laugh, likely or possible | never any part of it | never |
+| any sound of a second or more | never any part of it | never |
+| a shorter plain sound | never a part of it, and no pause cut is planned over it | takes it whole when it is a held hesitation: one steady voiced sound, no louder than 2 dB over the take's loud speech. A breath, a sound in two or more bursts and a sound louder than that stay. |
+
+A cut that Claude or the creator asks for over the whole of a laugh still
+takes it out, and the join check flags it (`removes_laugh`).
 
 #### Models
 
@@ -783,8 +836,13 @@ Sounds that aren't speech appear on their own line, labeled by kind:
 
 `(laugh 3.5s)` is a likely laugh. `(laugh? 1.6s)` is a possible one. `(sound
 0.2s)` is anything else: a breath, a hesitation, a bump. The labels come from
-the sound's length, its place in the sentence, and its measured shape. They
-are estimates. A laugh marks the line before it as a punchline.
+the sound's length, its place in the sentence, and its measured shape: a
+laugh comes in bursts, four or five a second, breathy or pitched like a
+giggle. They are estimates. A laugh marks the line before it as a punchline.
+
+The answer carries `sounds_note` while the transcript was never looked
+through for sounds (see "Sounds" under `transcribe`). No sound line then
+means nobody looked, not that there is no laugh.
 
 With `show_cuts`, removed phrases are prefixed with `CUT`.
 
@@ -864,7 +922,8 @@ Read only: yes.
 Returns a compact report: duration, word count, speaking rate, the longest
 pauses, filler words with times, repeated phrases that look like retakes,
 `word_times`, and `paces`: for each of the six pace levels, how many trims it
-would make on this take and the time they would save.
+would make on this take and the time they would save. `sounds_note` is there
+while the transcript was never looked through for sounds.
 
 ### get_edit
 
@@ -880,7 +939,8 @@ Returns Claude's saved cuts with reasons and kinds, a count of automatic
 trims (`auto`), the pace, the total removed time, the resulting duration, and
 `word_times`. Each cut carries `clock`, its source times as `m:ss-m:ss`, ready
 to show the creator. The creator's own cuts are never in `cuts`; they are
-under `creator`.
+under `creator`. `sounds_note` is there while the transcript was never looked
+through for sounds: call `transcribe` before you trust the edit near a laugh.
 
 When the video is a reel (a `.reel.json` sequence file sits beside it), the
 result carries `reel`:
@@ -1099,11 +1159,15 @@ The server validates before saving:
 - a cut over a word the creator brought back splits around that word: the
   rest is cut, the word plays. With every word of it brought back the cut is
   rejected like one in a kept span. `override_keeps` cuts the word after all.
-- automatic trims steer around a marked punchline and the laugh after it, but
-  can still clip one, most at the harder paces (10 places at Standard and 23 at
-  Max on the test take). Those come back in `joins` as `removes_laugh` or
-  `clips_beat` rows on an automatic trim, with a fix that asks the creator to
-  keep that stretch on the page
+- no automatic trim takes any part of a laugh, likely or possible, or of a
+  sound that lasts a second or more, at any pace and with every switch on
+  (see "Sounds" under `transcribe`). Trims also stay off the punchline before
+  a laugh and up to a second of pause either side. A trim can still shorten
+  a pause further from a laugh, which comes back in `joins` as a `clips_beat`
+  row with a fix that asks the creator to keep that stretch on the page
+- a cut of Claude's that reaches into a laugh or a sound of a second or more
+  without covering it stops at the sound, which stays in whole, and
+  `adjusted` says so. To take one out, send a cut that covers all of it
 
 Returns `{applied: [...], adjusted: [...], rejected: [...],
 removed_seconds, new_duration, joins}`. Each adjusted entry shows the
@@ -1237,6 +1301,12 @@ the way a viewer hears it and lists the ones likely to sound wrong.
    ...and that's when I knew. | The first thing is...
    fix: <what to change, with times>"}
 ```
+
+The second line of `text` says what the laugh flags are worth. On a
+transcript that was never looked through for sounds it is the `sounds_note`
+sentence, and the laugh flags below see only the sounds the speech model
+happened to write. On one that was looked through and holds none it reads
+"No laughs or other sounds were found between the words of this video."
 
 | Flag | Meaning |
 |---|---|

@@ -25,7 +25,7 @@ from lumr_studio import frames as screenshots
 from lumr_studio import models, reels, taste
 from lumr_studio import treatment as treatments
 from lumr_studio import word_times
-from lumr_studio.aligner import Wav2Vec2Aligner
+from lumr_studio.aligner import Remembering, Wav2Vec2Aligner
 from lumr_studio.analysis import analyze
 from lumr_studio.autocuts import TRIM_KINDS, check_gap_length
 from lumr_studio.engine.render import kept_segments
@@ -53,7 +53,7 @@ from lumr_studio.render_jobs import (
 from lumr_studio.review import ACCEPTED, EDITED, RESTORED, load_review
 from lumr_studio.review_server import review_url
 from lumr_studio.silences import SilenceProvider, measured_silences
-from lumr_studio.sounds import classify_events, load_or_measure_labels
+from lumr_studio.sounds import NOT_CHECKED, classify_events, find_sounds, load_or_measure_labels, looked_on, sounds_checked
 from lumr_studio.timeline import edited_duration, to_edited_time
 from lumr_studio.transcript import pack_transcript, timing_report
 from lumr_studio.transcription import Transcriber, run_transcription, speech_transcriber, transcript_summary
@@ -67,6 +67,8 @@ logger = logging.getLogger(__name__)
 Words = list[dict[str, Any]]
 # Labels for the transcript's sounds: which are laughs. See sounds.py.
 LabelProvider = Callable[[Project, Words], list[dict[str, Any]]]
+# What looks through a project's transcript for sounds and writes them into it. See sounds.find_sounds.
+SoundFinder = Callable[[Project], dict[str, Any]]
 
 # job_status holds a call open at most this long. MCP clients give up on a
 # tool call after about a minute.
@@ -91,11 +93,24 @@ def unmeasured_labels(_project: Project, words: Words) -> list[dict[str, Any]]:
     return classify_events(words)
 
 
-def _joins_report(cuts: list[dict[str, Any]], words: Words, duration: float, labels: list[dict[str, Any]]) -> dict[str, Any]:
-    """The join self-check without its row dicts: the text form says the same in less."""
-    report = check_joins(cuts, words, duration, labels=labels)
+def _joins_report(
+    project: Project, cuts: list[dict[str, Any]], words: Words, duration: float, labels: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The join self-check without its row dicts: the text form says the same in less.
+
+    It says whether the transcript was ever looked through for sounds, so
+    "no laughs" is never read off a transcript nobody checked.
+    """
+    report = check_joins(cuts, words, duration, labels=labels, sounds_checked=sounds_checked(project))
     report.pop("rows")
     return report
+
+
+def _with_sounds_note(project: Project, answer: dict[str, Any]) -> dict[str, Any]:
+    """``answer`` with ``sounds_note`` while the project's transcript was never looked through for sounds."""
+    if project.words_path.exists() and not sounds_checked(project):
+        answer["sounds_note"] = NOT_CHECKED
+    return answer
 
 
 # The kind of job that fetches models, and what transcribe says when the word times stay estimates.
@@ -104,6 +119,17 @@ RUNS_ON_ESTIMATES = "The edit runs on estimated word times, so the harder paces 
 EDIT_PLACED_AGAIN = (
     "The saved edit was placed again on the measured word times. Pauses the estimates hid are "
     "now cut, so it removes more. Ids of cuts changed; read get_edit before you change one."
+)
+EDIT_MADE_AGAIN_WITH_SOUNDS = (
+    "The saved edit was made again now that the laughs and other sounds are marked. No automatic cut "
+    "takes a laugh or a sound of a second or more, so it may remove less. Ids of cuts may have changed; "
+    "read get_edit before you change one."
+)
+# What transcribe says while a job only looks for sounds in a transcript that is there.
+FINDING_SOUNDS = (
+    "The words are there. This job finds the laughs and other sounds between them, which this transcript "
+    "was never checked for, and measures the word times again. Nothing is transcribed again. "
+    "Wait on job_status, then go on."
 )
 
 
@@ -119,32 +145,85 @@ def _edit_totals(project: Project, duration: float) -> dict[str, Any] | None:
     return {"cut_count": summary["cut_count"], "removed_seconds": summary["removed_seconds"]}
 
 
-def _measure_word_times(
-    project: Project, aligner: Aligner, silences: SilenceProvider, labels: LabelProvider
-) -> dict[str, Any]:
-    """Make measured word times, and place the saved edit again on them.
+def needs_a_look(project: Project) -> bool:
+    """Whether the project's transcript still has to be looked through for sounds.
 
-    Never fails the job: a machine that can't align answers
-    ``word_times: "estimated"`` with a note that says why.
+    True when it never was, as it is now, and when the one look it had read
+    its gaps from estimated word times and the times are measured now:
+    the measured gaps show sounds the estimates hid under a word.
+    """
+    if not sounds_checked(project):
+        return True
+    return looked_on(project) == word_times.ESTIMATED and word_times.source_of(project) == word_times.MEASURED
+
+
+def _look_for_sounds(project: Project, finder: SoundFinder) -> dict[str, Any]:
+    """What ``transcribe`` says about one look: ``{sounds: {found, on}}``, or ``{sounds_note}`` when the look failed.
+
+    Never raises a StudioError: a video whose sound can't be read still has
+    its words, and the edit goes on without marked sounds.
     """
     try:
-        made = word_times.align_project(project, aligner=aligner, silences=silences)
+        looked = finder(project)
     except StudioError as why:
-        return {"word_times": word_times.ESTIMATED, "word_times_note": f"{why} {RUNS_ON_ESTIMATES}"}
+        logger.warning("could not look for sounds in %s: %s", project.video, why)
+        return {"sounds_note": f"{why} Laughs and other sounds are not marked, so an automatic cut can take one."}
+    return {"sounds": {"found": looked["found"], "on": looked["on"]}, "_changed": looked["changed"]}
+
+
+def _measure_word_times(
+    project: Project, aligner: Aligner, silences: SilenceProvider, labels: LabelProvider,
+    finder: SoundFinder = find_sounds,
+) -> dict[str, Any]:
+    """Make measured word times, find the sounds between the measured words, and place the saved edit again.
+
+    The order matters. Sounds are found in the gaps between words, and only
+    measured words say where the gaps are: on a 27 minute take the
+    transcript's own times hid 3 of 15 sounds whole under a word and part of 5
+    more. So the words are measured first, the sounds found between them
+    are written into the transcript, and the words are measured once more
+    from it, so each gets its room up to the sounds and no further. The
+    second measure runs no model (``aligner.Remembering``). A transcript
+    whose times were measured before it was ever looked through goes
+    straight to the look, and is measured again from the times it has.
+
+    Never fails the job: a machine that can't align answers
+    ``word_times: "estimated"`` with a note that says why, and looks for
+    the sounds on the times it has.
+    """
+    aligner = Remembering.of(aligner, project)
+    was_measured = word_times.source_of(project) == word_times.MEASURED
+    made: dict[str, Any] | None = None
+    looked: dict[str, Any] = {}
+    why_not = ""
+    try:
+        if not was_measured:
+            made = word_times.align_project(project, aligner=aligner, silences=silences)
+        if needs_a_look(project):
+            looked = _look_for_sounds(project, finder)
+            if looked.pop("_changed", False):
+                made = word_times.align_project(project, aligner=aligner, silences=silences)
+    except StudioError as why:
+        why_not = f"{why} {RUNS_ON_ESTIMATES}"
     except Exception as exc:
         logger.exception("measuring word times failed for %s", project.video)
-        return {
-            "word_times": word_times.ESTIMATED,
-            "word_times_note": f"Measuring word times failed ({type(exc).__name__}). {RUNS_ON_ESTIMATES}",
-        }
-    result: dict[str, Any] = {"word_times": word_times.MEASURED, "aligning": made}
-    if made.get("warning"):
-        result["word_times_warning"] = made["warning"]
+        why_not = f"Measuring word times failed ({type(exc).__name__}). {RUNS_ON_ESTIMATES}"
+    if why_not:
+        if not looked and needs_a_look(project):
+            looked = _look_for_sounds(project, finder)
+        looked.pop("_changed", None)
+        return {"word_times": word_times.ESTIMATED, "word_times_note": why_not, **looked}
+    result: dict[str, Any] = {"word_times": word_times.MEASURED, **looked}
+    if made is not None:
+        result["aligning"] = made
+        if made.get("warning"):
+            result["word_times_warning"] = made["warning"]
     duration = project.duration()
     before = _edit_totals(project, duration)
     ctx = treatments.load_context(project, duration=duration, silences=silences, labels_for=labels)
-    if before is not None:
-        result["edit"] = {"before": before, "now": _edit_totals(project, duration), "note": EDIT_PLACED_AGAIN}
+    if before is not None and made is not None:  # with nothing measured again the edit stands as it was
+        note = EDIT_MADE_AGAIN_WITH_SOUNDS if was_measured else EDIT_PLACED_AGAIN
+        result["edit"] = {"before": before, "now": _edit_totals(project, duration), "note": note}
     # Plan every pace now, inside the wait Claude already has, so the page opens quickly later.
     treatments.plan_every_pace(ctx)
     return result
@@ -205,17 +284,23 @@ def transcribe(
     jobs: JobRegistry = JOBS,
     model_set: models.ModelSet | None = None,
     opener: models.Opener = models.open_url,
+    finder: SoundFinder = find_sounds,
 ) -> dict[str, Any]:
-    """Start transcription and the measuring of word times, or report what already exists.
+    """Start transcription, the measuring of word times and the look for sounds, or report what already exists.
 
-    One job does both, so Claude waits once. With a transcript but no
-    measured word times, the job only measures them (``status: "aligning"``).
+    One job does all three, so Claude waits once. With a transcript but no
+    measured word times, the job measures them and looks for the sounds
+    between the words (``status: "aligning"``). With measured word times
+    and a transcript that was never looked through for sounds, one made
+    before the plugin found them, the job looks and measures again from
+    the times it has (``status: "finding_sounds"``); no model runs.
     Before any of that, a model this call needs may be missing:
     ``status: "needs_models"`` names them and starts nothing, and with
     ``download_models`` true a ``download_models`` job fetches them
-    (``status: "downloading"``). On a machine that can't measure them for
-    another reason nothing starts and the answer says why under
-    ``word_times_note``.
+    (``status: "downloading"``). On a machine that can't measure word times
+    for another reason no job starts: the answer says why under
+    ``word_times_note``, and a transcript never looked through is looked
+    through on the spot, on the times it has.
     """
     project = open_project(video_path)
     aligner = aligner or Wav2Vec2Aligner()
@@ -235,17 +320,25 @@ def transcribe(
     if summary is None:
         job_id = jobs.start("transcribe", project, lambda _h: {
             **run_transcription(project, force, transcriber),
-            **_measure_word_times(project, aligner, silences, labels),
+            **_measure_word_times(project, aligner, silences, labels, finder),
         })
         return {"job_id": job_id}
-    if measured:
+    look = needs_a_look(project)
+    if measured and not look:
         return {"status": "exists", **summary}
-    lacks = aligner.lacks()
+    lacks = "" if measured else aligner.lacks()
     if lacks:
-        return {"status": "exists", **summary, "word_times_note": f"{lacks} {RUNS_ON_ESTIMATES}"}
+        found = _look_for_sounds(project, finder) if look else {}
+        found.pop("_changed", None)
+        return {
+            "status": "exists", **transcript_summary(project), "word_times_note": f"{lacks} {RUNS_ON_ESTIMATES}",
+            **found,
+        }
     job_id = jobs.start("transcribe", project, lambda _h: {
-        **transcript_summary(project), **_measure_word_times(project, aligner, silences, labels),
+        **transcript_summary(project), **_measure_word_times(project, aligner, silences, labels, finder),
     })
+    if measured:
+        return {"status": "finding_sounds", "job_id": job_id, **summary, "note": FINDING_SOUNDS}
     return {"status": "aligning", "job_id": job_id, **summary}
 
 
@@ -372,7 +465,8 @@ def read_transcript(
         removed = edits.removed_spans(edits.load_edit(project, project.duration()))
     reel = reels.reel_for(project.video)
     markers = reels.clip_markers(reel) if reel else None
-    return pack_transcript(words, start=start, end=end, removed=removed, labels=labels(project, words), markers=markers)
+    packed = pack_transcript(words, start=start, end=end, removed=removed, labels=labels(project, words), markers=markers)
+    return _with_sounds_note(project, packed)
 
 
 def analyze_take(video_path: str, *, silences: SilenceProvider = measured_silences) -> dict[str, Any]:
@@ -389,7 +483,7 @@ def analyze_take(video_path: str, *, silences: SilenceProvider = measured_silenc
     report["paces"] = [
         {**level, **_pace_estimate(project, words, duration, measured, level["pace"])} for level in describe_paces()
     ]
-    return report
+    return _with_sounds_note(project, report)
 
 
 def _pace_estimate(project: Project, words: Words, duration: float, measured: list[Any], name: str) -> dict[str, Any]:
@@ -462,8 +556,8 @@ def get_edit(
         summary["export"] = exported
     if check:
         words = word_times.load_words(project)
-        summary["joins"] = _joins_report(edit.get("cuts", []), words, duration, labels(project, words))
-    return summary
+        summary["joins"] = _joins_report(project, edit.get("cuts", []), words, duration, labels(project, words))
+    return _with_sounds_note(project, summary)
 
 
 def _picks_summary(project: Project, edit: dict[str, Any], duration: float) -> dict[str, Any] | None:
@@ -747,8 +841,8 @@ def set_edit(
             "skipped_to_protect_jokes": outcome.auto_skipped_protected,
             "skipped_in_spans_the_creator_restored": outcome.auto_skipped_kept,
         }
-    result["joins"] = _joins_report(outcome.cuts, words, duration, sounds)
-    return result
+    result["joins"] = _joins_report(project, outcome.cuts, words, duration, sounds)
+    return _with_sounds_note(project, result)
 
 
 def find_words(

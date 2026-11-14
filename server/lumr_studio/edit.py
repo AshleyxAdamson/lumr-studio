@@ -23,6 +23,14 @@ laughs: automatic trims that overlap one are dropped, since a trim there
 changes the timing of a joke. Claude may still cut inside a protected span on
 purpose; the join check flags it.
 
+A laugh, and any sound of a second or more (``sounds.whole_spans``), goes only
+with a cut that was asked for over the whole of it. The midpoint rule would
+take such a sound as soon as a cut reaches past its middle, by moving the
+cut's edge to the sound's far side: half a laugh nobody asked for. So a cut of
+Claude's that covers one only in part stops at it (``place_cut``), and the
+recipe's last check takes every part of one back out of the automatic
+removals (``leave_sounds_whole``).
+
 Each of Claude's cuts carries a ``kind``, one of ``CUT_KINDS``, so the creator
 sees them grouped the way Claude meant them. The kind comes from Claude, never
 from reading the reason: a guess from keywords is how a joke setup gets
@@ -62,6 +70,7 @@ from lumr_studio.autocuts import SHORTEST_PIECE_SECONDS, TRIM_KINDS, Said, aroun
 from lumr_studio.errors import StudioError
 from lumr_studio.project import Project, now_iso, write_json_atomic
 from lumr_studio.timeline import edited_duration
+from lumr_studio.transcript import is_event
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +122,9 @@ MOVED_FROM = "moved_from_word_times"
 CREATOR_KIND = "yours"
 CREATOR_KIND_LABEL = "Your cuts"
 CREATOR_REASON = "Cut by you"
+# A cut covers a sound whole when it reaches this close to both its ends: the
+# packed transcript prints a sound's times to the hundredth of a second.
+COVERS_WHOLE_SECONDS = 0.05
 # A requested cut saved with this flag may cut into a kept span. set_edit
 # sets it on every cut when Claude passes override_keeps.
 OVERRIDE_FLAG = "override_keeps"
@@ -166,21 +178,32 @@ def _reject_no_whole_word(a: float, b: float, touched: list[dict[str, Any]]) -> 
     )
 
 
+def covered_in_part(start: float, end: float, a: float, b: float) -> bool:
+    """Whether the cut ``[a, b]`` reaches into the sound ``[start, end]`` without covering the whole of it."""
+    if not (a < end and start < b):
+        return False
+    return a > start + COVERS_WHOLE_SECONDS or b < end - COVERS_WHOLE_SECONDS
+
+
 def place_cut(
     a: float,
     b: float,
     tokens: list[dict[str, Any]],
     duration: float,
     silences: list[Silence] | None = None,
+    whole: list[Span] | None = None,
 ) -> tuple[float, float]:
     """Word-safe ``(start, end)`` for the requested cut ``[a, b]``.
 
     ``tokens`` are all transcript entries (words and events) sorted by start.
-    A cut that lies wholly in a pause is returned unchanged. Raises CutRejected
-    for a cut that clips words without removing any whole one, and for a cut
-    shorter than ``MIN_CUT_SECONDS`` once placed.
+    A cut that lies wholly in a pause is returned unchanged. ``whole`` are
+    the sounds that go only with a cut over the whole of them
+    (``sounds.whole_spans``): one the cut covers in part stays in, and the
+    cut's edge stops at it. Raises CutRejected for a cut that clips words
+    without removing any whole one, and for a cut shorter than
+    ``MIN_CUT_SECONDS`` once placed.
     """
-    start, end = _placed_edges(a, b, tokens, duration, silences or [])
+    start, end = _placed_edges(a, b, tokens, duration, silences or [], whole)
     if end - start < MIN_CUT_SECONDS:
         raise CutRejected(
             f"is too short to matter, under {MIN_CUT_SECONDS}s ({end - start:.3f}s once placed). "
@@ -190,9 +213,20 @@ def place_cut(
 
 
 def _placed_edges(
-    a: float, b: float, tokens: list[dict[str, Any]], duration: float, silences: list[Silence]
+    a: float, b: float, tokens: list[dict[str, Any]], duration: float, silences: list[Silence],
+    whole: list[Span] | None = None,
 ) -> tuple[float, float]:
-    removed = [w for w in tokens if a < _mid(w) < b]
+    # A laugh or long sound the cut covers only in part stays in. It sits
+    # before the cut when the cut starts inside it, else after.
+    sounds = set(whole or [])
+    stays = [
+        w for w in tokens
+        if sounds and is_event(w) and (float(w["start"]), float(w["end"])) in sounds
+        and covered_in_part(float(w["start"]), float(w["end"]), a, b)
+    ]
+    staying = {id(w) for w in stays}
+    before = {id(w) for w in stays if a > float(w["start"]) + COVERS_WHOLE_SECONDS}
+    removed = [w for w in tokens if a < _mid(w) < b and id(w) not in staying]
     if not removed:
         touched = [w for w in tokens if float(w["start"]) < b and float(w["end"]) > a]
         if touched:
@@ -202,8 +236,9 @@ def _placed_edges(
     removed_ids = {id(w) for w in removed}
     first_start = min(float(w["start"]) for w in removed)
     last_end = max(float(w["end"]) for w in removed)
-    kept_before = [w for w in tokens if id(w) not in removed_ids and _mid(w) <= a]
-    kept_after = [w for w in tokens if id(w) not in removed_ids and _mid(w) >= b]
+    kept = [w for w in tokens if id(w) not in removed_ids]
+    kept_before = [w for w in kept if (id(w) in before if id(w) in staying else _mid(w) <= a)]
+    kept_after = [w for w in kept if (id(w) not in before if id(w) in staying else _mid(w) >= b)]
 
     if kept_before:
         prev_end = max(float(w["end"]) for w in kept_before)
@@ -229,7 +264,8 @@ def _placed_edges(
 
 
 def _place_piece(
-    a: float, b: float, tokens: list[dict[str, Any]], duration: float, silences: list[Silence]
+    a: float, b: float, tokens: list[dict[str, Any]], duration: float, silences: list[Silence],
+    whole: list[Span] | None = None,
 ) -> tuple[float, float] | None:
     """Edges for one piece of a cut that was split around words the creator brought back.
 
@@ -239,7 +275,7 @@ def _place_piece(
     if not any(a < _mid(w) < b for w in tokens):
         return None
     try:
-        return _placed_edges(a, b, tokens, duration, silences)
+        return _placed_edges(a, b, tokens, duration, silences, whole)
     except CutRejected:
         return None
 
@@ -692,6 +728,45 @@ def keep_words_whole(
     return out, moved
 
 
+def leave_sounds_whole(
+    cuts: list[dict[str, Any]], sounds: list[Span], asked: list[Span],
+) -> tuple[list[dict[str, Any]], int]:
+    """``cuts`` with no automatic removal taking any part of a sound in ``sounds``, and how many cuts changed.
+
+    The last word on the rule in the module docstring. ``sounds`` are the
+    laughs and the sounds of a second or more (``sounds.whole_spans``).
+    Trims planned over one are dropped before the edit is built
+    (``protected``), so this finds nothing unless a later step widened a
+    removal: it is the one place that makes the rule hold whatever those
+    steps do. ``asked`` are the parts Claude and the creator chose, as
+    placed. What one of those covers of a sound was asked for and stays
+    removed; every other part of a sound is taken back out of a cut that
+    has an automatic part, which splits around it. A piece left under
+    ``MIN_CUT_SECONDS`` goes unless it holds a part that was asked for.
+    Each change is logged.
+    """
+    if not sounds:
+        return cuts, 0
+    theirs = _ByStart([(a, b, (a, b)) for a, b in asked])
+    whole = _ByStart([(a, b, (a, b)) for a, b in sounds])
+    out: list[dict[str, Any]] = []
+    changed = 0
+    for cut in cuts:
+        start, end = float(cut["start"]), float(cut["end"])
+        inside = whole.overlapping(start, end) if _has_an_automatic_part(cut) else []
+        own = theirs.overlapping(start, end) if inside else []
+        holes = [piece for a, b in inside for piece in span_without(a, b, own)]
+        if not holes:
+            out.append(cut)
+            continue
+        changed += 1
+        log.warning("an automatic cut at %.3f-%.3f reached into a laugh or a long sound; that part stays in", start, end)
+        for a, b in span_without(start, end, holes):
+            if b - a >= MIN_CUT_SECONDS or any(_overlaps(a, b, c, d) for c, d in own):
+                out.append({**cut, "start": round(a, 3), "end": round(b, 3)})
+    return out, changed
+
+
 # ── Remembered placements ─────────────────────────────────────────────────────
 
 # Where a cut of Claude's lands depends on the words, not on the pace. The
@@ -723,6 +798,13 @@ class _ByStart:
         return [what for a, b, what in self.items[first:last] if _overlaps(a, b, start, end)]
 
 
+def _stopped_at_sound_message(sound: Span) -> str:
+    return (
+        f"stopped at the laugh or long sound at {sound[0]:.2f}-{sound[1]:.2f}, which this cut covered only in "
+        "part, so it stays in whole. If the creator wants it out, send a cut that covers all of it."
+    )
+
+
 def _restored_message(span: Span) -> str:
     return (
         f"overlaps {span[0]:.2f}-{span[1]:.2f}, which the creator restored "
@@ -733,7 +815,7 @@ def _restored_message(span: Span) -> str:
 
 def _place_request(
     req: CutRequest, tokens: list[dict[str, Any]], duration: float, silences: list[Silence] | None,
-    holes: list[Span], take: str,
+    holes: list[Span], take: str, sounds: list[Span] | None = None,
 ) -> tuple[list[Span], Span | None]:
     """Where one of Claude's cuts lands: ``(pieces, whole)``, remembered for this ``take``.
 
@@ -741,16 +823,18 @@ def _place_request(
     piece, the cut as ``place_cut`` puts it. With holes the cut splits around
     them. ``whole`` is the unsplit placement when every piece fell away, so
     the cut can read as put back. ``take`` names the words and silences the
-    cut is placed on. Raises CutRejected as ``place_cut`` does.
+    cut is placed on, and ``sounds`` the sounds that go only with a cut over
+    the whole of them. Raises CutRejected as ``place_cut`` does.
     """
-    key = (take, req.start, req.end, tuple(holes))
+    sounds = [s for s in sounds or [] if _overlaps(req.start, req.end, s[0], s[1])]
+    key = (take, req.start, req.end, tuple(holes), tuple(sounds))
     with _placements_lock:
         hit = _placements.get(key)
         if hit is not None:
             _placements.move_to_end(key)
     if hit is None:
         try:
-            hit = _work_out_placement(req, tokens, duration, silences, holes)
+            hit = _work_out_placement(req, tokens, duration, silences, holes, sounds)
         except CutRejected as why:
             hit = why
         with _placements_lock:
@@ -765,14 +849,14 @@ def _place_request(
 
 def _work_out_placement(
     req: CutRequest, tokens: list[dict[str, Any]], duration: float, silences: list[Silence] | None,
-    holes: list[Span],
+    holes: list[Span], sounds: list[Span] | None = None,
 ) -> tuple[list[Span], Span | None]:
-    whole = place_cut(req.start, req.end, tokens, duration, silences)
+    whole = place_cut(req.start, req.end, tokens, duration, silences, sounds)
     if not holes:
         return [whole], None
     pieces = [
         placed for a, b in span_without(req.start, req.end, holes)
-        if (placed := _place_piece(a, b, tokens, duration, silences or [])) is not None
+        if (placed := _place_piece(a, b, tokens, duration, silences or [], sounds)) is not None
     ]
     return pieces, None if pieces else whole
 
@@ -821,6 +905,7 @@ def build_edit(
     creator_cuts: list[dict[str, Any]] | None = None,
     exact_keeps: list[Span] | None = None,
     picks: list[dict[str, Any]] | None = None,
+    whole_sounds: list[Span] | None = None,
 ) -> EditOutcome:
     """Validate, place, merge and finalize Claude's cuts, the creator's own cuts, Claude's picks and any auto cuts.
 
@@ -828,6 +913,9 @@ def build_edit(
     laughs (see the module docstring). ``override_keeps`` lets Claude's cuts
     into kept spans, for when the creator asks for the cut after all; a raw
     cut carrying ``OVERRIDE_FLAG`` gets the same for itself alone.
+    ``whole_sounds`` are the laughs and long sounds (``sounds.whole_spans``):
+    a cut of Claude's that covers one only in part stops at it, and
+    ``adjusted`` says which cut would take it out.
 
     ``creator_cuts`` are the cuts the creator made by hand, each ``{start,
     end}`` over the words she picked. ``exact_keeps`` are the words she
@@ -853,7 +941,7 @@ def build_edit(
             req = parse_cut(i, raw, duration)
             forced = override_keeps or req.override_keeps
             holes = [] if forced else [k for k in brought_back if _overlaps(req.start, req.end, k[0], k[1])]
-            pieces, whole = _place_request(req, tokens, duration, silences, holes, take)
+            pieces, whole = _place_request(req, tokens, duration, silences, holes, take, whole_sounds)
         except CutRejected as why:
             outcome.rejected.append({"index": i, "cut": raw, "why": f"Cut {i} {why}"})
             continue
@@ -870,11 +958,13 @@ def build_edit(
                 continue
             placed.append((req, start, end))
             if abs(start - req.start) > ADJUST_EPS or abs(end - req.end) > ADJUST_EPS:
+                left_in = next((s for s in whole_sounds or [] if covered_in_part(s[0], s[1], req.start, req.end)), None)
                 outcome.adjusted.append({
                     "index": i,
                     "requested": {"start": round(req.start, 3), "end": round(req.end, 3)},
                     "final": {"start": round(start, 3), "end": round(end, 3)},
                     "why": "split around words the creator brought back" if holes else
+                           _stopped_at_sound_message(left_in) if left_in else
                            "edges moved to word boundaries (midpoint rule) with a natural tail and lead-in kept",
                 })
 

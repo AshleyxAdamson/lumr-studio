@@ -108,7 +108,12 @@ def test_a_model_already_there_is_not_asked_for_again(no_transcript, jobs, both,
 def test_a_video_with_measured_times_needs_no_model(video, jobs, both, net):
     word_times.align_project(open_project(str(video)), aligner=FakeAligner(), silences=no_silences)
     answer = ask(video, jobs, both, net)
+    # Its sounds were never looked for: that takes a job, and no model, since the words are measured.
+    assert answer["status"] == "finding_sounds" and answer["word_times"] == "measured"
+    assert jobs.wait(answer["job_id"], timeout=20)["status"] == "done"
+    answer = ask(video, jobs, both, net)
     assert answer["status"] == "exists" and answer["word_times"] == "measured"
+    assert net.requests == []
 
 
 def test_transcribing_again_with_force_needs_the_speech_model_too(video, jobs, both, net):

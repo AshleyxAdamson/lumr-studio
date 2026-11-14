@@ -42,6 +42,7 @@ from typing import Any
 
 from lumr_studio.edit import clock, clock_span
 from lumr_studio.errors import StudioError
+from lumr_studio.sounds import NONE_FOUND, NOT_CHECKED
 from lumr_studio.transcript import _is_clause_end, _is_sentence_end, is_event, word_is_cut
 
 Word = dict[str, Any]
@@ -778,8 +779,14 @@ def check_joins(
     *,
     labels: list[Label] | None = None,
     max_listed: int = MAX_LISTED,
+    sounds_checked: bool | None = None,
 ) -> dict[str, Any]:
     """Read every join the way a viewer hears it and flag the ones likely to sound wrong.
+
+    ``sounds_checked`` says whether the transcript was ever looked through
+    for sounds (``sounds.sounds_checked``), so that with no labels the text
+    tells "none were found" from "nobody looked". Left out, it says only
+    that there are no labels.
 
     Returns {"joins": n, "flagged": k, "clean": n - k,
              "by_flag": {flag: count},
@@ -799,8 +806,10 @@ def check_joins(
     if by_flag:
         head += " " + ", ".join(f"{f} {n}" for f, n in by_flag.items()) + "."
     lines = [head]
-    if not labels:
-        lines.append("No sound labels, so laughs were not checked.")
+    if sounds_checked is False:
+        lines.append(NOT_CHECKED)
+    elif not labels:
+        lines.append(NONE_FOUND if sounds_checked else "No sound labels, so laughs were not checked.")
     lines += [_row_text(r) for r in listed]
     if len(flagged) > len(listed):
         lines.append(f"+{len(flagged) - len(listed)} more flagged, not listed.")

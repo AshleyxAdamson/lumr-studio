@@ -36,6 +36,7 @@ Get the video path from the creator. Call `transcribe` with it. It transcribes a
 | `status: "downloading"` with a `job_id` | The creator said yes and the download started. Wait on `job_status`, and tell the creator how far along it is. When it's done, call `transcribe` again with the same path. |
 | `job_id` | Wait on `job_status`. Tell the creator it transcribes and then measures where each word sits, about a minute more for a 20 minute video. |
 | `status: "aligning"` with a `job_id` | The transcript is there. The job measures the word times. Wait on it. |
+| `status: "finding_sounds"` with a `job_id` | The transcript and its word times are there. The job finds the laughs and other sounds between the words, which an older transcript was never checked for. Nothing is transcribed again. Wait on it. |
 | `status: "exists"` | Go on. |
 
 On `needs_models`, ask the creator before you do anything else. In a few short lines say what would download, from `models`: each name, what it does, its size in MB, where it comes from (`source_host`) and its license, then the total. What each does, in plain words:
@@ -152,7 +153,7 @@ Choose it from what you meant by the cut, not from words in your reason. If a li
 
 There are six stops: natural, standard, fast, tight, hard, max. Leave `pace` out unless the creator asked for something. Left out, it keeps what they set on the page or saved as their usual. Their own choice beats your guess.
 
-Every pace leaves a pause at each join: the most between sentences, less at a comma, the least inside a clause. From `hard` on that pause is very short. The automatic pause trims steer around a marked laugh but can still clip one, most at the harder paces: on the test take, 10 places at Standard and 23 at Max. Each shows up in `joins` as a `removes_laugh` or `clips_beat` row on an automatic trim. Read those rows in step 6 and pass on their fix, which asks the creator to keep that stretch on the page.
+Every pace leaves a pause at each join: the most between sentences, less at a comma, the least inside a clause. From `hard` on that pause is very short. No automatic trim takes any part of a laugh, likely or possible, or of a sound that lasts a second or more, at any pace: those lines of the transcript, `(laugh 3.5s)`, `(laugh? 1.6s)` and `(sound 1.4s)`, always play whole. A trim can still shorten a pause near a laugh. That shows up in `joins` as a `clips_beat` row on an automatic trim. Read those rows in step 6 and pass on their fix, which asks the creator to keep that stretch on the page. If any answer carries `sounds_note`, the transcript was never checked for laughs: call `transcribe` again and wait on its job before you go on.
 
 Say what the hard stops cost before you use one. `hard` leaves almost no pause between sentences. `max` cuts every pause it can reach, several each second of talk in places, and some joins will sound choppy. Both take more filler words, such as "and", "so" and "you know". No pace takes a "like": that word is yours to pick (step 5). Offer the page so the creator hears it before they export: Next steps through each cut that takes words; plain pauses are skipped.
 
