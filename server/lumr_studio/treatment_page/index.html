@@ -1401,7 +1401,7 @@ const Core = (function(){
       ["You cut 1 word."], ["You cut 12 words", "0:03 shorter"], ["Undone."].
       kind is 'cut', 'back', 'keep', 'unkeep' or 'undo'. `state` is the answer to it; `was`
       holds the photos and clips and the kept parts from before it. The time is
-      left out under a second. */
+      left out under a second. A kept part that came out longer than what she picked says by how much. */
   function actionParts(kind, state, was){
     const changed = (state && state.changed) || {};
     const n = kind === 'cut' ? changed.words_cut || 0 : kind === 'back' ? changed.words_back || 0 : 0;
@@ -1409,6 +1409,9 @@ const Core = (function(){
     const parts = [kind === 'undo' ? 'Undone' : kind === 'keep' ? 'You kept a part' : kind === 'unkeep' ? 'You stopped keeping a part'
       : kind === 'cut' ? (n ? 'You cut ' + count : 'Those words were cut already')
       : (n ? 'You brought back ' + count : 'You took back a cut')];
+    /* a kept part reaches to the ends of its sentences: she is told how far past what she picked that went */
+    const grew = kind === 'keep' ? changed.keep_widened || 0 : 0;
+    if(grew >= TIME_WORTH_SAYING) parts.push('it grew by ' + clock(Math.round(grew)) + ' to hold whole sentences');
     const sec = changed.seconds || 0;
     if(Math.abs(sec) >= TIME_WORTH_SAYING) parts.push(clock(Math.round(Math.abs(sec))) + (sec < 0 ? ' shorter' : ' longer'));
     /* a cut inside a part she kept: the newer one wins, and she is told */
@@ -1859,7 +1862,7 @@ const Core = (function(){
     const s = JSON.parse(JSON.stringify(state));
     const before = s.durations.edited, hidden = s.overlays.filter(o => o.status === 'hidden').map(o => o.id), had = s.rows.filter(r => r.by === 'you').length;
     const likesOut = x => (x.settings.take_out.likes ? x.take_out.find(k => k.key === EXAMPLE.likes[0]).count : 0), likesBefore = likesOut(s);
-    const did = { words_cut: 0, words_back: 0, keeps_changed: 0 };
+    const did = { words_cut: 0, words_back: 0, keeps_changed: 0, keep_widened: 0 };
     const flagsOf = id => exampleRows().find(r => r.id === id);
     const setRow = (r, st) => { const f = flagsOf(r.id); r.state = st; r.flags = st === 'put_back' ? [] : f.flags; r.flag_labels = st === 'put_back' ? [] : f.flag_labels; r.why = st === 'put_back' ? '' : f.why; };
     const picked = () => {
@@ -1939,6 +1942,7 @@ const Core = (function(){
       const keep = exampleKeep(a, b, body.note, !!body.exact);
       remember();
       if(body.exact) did.words_back = wordsBetween(W, keep.start - 0.01, keep.end + 0.01).filter(i => s.words[i][3]).length;
+      else did.keep_widened = r1(Math.max(0, body.start - keep.start) + Math.max(0, keep.end - body.end));
       recut(wordsBetween(W, keep.start - 0.01, keep.end + 0.01), false);
       if(!s.keeps.some(k => k.start <= keep.start && k.end >= keep.end)){
         s.keeps = s.keeps.filter(k => body.exact ? !(k.start >= keep.start && k.end <= keep.end) : !(keep.start < k.end && keep.end > k.start));

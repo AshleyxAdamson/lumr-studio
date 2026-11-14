@@ -626,6 +626,34 @@ def test_the_top_line_says_what_she_did_and_leaves_a_short_time_out():
 
 
 @needs_node
+def test_the_top_line_says_when_a_kept_part_grew_past_what_she_picked():
+    out = js("""
+      const did = (kind, changed) => Core.actionParts(kind, { changed });
+      const s = Core.exampleState(), W = s.words, b = Core.sentenceBounds(W, 40);
+      const inside = Core.exampleChange(s, 'api/keep', { start: W[b[0] + 1][1], end: W[b[0] + 1][2] });
+      const whole = Core.exampleChange(s, 'api/keep', { start: W[b[0]][1], end: W[b[1]][2] });
+      const exact = Core.exampleChange(s, 'api/keep', { start: W[b[0] + 1][1], end: W[b[0] + 1][2], exact: true });
+      return { said: [did('keep', { seconds: 43.1, keep_widened: 66.2 }), did('keep', { seconds: 0, keep_widened: 3.4 }),
+                      did('keep', { seconds: 0, keep_widened: 0.9 }), did('keep', { seconds: 2 }),
+                      did('cut', { words_cut: 1, seconds: -2, keep_widened: 9 })],
+               inside: [inside.changed.keep_widened, (k => k.end - k.start)(inside.keeps.find(k => k.start === W[b[0]][1])),
+                        W[b[0] + 1][2] - W[b[0] + 1][1]],
+               whole: whole.changed.keep_widened, exact: exact.changed.keep_widened };
+    """)
+    assert out["said"] == [
+        ["You kept a part", "it grew by 1:06 to hold whole sentences", "0:43 longer"],
+        ["You kept a part", "it grew by 0:03 to hold whole sentences"],
+        ["You kept a part."], ["You kept a part", "0:02 longer"],
+        ["You cut 1 word", "0:02 shorter"],
+    ]
+    grew, kept, picked = out["inside"]
+    assert grew > 0 and grew == pytest.approx(kept - picked, abs=0.06), "the example answers what the server answers"
+    assert out["whole"] == 0 and out["exact"] == 0
+    said = " ".join(part for parts in out["said"] for part in parts)
+    assert not decimal_times_in(said) and not banned_in(said) and not WORDS_GONE.search(said)
+
+
+@needs_node
 def test_a_sentence_in_the_top_line_keeps_its_full_stop_only_when_it_comes_last():
     out = js("""
       return [Core.factsLine(['18:58 after edits', 'You cut 1 word.']),

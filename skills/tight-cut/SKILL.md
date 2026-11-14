@@ -241,7 +241,7 @@ Call `set_edit` with your cuts and your `picks`. This saves a draft. Nothing is 
 
 Read the result:
 
-- `rejected`: fix each one using the reason given, or drop it.
+- `rejected`: read it on every `set_edit`, first, however long the rest of the answer is. A rejected cut is not in the edit, so what it would remove plays. Fix each one using the reason given, or drop it. When the reason is a part the creator kept or put back, the call is theirs: tell them which cut it was, its time and length, and that the part they kept covers it. Send it again with `override_keeps` only on their yes.
 - `adjusted`: the server moved an edge to a word boundary. Fine.
 - `joins`: the self-check. Read every flagged row. Each shows the words either side of the join and what would fix it.
 - `picks`: how many of your picked ums and likes are out (`out_counts` says it by word, such as "5 ums, 30 likes"), which were left in and why, which the creator kept, and which ids were refused. For a refused id, call `find_words` again and use its ids. When you call `set_edit` again to fix cuts, leave `picks` out: the saved ones stay. If `switch_on` is false, none of your picks is out, whatever the counts say: read `note`, and tell the creator when you present the plan that the ums and likes you picked still play until they switch Ums and likes on, on the page.
@@ -314,7 +314,7 @@ Their changes are already in the saved edit. If you call `set_edit` again, leave
 
 **Their switch.** `creator.take_out.likes: false` means they switched your picked ums and likes off. Leave it. You can still hand in a better pick list; it is saved for when they switch it on. The switch was called Filler likes before it held the ums. One switched off back then, on a video or in their usual, is still off and keeps the ums in too, so say that plainly and let them decide.
 
-A cut the creator put back, and any part they kept, stays that way. `set_edit` rejects a cut there. A cut of yours over a word they brought back splits around that word. Pass `override_keeps` only when the creator tells you to cut it after all.
+A cut the creator put back, and any part they kept, stays that way. `set_edit` rejects a cut there and names it under `rejected`: tell the creator, as step 6 says. A cut of yours over a word they brought back splits around that word. Pass `override_keeps` only when the creator tells you to cut it after all.
 
 **The creator's own cuts.** `creator.cuts` lists what they cut by hand and `creator.cut_words` counts what those cuts say.
 

@@ -479,9 +479,14 @@ def exact_spans_of(keep: list[dict[str, Any]]) -> list[Span]:
 
 
 def widen_to_sentences(start: float, end: float, words: Words) -> Span:
-    """``[start, end]`` widened to the whole sentences it touches, a laugh after the last one included.
+    """``[start, end]`` widened to the whole sentences it touches, each with the sounds that follow it closely.
 
-    A span that touches no sentence (it sits in a pause) is returned as is.
+    A laugh right after the last sentence is included; a sound further off
+    than ``samples.SOUND_AFTER_SENTENCE_SECONDS`` is not, and neither is the
+    pause before it. A sound that stands alone is taken whole when the span
+    reaches into it and left out when it does not, so a kept part never
+    holds half a sound. A span that touches no sentence and no sound (it
+    sits in a pause) is returned as is.
     """
     touched = [s for s in sentence_spans(words) if _overlaps(s[0], s[1], start, end)]
     if not touched:
@@ -1357,8 +1362,10 @@ def what_changed(before: Snapshot, after: Snapshot) -> dict[str, Any]:
     A trim or a flagged join counts as the same one when it overlaps one from
     before: a new pace moves edges without making it a different pause.
     ``overlays_hidden`` counts the photos and clips this change newly hid.
-    ``words_cut``, ``words_back`` and ``keeps_changed`` are zero here; the
-    action that cut or brought back words fills them in.
+    ``words_cut``, ``words_back``, ``keeps_changed`` and ``keep_widened``
+    are zero here; the action that cut, brought back or kept words fills
+    them in. ``keep_widened`` is how many seconds a new kept part reaches
+    past the stretch that was asked for, both ends together.
     """
     def unmatched(spans: list[Span], others: list[Span]) -> int:
         return sum(1 for a in spans if not any(_overlaps(*a, *b) for b in others))
@@ -1377,12 +1384,13 @@ def what_changed(before: Snapshot, after: Snapshot) -> dict[str, Any]:
         "words_cut": 0,
         "words_back": 0,
         "keeps_changed": 0,
+        "keep_widened": 0,
         "likes": after.likes - before.likes,
     }
 
 
-def _answer(ctx: Context, before: Snapshot, **words: int) -> dict[str, Any]:
-    """The new state with what changed. ``words`` are the counts only the action knows."""
+def _answer(ctx: Context, before: Snapshot, **words: float) -> dict[str, Any]:
+    """The new state with what changed. ``words`` are the counts, and the seconds a keep widened by, that only the action knows."""
     return page_state(ctx, changed={**what_changed(before, snapshot(ctx)), **words})
 
 
@@ -1839,9 +1847,12 @@ def _keep_whole(ctx: Context, yard: _Yard, picked: range, span: Span, note: str,
 def add_keep(ctx: Context, body: Any) -> dict[str, Any]:
     """Keep a stretch no matter what. Answers the new state.
 
-    Without ``exact`` the stretch widens to whole sentences. Claude's cuts
-    that overlap it are put back and automatic trims inside it are dropped.
-    A keep that overlaps an earlier flagged one merges with it.
+    Without ``exact`` the stretch widens to whole sentences (see
+    ``widen_to_sentences``). Claude's cuts that overlap it are put back and
+    automatic trims inside it are dropped. A keep that overlaps an earlier
+    flagged one merges with it. ``changed.keep_widened`` says how many
+    seconds the widening added to what was asked for, so a kept part that
+    grew far (a sentence with no full stop can run long) never grows unseen.
 
     With ``exact`` true it keeps exactly the words whose middle falls inside,
     which is how one removed word comes back. A cut of Claude's splits around
@@ -1866,17 +1877,20 @@ def add_keep(ctx: Context, body: Any) -> dict[str, Any]:
     picked = _need_words(yard, start, end) if exact else yard.picked(start, end)
     back = _removed_now(ctx, yard, picked)
     cuts, _ = _cuts_without(cuts, yard, picked)
+    widened = 0.0
     if exact:
         keep = _keep_exactly(ctx, yard, picked, note, keep)
         start, end = yard.span(picked)
     else:
         keep = _keep_whole(ctx, yard, picked, (start, end), note, keep, cuts)
+        asked = (start, end)
         start, end = widen_to_sentences(start, end, ctx.words)
+        widened = round((asked[0] - start) + (end - asked[1]), 1)
     _let_go_of_overrides(requested, start, end)
     before = snapshot(ctx)
     _rebuild(ctx, saved_treatment(ctx.edit), requested=requested, creator_cuts=cuts,
              keep=sorted(keep, key=lambda k: float(k["start"])), undo=_undo_of(ctx.edit))
-    return _answer(ctx, before, words_back=back if exact else 0)
+    return _answer(ctx, before, words_back=back if exact else 0, keep_widened=widened)
 
 
 def remove_keep(ctx: Context, body: Any) -> dict[str, Any]:

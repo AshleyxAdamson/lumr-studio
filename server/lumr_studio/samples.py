@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any
 
+from lumr_studio.sounds import PUNCHLINE_MAX_SECONDS_BEFORE
 from lumr_studio.transcript import _is_sentence_end, is_event
 
 Span = tuple[float, float]
@@ -38,6 +39,17 @@ Span = tuple[float, float]
 # A pause this long ends a sentence even without a full stop; transcripts
 # sometimes miss the punctuation.
 SENTENCE_GAP_SECONDS = 1.0
+# A sound belongs to what was said before it only when it starts this soon
+# after: a laugh right after its punchline does, a noise half a minute into
+# a wait does not. The number is the one ``sounds`` already holds for how
+# long before a laugh its line may have ended (``_punchline``, which asks
+# it when a connecting word sits between the two). It is longer than the
+# pause that ends a sentence for a word: a creator waits a beat for a
+# laugh, and at ``SENTENCE_GAP_SECONDS`` a laugh a little over a second
+# after its line would be split from it. Without a limit a kept part
+# reached from a line across a wait of half a minute to the end of a noise
+# in it, and put the wait back into the video.
+SOUND_AFTER_SENTENCE_SECONDS = PUNCHLINE_MAX_SECONDS_BEFORE
 
 # About this much edited playback per sample: long enough for a joke with its
 # setup, short enough to play three after every change.
@@ -92,12 +104,19 @@ def plain_why(saved: str) -> str:
 
 
 def sentence_spans(words: list[dict[str, Any]]) -> list[Span]:
-    """Every sentence as a ``(start, end)`` source span, in order.
+    """Every sentence, and every sound that stands alone, as a ``(start, end)`` source span, in order.
 
     A sentence ends after a word with a full stop, question mark or
     exclamation mark, or before a pause of ``SENTENCE_GAP_SECONDS``. A sound
-    (a laugh, a breath) belongs to the sentence before it, so a punchline and
-    its laugh stay together.
+    (a laugh, an um, a breath) belongs to the span before it when it starts
+    within ``SOUND_AFTER_SENTENCE_SECONDS`` of the last word or sound of
+    that span, so a punchline and its laugh stay together, and so do the
+    bouts of one long laugh.
+
+    A sound that follows nothing that closely stands on its own: it is a
+    span by itself, part of no sentence. The first word after it starts a
+    new sentence, however soon it comes, since a sound never belongs to
+    what is said after it. The pause before a lone sound is in no span.
     """
     spans: list[list[float]] = []
     open_sentence = False
@@ -105,12 +124,12 @@ def sentence_spans(words: list[dict[str, Any]]) -> list[Span]:
     for w in sorted(words, key=lambda x: float(x["start"])):
         start, end = float(w["start"]), float(w["end"])
         if is_event(w):
-            if spans:
+            if last_end is not None and round(start - last_end, 3) <= SOUND_AFTER_SENTENCE_SECONDS:
                 spans[-1][1] = max(spans[-1][1], end)
             else:
                 spans.append([start, end])
-                open_sentence = True
-            last_end = max(last_end or end, end)
+                open_sentence = False
+            last_end = end if last_end is None else max(last_end, end)
             continue
         gap_break = last_end is not None and start - last_end >= SENTENCE_GAP_SECONDS
         if open_sentence and not gap_break:

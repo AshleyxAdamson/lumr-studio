@@ -38,7 +38,7 @@ CLUSTER_KEYS = {"number", "start", "end", "clock", "clock_range", "edits", "seco
 OVERLAY_KEYS = {"id", "name", "kind", "start", "end", "clock", "status", "tag"}
 CHANGED_KEYS = {
     "trims", "trims_added", "trims_dropped", "seconds", "need_a_look", "new_flags", "overlays_hidden",
-    "your_cuts", "words_cut", "words_back", "keeps_changed", "likes",
+    "your_cuts", "words_cut", "words_back", "keeps_changed", "keep_widened", "likes",
 }
 ROW_KEYS = {
     "id", "start", "end", "clock", "seconds", "group", "reason", "by", "flags", "flag_labels", "note", "why",
@@ -418,6 +418,111 @@ def test_overlapping_kept_parts_merge(video):
     assert kept["start"] == 0.5 and kept["end"] >= 6.6 and "hello" in kept["note"]
 
 
+def test_a_kept_part_says_how_far_past_the_asked_stretch_it_reaches(video):
+    ctx = edited(video, pace="standard")
+    state = treatment.add_keep(ctx, {"start": 9.0, "end": 9.2})
+    assert state["changed"]["keep_widened"] == 2.5, "8.0 to 10.7 for 9.0 to 9.2: a second before, a second and a half after"
+    state = treatment.add_keep(ctx, {"start": 12.0, "end": 14.2})
+    assert state["changed"]["keep_widened"] == 0, "a whole sentence asked for, a whole sentence kept"
+    state = treatment.add_keep(ctx, {"start": 16.05, "end": 16.2, "exact": True})
+    assert state["changed"]["keep_widened"] == 0, "words brought back one by one never widen"
+
+
+# ── a kept part and the sounds near it ────────────────────────────────────────
+
+# A made-up bread-baking talk in the shape that went wrong on a real edit: a joke with its laugh, then a line,
+# a long wait the creator left for a clip with a noise late in it, and the next line.
+WAIT_TALK = [
+    ("The", 0.5, 0.7), ("first", 0.75, 1.05), ("loaf", 1.1, 1.4), ("came", 1.45, 1.7), ("out", 1.75, 1.95),
+    ("flat.", 2.0, 2.5), ("[vocalization]", 3.0, 5.0, "event"),
+    ("So", 5.6, 5.8), ("you", 5.85, 6.0), ("fold", 6.05, 6.4), ("the", 6.45, 6.6), ("dough", 6.65, 7.0),
+    ("over,", 7.05, 7.5), ("[vocalization]", 14.0, 16.0, "event"),
+    ("Now", 17.4, 17.6), ("it", 17.65, 17.8), ("rests.", 17.85, 18.4),
+]
+JOKE, LAUGH, LINE, NOISE = (0.5, 2.5), (3.0, 5.0), (5.6, 7.5), (14.0, 16.0)
+# Claude's cut of the wait: from just after the line to just before the next one, the noise with it.
+WAIT = {"start": 7.7, "end": 17.0, "reason": "the wait left for the clip", "kind": "other"}
+OVER_THE_LAUGH = {"start": 2.7, "end": 5.3, "reason": "dead air after the line", "kind": "other"}
+
+
+def wait_talk(video, cuts):
+    """The fixture's video with ``WAIT_TALK`` for a transcript and ``cuts`` saved, the page hearing the sounds ``set_edit`` hears."""
+    rows = [dict(zip(("word", "start", "end", "type"), row)) for row in WAIT_TALK]
+    video.with_suffix(".words.json").write_text(json.dumps(rows))
+    result = tools.set_edit(str(video), list(cuts), **QUIET)
+    return result, heard(video)
+
+
+def heard(video):
+    return treatment.load_context(open_project(str(video)), duration=DURATION, silences=no_silences,
+                                  labels_for=unmeasured_labels)
+
+
+def test_a_kept_line_ends_at_its_last_word_and_the_cut_of_the_wait_after_it_still_applies(video):
+    first, ctx = wait_talk(video, [WAIT])
+    assert first["rejected"] == [] and first["removed_seconds"] > 9.0
+    # Kept from inside the line to just past its last word, as the page sends a picked part.
+    state = treatment.add_keep(ctx, {"start": 6.3, "end": 7.55})
+    (kept,) = state["keeps"]
+    assert (kept["start"], kept["end"]) == (LINE[0], 7.55), "to the start of the line, and no further than was asked after it"
+    assert kept["text"] == "So you fold the dough over,"
+    assert state["changed"]["keep_widened"] == 0.7 and state["changed"]["seconds"] == 0, "nothing came back"
+    assert row(state, "other")["state"] == "kept_out"
+    assert removed_at(state, 10.0) and removed_at(state, NOISE[0] + 1.0), "the wait and the noise in it stay out"
+    assert state["durations"]["edited"] == first["new_duration"]
+    again = tools.set_edit(str(video), [WAIT], **QUIET)
+    assert again["rejected"] == [], "the kept line does not reach the wait, so the cut of the wait is no cut in a kept part"
+    assert len(again["applied"]) == 1 and again["new_duration"] == first["new_duration"]
+
+
+def test_a_kept_joke_holds_the_laugh_right_after_it_and_no_cut_takes_that_laugh(video):
+    _, ctx = wait_talk(video, [OVER_THE_LAUGH, WAIT])
+    state = treatment.add_keep(ctx, {"start": 1.1, "end": 1.9})
+    (kept,) = state["keeps"]
+    assert (kept["start"], kept["end"]) == (JOKE[0], LAUGH[1]), "the joke and its laugh, half a second after it"
+    assert kept["text"] == "The first loaf came out flat."
+    states = {(r["start"] < LAUGH[1]): r["state"] for r in state["rows"]}
+    assert states == {True: "put_back", False: "kept_out"}, "the cut over the laugh is put back, the cut of the wait stays"
+    assert not removed_at(state, 4.0) and removed_at(state, 10.0)
+    again = tools.set_edit(str(video), [OVER_THE_LAUGH, WAIT], **QUIET)
+    (refused,) = again["rejected"]
+    assert refused["index"] == 0 and "which the creator restored" in refused["why"]
+    assert len(again["applied"]) == 1
+
+
+def test_keeping_a_sound_that_stands_alone_keeps_that_sound_whole_and_nothing_around_it(video):
+    _, ctx = wait_talk(video, [])
+    state = treatment.add_keep(ctx, {"start": 14.5, "end": 15.0})
+    (kept,) = state["keeps"]
+    assert (kept["start"], kept["end"]) == NOISE, "never half a sound, and none of the wait before it"
+    assert state["changed"]["keep_widened"] == 1.5
+
+
+def test_a_kept_part_takes_a_lone_sound_only_when_it_reaches_into_it(video):
+    _, ctx = wait_talk(video, [])
+    short = treatment.add_keep(ctx, {"start": 6.3, "end": 13.9})["keeps"][0]
+    assert (short["start"], short["end"]) == (LINE[0], 13.9), "it stops where she stopped, a tenth short of the noise"
+    reaching = treatment.add_keep(ctx, {"start": 6.3, "end": 14.5})["keeps"][0]
+    assert (reaching["start"], reaching["end"]) == (LINE[0], NOISE[1])
+
+
+def test_a_kept_part_in_a_pause_with_no_sound_in_it_is_kept_as_asked(video):
+    _, ctx = wait_talk(video, [])
+    state = treatment.add_keep(ctx, {"start": 9.0, "end": 11.0})
+    assert [(k["start"], k["end"]) for k in state["keeps"]] == [(9.0, 11.0)] and state["changed"]["keep_widened"] == 0
+
+
+def test_keeping_a_lone_sound_inside_a_cut_of_claudes_says_how_much_came_back(video):
+    first, ctx = wait_talk(video, [WAIT])
+    state = treatment.add_keep(ctx, {"start": 14.5, "end": 15.0})
+    assert [(k["start"], k["end"]) for k in state["keeps"]] == [NOISE]
+    # A kept part stops a cut of Claude's whole, as it always did. The answer says what that brought back.
+    assert row(state, "other")["state"] == "put_back"
+    assert state["changed"]["seconds"] == first["removed_seconds"] and state["changed"]["seconds"] > 9.0
+    with pytest.raises(StudioError, match="Every cut was rejected.*14.00-16.00, which the creator restored"):
+        tools.set_edit(str(video), [WAIT], **QUIET)
+
+
 def test_a_cut_inside_a_kept_part_cannot_be_kept_out(video):
     ctx = edited(video)
     state = treatment.add_keep(ctx, {"start": 9.0, "end": 9.2})
@@ -547,7 +652,8 @@ def test_what_changed_matches_trims_that_only_moved():
                                flagged=[(10.05, 12.0), (20.0, 21.0)])
     assert treatment.what_changed(before, after) == {
         "trims": 1, "trims_added": 2, "trims_dropped": 1, "seconds": -1.5, "need_a_look": 2, "new_flags": 1,
-        "overlays_hidden": 0, "your_cuts": 0, "words_cut": 0, "words_back": 0, "keeps_changed": 0, "likes": 0,
+        "overlays_hidden": 0, "your_cuts": 0, "words_cut": 0, "words_back": 0, "keeps_changed": 0,
+        "keep_widened": 0, "likes": 0,
     }
 
 

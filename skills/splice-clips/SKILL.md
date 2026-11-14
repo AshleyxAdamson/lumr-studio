@@ -66,6 +66,8 @@ Then call `carry_edit` from the old video to the new one, and wait. Read the who
 - **split**: a cut ran across a splice point, as it does when the creator's wait was cut. That is right.
 - **shortened**, **dropped**, **not_placed**: read each one's `why`. If words the creator meant to lose are back, cut them again with `set_edit`.
 
+Every `set_edit` answer carries `rejected`. Read it first: a cut listed there is not in the edit, so what it would remove plays. When the reason is a part the creator kept, tell them which cut it was, its time and length, and send it again with `override_keeps` only on their yes.
+
 Done when the report's cuts add up: every cut of the old edit is carried, split, or named with a reason you can say to the creator.
 
 ## 6. Check each splice
@@ -77,6 +79,13 @@ For every splice point, both sides of it:
 - `read_transcript` across it. The cue line, the excerpt and the next line read as one thought.
 
 The pace tightens pauses inside the clips too. A laugh and any sound of a second or more always play whole, but a clip where someone thinks out loud can lose its air. If an excerpt reads rushed, tell the creator they can select it on the review page and press Keep.
+
+Keep holds the whole sentences they picked from, with a laugh right after the last one, and it beats your cuts: a cut that overlaps the kept part is put back whole. So once they say they pressed it, call `get_edit` and check the kept part:
+
+- Its entry under `creator.kept` ends at the excerpt's last word, or at a sound right after it.
+- `new_duration` is longer than before by the pauses inside the excerpt and no more.
+
+A part that runs on into the wait after the clip, or a length that jumped by about that wait, means your cut of the wait is back in the video. Tell the creator: they can remove that part from the Kept list on the page and keep the excerpt's words again. On your next `set_edit`, `rejected` names any cut the kept part still covers.
 
 Done when every splice has a clean `look` at both ends of its clip and a preview.
 

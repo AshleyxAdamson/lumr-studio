@@ -1794,7 +1794,8 @@ word_times}`. On the page the creator:
   One step of undo, for her cuts and keeps. It does not cover the pace, the
   sliders or the switches.
 - flags any stretch "keep no matter what": it widens to whole sentences, and
-  nothing of Claude's or the pace's cuts inside it
+  nothing of Claude's or the pace's cuts inside it. "What a kept part holds"
+  below says where a sentence ends and which sounds go with it.
 - listens to three samples of about 30 seconds (the stretch where the most
   pauses come out, around Claude's biggest cut, around a laugh), or picks
   three new ones
@@ -1906,6 +1907,53 @@ After the creator says they're done, call `get_edit` and read `creator` and
 Her cuts and keeps outlive every pace change, every switch and every
 `set_edit`. A word she cut beside a trimmed pause still leaves the pause the
 pace leaves.
+
+#### What a kept part holds
+
+A part kept with Keep (`POST api/keep` without `exact`) runs from the start
+of the first sentence it touches to the end of the last one
+(`treatment.widen_to_sentences`, on `samples.sentence_spans`):
+
+- A sentence ends after a word with a full stop, a question mark or an
+  exclamation mark, or before a pause of 1 s.
+- A sound belongs to the sentence before it when it starts within 1.5 s of
+  the last word or sound before it. So a punchline keeps its laugh, a laugh
+  keeps its bouts, and an um stays inside its sentence. 1.5 s is the limit
+  `sounds.py` already holds for how long after a line ends its laugh may
+  start.
+- A sound further off stands alone: it is part of no sentence, and neither
+  is the pause before it. The first word after it starts a new sentence. So
+  a kept line ends at its last word. It never reaches across a wait to a
+  noise in it, and a cut of Claude's over that wait stays a cut.
+- A kept part that reaches into a lone sound holds the whole sound, never
+  half of one. One that stops short of it leaves it out. Keep on the sound
+  alone keeps that sound and nothing around it.
+- A stretch that touches no sentence and no sound is kept as asked.
+
+A kept part still stops a cut of Claude's whole: a cut that overlaps it is
+put back from end to end, however little of it the part covers, and the
+next `set_edit` rejects that cut.
+
+The answer to `POST api/keep` says what the keep did, under `changed`:
+`seconds` is how much longer the video got, and `keep_widened` is how many
+seconds the kept part reaches past the stretch that was asked for, both ends
+together (0 with `exact`). The page says both in its top line, such as "You
+kept a part · it grew by 0:25 to hold whole sentences · 0:43 longer". A
+sentence with no full stop can run long, and a part that grew with it is
+never left unsaid.
+
+The three samples and the blocks on the bar start and end on the same
+spans, a lone sound among them. `read_transcript`, `find_words` and the
+`joins` check read sentences their own way and did not change: the
+transcript prints a sound as a line of its own, and `find_words` counts the
+pause before a sound as a pause.
+
+Before 0.4.2 a sound belonged to the sentence before it however late it
+came, so a line kept before a long wait reached to the end of a noise in
+that wait and put the wait back. A part kept then stays as it was saved:
+`creator.kept` in `get_edit` shows its start and end. When one runs past
+its last word across a wait, tell the creator, who can remove it from the
+Kept list on the page and keep the line again.
 
 ### forget_taste
 

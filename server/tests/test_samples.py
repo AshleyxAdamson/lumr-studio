@@ -65,6 +65,65 @@ def test_sentences_end_at_a_full_stop_or_a_long_pause_and_keep_their_laugh():
     assert sentence_spans(words) == [(0.0, 2.5), (2.8, 3.8), (5.0, 5.8)]
 
 
+def bake(*rows):
+    """Made-up lines of a bread-baking video: ``(text, start)`` for words said back to back, ``(start, end)`` for a sound."""
+    words = []
+    for a, b in rows:
+        if isinstance(a, str):
+            t = b
+            for token in a.split():
+                words.append(w(token, round(t, 3), round(t + 0.3, 3)))
+                t += 0.35
+        else:
+            words.append(w("[vocalization]", a, b, "event"))
+    return words
+
+
+def test_a_sound_long_after_a_sentence_stands_on_its_own():
+    # The shape that went wrong: a line, a wait of half a minute with a noise in it, the next line.
+    words = bake(("So you fold the dough over,", 10.0), (45.74, 53.74), ("Now it rests.", 55.1))
+    line, noise, after = sentence_spans(words)
+    assert line == (10.0, 12.05), "the line ends at its last word, not at the noise"
+    assert noise == (45.74, 53.74), "the noise is a span of its own"
+    assert after == (55.1, 56.1)
+    # The same with a full stop before the wait, and with the next line right behind the noise.
+    words = bake(("So you fold the dough over.", 10.0), (45.74, 53.74), ("Now it rests.", 53.9))
+    assert sentence_spans(words) == [(10.0, 12.05), (45.74, 53.74), (53.9, 54.9)]
+
+
+@pytest.mark.parametrize("pause, belongs", [(0.0, True), (0.5, True), (1.2, True), (1.5, True), (1.6, False), (3.0, False)])
+def test_a_sound_belongs_to_the_sentence_before_it_up_to_the_limit(pause, belongs):
+    assert samples.SOUND_AFTER_SENTENCE_SECONDS == 1.5
+    words = bake(("It came out flat.", 0.0), (round(1.35 + pause, 3), round(3.35 + pause, 3)), ("Anyway, the oven.", 9.0))
+    spans = sentence_spans(words)
+    if belongs:
+        assert spans == [(0.0, round(3.35 + pause, 3)), (9.0, 10.0)]
+    else:
+        assert spans == [(0.0, 1.35), (round(1.35 + pause, 3), round(3.35 + pause, 3)), (9.0, 10.0)]
+
+
+def test_the_word_after_a_lone_sound_starts_a_new_sentence():
+    # The line before the wait has no full stop, and the next word comes a tenth of a second after the noise.
+    words = bake(("and then you", 0.0), (20.0, 21.0), ("shape it.", 21.1))
+    assert sentence_spans(words) == [(0.0, 1.0), (20.0, 21.0), (21.1, 21.75)]
+
+
+def test_a_sound_before_the_first_word_stands_on_its_own():
+    words = bake((0.2, 0.9), ("Hello and welcome.", 1.0))
+    assert sentence_spans(words) == [(0.2, 0.9), (1.0, 2.0)]
+
+
+def test_an_um_inside_a_sentence_still_holds_it_together():
+    words = bake(("Then let it rest and,", 0.0), (1.8, 2.2), ("the thing is, wait.", 2.3))
+    assert sentence_spans(words) == [(0.0, 3.65)]
+
+
+def test_a_laugh_in_bouts_stays_with_its_line_and_a_far_one_does_not():
+    # Two bouts 1.2 s apart right after the punchline are one laugh. A third, six seconds later, is not.
+    words = bake(("It came out flat.", 0.0), (1.6, 3.0), (4.2, 5.0), (11.0, 12.0), (13.2, 14.0), ("Anyway.", 20.0))
+    assert sentence_spans(words) == [(0.0, 5.0), (11.0, 14.0), (20.0, 20.3)]
+
+
 def test_edited_clock_skips_what_is_cut():
     clock = EditedClock([(0.0, 10.0), (20.0, 30.0)])
     assert clock.at(5.0) == 5.0
@@ -98,6 +157,50 @@ def test_a_window_around_a_moment_has_room_either_side():
     clock = EditedClock([(0.0, 240.0)])
     start, end = window_around((100.0, 104.0), sentences, clock, 15.0, 15.0)
     assert 10.0 <= 100.0 - start <= 20.0 and 10.0 <= end - 104.0 <= 20.0
+
+
+def talk_with_a_wait():
+    """Two minutes of talk, a 40 s wait with an 8 s noise 30 s into it, two more minutes of talk. Returns ``(words, wait, noise)``."""
+    before = talk(minutes=2)
+    wait = (before[-1]["end"], before[-1]["end"] + 40.0)
+    noise = (round(wait[0] + 30.0, 3), round(wait[0] + 38.0, 3))
+    after = [w(x["word"], round(x["start"] + wait[1], 3), round(x["end"] + wait[1], 3)) for x in talk(minutes=2)]
+    return before + [w("[vocalization]", *noise, "event")] + after, wait, noise
+
+
+def test_no_sentence_runs_across_a_wait_to_a_noise_in_it():
+    words, wait, noise = talk_with_a_wait()
+    spans = sentence_spans(words)
+    assert noise in spans
+    assert not any(a < wait[0] + 1.0 and b > wait[0] + 1.0 for a, b in spans), "nothing spans the wait"
+
+
+def test_a_window_that_starts_on_the_line_before_a_wait_ends_on_that_line_or_past_the_wait():
+    words, wait, noise = talk_with_a_wait()
+    sentences = sentence_spans(words)
+    last = max(i for i, (_, b) in enumerate(sentences) if b <= wait[0] + 0.01)
+    clock = EditedClock([(0.0, wait[1] + 120.0)])
+    assert window_from(last, sentences, clock, seconds=4.0) == sentences[last], "one line, not the wait behind it"
+    # With the wait cut, as Claude cuts it, thirty seconds of playback reach well past it.
+    clock = EditedClock([(0.0, wait[0] + 0.2), (wait[1] - 0.2, wait[1] + 120.0)])
+    start, end = window_from(last, sentences, clock)
+    assert end > wait[1] and abs(clock.length(start, end) - 30.0) <= 3.0
+
+
+def test_a_joke_sample_holds_a_laugh_that_stands_alone():
+    # The laugh comes four seconds after its line: it is no part of the line, and the sample still plays it whole.
+    words = talk(minutes=2)
+    line_end = words[-1]["end"]
+    alone = laugh(round(line_end + 4.0, 3), round(line_end + 6.0, 3))
+    later = [w(x["word"], round(x["start"] + line_end + 8.0, 3), round(x["end"] + line_end + 8.0, 3)) for x in talk(minutes=2)]
+    words = words + [w("[vocalization]", alone["start"], alone["end"], "event")] + later
+    sentences = sentence_spans(words)
+    assert (alone["start"], alone["end"]) in sentences
+    picked = choose_samples(sentences, EditedClock([(0.0, 250.0)]), edits_for(words, laughs=[alone]))
+    joke = picked[SAMPLE_KEYS.index("joke")]
+    assert joke["why"] == WHY_JOKE and joke["start"] <= alone["start"] and joke["end"] >= alone["end"]
+    starts, ends = starts_and_ends(words)
+    assert joke["start"] in starts and joke["end"] in ends
 
 
 # ── choosing samples ──────────────────────────────────────────────────────────
@@ -235,6 +338,21 @@ def test_a_stretch_no_busier_than_average_is_not_a_section():
     removed = [(t + 5.0, t + 5.3, "auto") for t in [5.4 * i for i in range(60)]]  # the same everywhere
     sections = busy_sections(sentence_spans(words), removed, 360.0)
     assert len(sections) <= 3
+
+
+def test_a_noise_in_a_wait_leaves_the_busy_stretches_as_a_silent_wait_does():
+    words, wait, noise = talk_with_a_wait()
+    duration = wait[1] + 120.0
+    removed = [(wait[0] + 0.2, wait[1] - 0.2, "claude")] + [(60.0 * m + 5.0, 60.0 * m + 5.4, "auto") for m in (0, 1, 3, 4)]
+    sections = busy_sections(sentence_spans(words), removed, duration)
+    starts, ends = starts_and_ends(words)
+    assert all(s["start"] in starts and s["end"] in ends for s in sections), "whole sentences and whole sounds"
+    assert all(a["end"] < b["start"] for a, b in zip(sections, sections[1:]))
+    assert not any(s["start"] < wait[0] and s["end"] > wait[0] + 1.0 for s in sections), "no line drags the wait along"
+    # The same wait with nothing heard in it: the same stretches before it, and as many after, holding as much.
+    quiet = busy_sections(sentence_spans([x for x in words if x.get("type") != "event"]), removed, duration)
+    assert [s for s in sections if s["end"] <= wait[0]] == [s for s in quiet if s["end"] <= wait[0]]
+    assert [(s["cuts"], s["seconds_removed"]) for s in sections] == [(s["cuts"], s["seconds_removed"]) for s in quiet]
 
 
 @pytest.mark.parametrize("removed", [[], None])

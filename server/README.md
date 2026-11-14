@@ -159,7 +159,7 @@ by `../hooks/hooks.json` at session start) against stub programs on a trimmed
 | `look.py` | One picture of a join, for Claude |
 | `pace.py` | The six pace stops, the two sliders, and the pause each setting leaves |
 | `treatment.py` | The page's state and every change the page can make |
-| `samples.py` | The three samples, the clusters, and the shade rule |
+| `samples.py` | The three samples, the clusters, the shade rule, and the sentence spans they and kept parts share (`sentence_spans`: a sound belongs to the sentence before it only when it starts within 1.5 s; one further off stands alone) |
 | `review_server.py` | The local web server for the page: routes, token, export |
 | `review.py` | The earlier decision queue, still answered, no page calls it |
 | `overlays.py`, `overlay_render.py`, `overlay_tools.py`, `overlay_mcp.py` | The creator's photos and clips: checking, drawing, tools, MCP wiring. An extra: `overlay_mcp.register` runs only with `overlays` on, and the rest stays linked and dormant (`render_jobs.py` and `treatment.py` import it, and with no saved overlays it draws nothing) |
@@ -186,6 +186,7 @@ creator's footage stays on the creator's machine: the server binds to
 | Three samples and "New samples" | `samples[]`, `POST api/samples` |
 | Double-click a word to cut it or bring it back | `words[]` (the fifth value says who took a word out), `POST api/cut/add`, `POST api/keep {exact: true}`, `POST api/cut/remove` |
 | Cut and Keep on picked words, and the "Kept: N" list | `POST api/cut/add`, `keeps[]`, `POST api/keep`, `POST api/keep/remove` |
+| The top line after Keep: how far the part grew past the picked words, and how much longer the video got | `changed.keep_widened`, `changed.seconds` |
 | Undo, for the creator's cuts and keeps, one step | `can_undo`, `POST api/undo` |
 | The line under the pace when the word times are estimated | `word_times`, `word_times_note` |
 | The bar: one block per cluster, shaded by its number of edits | `clusters[].level` |
