@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from lumr_studio import carry
 from lumr_studio import edit as edits
 from lumr_studio import frames as screenshots
 from lumr_studio import models, reels, taste
@@ -150,16 +151,21 @@ ASK_BEFORE_DOWNLOADING = (
 )
 IF_THEY_SAY_NO = " If they say no, go on with the transcript as it is, on estimated word times."
 MODELS_DOWNLOADED_NEXT = "Call transcribe again with the same video_path. It goes on now."
+# The same two, as carry_edit says them.
+CARRY_ASK_BEFORE_DOWNLOADING = ASK_BEFORE_DOWNLOADING.replace("call transcribe again", "call carry_edit again")
+CARRY_MODELS_DOWNLOADED_NEXT = "Call carry_edit again with the same from_video and to_video. It goes on now."
 
 
-def _needs_models(missing: list[models.Model], summary: dict[str, Any] | None) -> dict[str, Any]:
+def _needs_models(
+    missing: list[models.Model], summary: dict[str, Any] | None, ask: str = ASK_BEFORE_DOWNLOADING
+) -> dict[str, Any]:
     """The ``needs_models`` answer. With a ``summary``, the transcript is there and only word times are missing."""
     described = [m.describe() for m in missing]
     answer: dict[str, Any] = {
         "status": "needs_models",
         "models": described,
         "total_mb": sum(m["size_mb"] for m in described),  # the sizes as shown, so the sum adds up
-        "note": ASK_BEFORE_DOWNLOADING + (IF_THEY_SAY_NO if summary else ""),
+        "note": ask + (IF_THEY_SAY_NO if summary else ""),
     }
     if summary:
         answer.update(summary, word_times_note=RUNS_ON_ESTIMATES)
@@ -167,13 +173,14 @@ def _needs_models(missing: list[models.Model], summary: dict[str, Any] | None) -
 
 
 def _start_download(
-    project: Project, missing: list[models.Model], opener: models.Opener, jobs: JobRegistry
+    project: Project, missing: list[models.Model], opener: models.Opener, jobs: JobRegistry,
+    next_step: str = MODELS_DOWNLOADED_NEXT,
 ) -> dict[str, Any]:
     """Start the download of ``missing``, or join the one already running for this video."""
 
     def work(handle: JobHandle) -> dict[str, Any]:
         fetched = models.download(missing, opener, handle.set_progress)
-        return {"models_downloaded": [m.title for m in fetched], "next": MODELS_DOWNLOADED_NEXT}
+        return {"models_downloaded": [m.title for m in fetched], "next": next_step}
 
     job_id, _started = jobs.start_one(DOWNLOAD_KIND, project, work)
     return {"status": "downloading", "job_id": job_id, "models": [m.describe() for m in missing]}
@@ -257,6 +264,84 @@ def assemble(name: str, pieces: list[dict[str, Any]], *, jobs: JobRegistry = JOB
         return built
     project.root.mkdir(parents=True, exist_ok=True)
     job_id, _started = jobs.start_one(reels.KIND, project, reels.builder(plan))
+    return {"job_id": job_id}
+
+
+def carry_edit(
+    from_video: str,
+    to_video: str,
+    download_models: bool = False,
+    *,
+    transcriber: Transcriber = speech_transcriber,
+    aligner: Aligner | None = None,
+    silences: SilenceProvider = measured_silences,
+    labels: LabelProvider | None = None,
+    jobs: JobRegistry = JOBS,
+    model_set: models.ModelSet | None = None,
+    opener: models.Opener = models.open_url,
+) -> dict[str, Any]:
+    """Carry the saved edit of ``from_video`` onto ``to_video``, a video made from the same footage.
+
+    ``to_video`` is the new reel ``assemble`` built after clips were added,
+    taken out or moved; ``from_video`` is the reel that was edited, or a
+    plain video that is now a clip of the new reel. One job writes the new
+    video's transcript from the old one's words (the speech model hears only
+    the stretches no transcript covers), measures the word times, and places
+    the edit: Claude's cuts and picks, the creator's cuts, kept parts and
+    ratings, the pace and switches, and her photos and clips. See
+    ``carry.py``. The answer is ``{job_id}``; the finished job's result is
+    the report.
+
+    Before anything starts, a model the job needs may be missing; the
+    answer is then ``needs_models`` or ``downloading``, as ``transcribe``
+    gives them. The speech model is needed only when there is a stretch to
+    hear, and the word-timing model only when the old edit sits on measured
+    times. Raises StudioError when ``from_video`` has no saved edit, when
+    ``to_video`` already has one, or when the two share no footage. Nothing
+    of the old video's project is written, and nothing is overwritten.
+    """
+    project = open_project(to_video)
+    running = jobs.latest(carry.KIND, project)
+    if running is not None and running.status == "running":
+        return {"job_id": running.job_id}
+    plan = carry.plan_carry(from_video, to_video)
+    aligner = aligner or Wav2Vec2Aligner()
+    labels = labels or measured_labels
+    model_set = models.PRODUCTION if model_set is None else model_set
+    measured = project.words_path.exists() and word_times.source_of(project) == word_times.MEASURED
+    wanted = [model_set.speech] if plan.to_hear else []
+    if not measured and plan.measured:
+        wanted.append(model_set.aligner)
+    missing = [m for m in wanted if m is not None and not m.present()]
+    if missing:
+        if download_models:
+            return _start_download(project, missing, opener, jobs, CARRY_MODELS_DOWNLOADED_NEXT)
+        return _needs_models(missing, None, CARRY_ASK_BEFORE_DOWNLOADING)
+
+    def work(handle: JobHandle) -> dict[str, Any]:
+        transcript = carry.write_transcript(
+            plan, hear=lambda video, start, end: carry.hear(video, start, end, transcriber=transcriber),
+            on_progress=lambda done: handle.set_progress(0.4 * done),
+        )
+        handle.set_progress(0.4)
+        timed: dict[str, Any] = {}
+        if word_times.source_of(project) != word_times.MEASURED:
+            timed = _measure_word_times(project, aligner, silences, labels)
+        handle.set_progress(0.8)
+        placed = carry.place_edit(plan, silences=silences, labels=labels)
+        return {
+            "status": "carried",
+            "from_video": str(plan.source.video),
+            "to_video": str(project.video),
+            "transcript": transcript,
+            **timed,
+            "word_times": word_times.source_of(project),
+            **placed.report,
+            "joins": _joins_report(placed.cuts, placed.words, placed.duration, placed.sounds),
+            "note": carry.AFTER_CARRYING,
+        }
+
+    job_id, _started = jobs.start_one(carry.KIND, project, work)
     return {"job_id": job_id}
 
 

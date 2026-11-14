@@ -20,7 +20,7 @@ EDITOR_TOOLS = {
     "transcribe": False, "read_transcript": True, "analyze_take": True, "get_edit": True,
     "set_edit": False, "preview": False, "render": False, "job_status": True,
     "look": False, "frames": False, "review": False, "find_words": True, "forget_taste": False,
-    "assemble": False,
+    "assemble": False, "carry_edit": False,
 }
 # What LUMR_STUDIO_EXTRAS=publish_kit,overlays adds.
 EXTRA_TOOLS = {
@@ -108,7 +108,7 @@ def test_server_lists_tools_and_answers_get_edit(video, plugin_data):
     listed, edit, bad, text, found, shots, client_instructions = asyncio.run(talk())
 
     by_name = {t.name: t for t in listed}
-    assert len(listed) == len(by_name) == 14, sorted(by_name)
+    assert len(listed) == len(by_name) == 15, sorted(by_name)
     assert set(by_name) == set(EDITOR_TOOLS)
     check_tools(by_name, EDITOR_TOOLS)
     for name, words in EXPORT_WORDS.items():
@@ -116,6 +116,12 @@ def test_server_lists_tools_and_answers_get_edit(video, plugin_data):
         assert all(word in said for word in words), f"{name} must say {words}: {by_name[name].description!r}"
     # job_status says where an export's id comes from on the input itself.
     assert "reel" in by_name["assemble"].description.lower()
+    # carry_edit takes two videos, and says what it carries and that the old edit stays.
+    carry = by_name["carry_edit"]
+    assert set(carry.input_schema["properties"]) == {"from_video", "to_video", "download_models"}
+    assert set(carry.input_schema["required"]) == {"from_video", "to_video"}
+    assert all(word in carry.description for word in ("job_id", "joins", "needs_models", "not changed"))
+    assert "carry_edit" in by_name["assemble"].description
     job_id = by_name["job_status"].input_schema["properties"]["job_id"]["description"]
     assert "export" in job_id and "get_edit" in job_id, job_id
     # forget_taste takes no video, and says to ask before everything.
@@ -124,6 +130,7 @@ def test_server_lists_tools_and_answers_get_edit(video, plugin_data):
     assert not forget.input_schema.get("required")
     assert all(word in forget.description.lower() for word in FORGET_WORDS), forget.description
     assert "except job_status and forget_taste" in client_instructions
+    assert "call carry_edit" in client_instructions
 
     assert not edit.is_error
     assert edit.structured_content["cuts"] == []
@@ -180,7 +187,7 @@ def test_the_extras_flag_brings_back_the_publish_kit_and_the_overlays(plugin_dat
     listed, instructions = asyncio.run(talk())
 
     by_name = {t.name: t for t in listed}
-    assert len(listed) == len(by_name) == 18, sorted(by_name)
+    assert len(listed) == len(by_name) == 19, sorted(by_name)
     assert set(by_name) == set(EDITOR_TOOLS) | set(EXTRA_TOOLS)
     check_tools(by_name, {**EDITOR_TOOLS, **EXTRA_TOOLS})
     assert "set_overlays shows the creator's own photos and clips" in instructions
