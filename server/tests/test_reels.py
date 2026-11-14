@@ -811,7 +811,9 @@ def test_a_plain_video_reads_exactly_as_it_did(video):
     project = open_project(str(video))
     words = word_times.load_words(project)
     plain = pack_transcript(words, labels=unmeasured_labels(project, words))
-    assert tools.read_transcript(str(video), labels=unmeasured_labels) == plain
+    read = tools.read_transcript(str(video), labels=unmeasured_labels)
+    read.pop("sounds_note")  # the fixture's transcript was never looked through for sounds, and the answer says so
+    assert read == plain
     assert "==" not in plain["text"]
     # Pinned to what the packer printed before reels existed, so a change to plain output shows here.
     assert plain["text"].splitlines()[:6] == [

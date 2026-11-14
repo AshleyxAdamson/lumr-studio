@@ -17,6 +17,7 @@ from lumr_studio.sounds import (
     measure_events,
     measure_samples,
     protected_spans,
+    whole_spans,
 )
 
 RNG = np.random.default_rng(7)
@@ -151,7 +152,7 @@ def test_label_shape_and_order():
     assert labels[0] == {
         "start": 4.0, "end": 6.5, "seconds": 2.5, "kind": "laugh",
         "confidence": "possible", "voiced": None, "bursts": None, "burst_rate": None,
-        "punchline": labels[0]["punchline"],
+        "over_speech_db": None, "punchline": labels[0]["punchline"],
     }
 
 
@@ -174,18 +175,35 @@ def test_is_filler_reads_the_voiced_share_of_a_sound_not_a_laugh():
     assert not is_filler(breath) and not is_filler(unmeasured) and not is_filler(a_laugh)
 
 
-def test_is_filler_refuses_a_voiced_laugh_train_judged_as_a_sound():
-    # A giggle can measure breathy enough to read as pitched throughout (voiced 0.6, over
-    # FILLER_VOICED_MIN) without being breathy enough for _judge to call it a laugh (LAUGH_VOICED
-    # tops out at 0.5); its burst train still gives it away.
-    giggle = {"kind": "sound", "voiced": 0.6, "bursts": 6, "burst_rate": 4.5}
-    assert not is_filler(giggle), "a burst train in laugh's rate is a laugh, whatever it measured as"
-    # A held "uhh" has no train (bursts under LIKELY_MIN_BURSTS) and is still a filler.
-    uhh = {"kind": "sound", "voiced": 0.6, "bursts": 1, "burst_rate": 0.0}
+def test_is_filler_refuses_a_sound_in_bursts_and_a_sound_of_a_second():
+    # A giggle is voiced like an "uhh" (0.6, over FILLER_VOICED_MIN). What tells them apart is the
+    # bursts: a held "uhh" is one steady sound.
+    uhh = {"kind": "sound", "voiced": 0.6, "bursts": 1, "burst_rate": 0.0, "start": 3.0, "end": 3.5}
     assert is_filler(uhh)
-    # A voiced train too fast or slow for laughter is not one either.
-    too_fast = {"kind": "sound", "voiced": 0.6, "bursts": 6, "burst_rate": 9.0}
-    assert is_filler(too_fast)
+    for bursts, rate in ((6, 4.5), (3, 6.9), (2, 5.6)):
+        giggle = {**uhh, "bursts": bursts, "burst_rate": rate}
+        assert not is_filler(giggle), "a sound in bursts is no held hesitation, however short"
+    # A sound that goes on for a second is no filler either, steady or not: a person decides.
+    assert is_filler({**uhh, "end": 3.99})
+    assert not is_filler({**uhh, "end": 4.0})
+    assert not is_filler({"kind": "sound", "voiced": 0.9, "bursts": 1, "seconds": 1.2})
+
+
+def test_a_pitched_laugh_in_bursts_is_a_laugh_not_only_a_breathy_one():
+    # Measures like the ones a 7 second giggle and three short laughs gave: voiced well over half the time.
+    long_giggle = {"bursts": 11, "burst_rate": 4.2, "voiced": 0.69}
+    short_giggle = {"bursts": 5, "burst_rate": 4.9, "voiced": 0.73}
+    three_bursts = {"bursts": 3, "burst_rate": 6.9, "voiced": 0.66}
+    # After the punchline a train is a likely laugh; mid-sentence it is a possible one.
+    labels = classify_events(talk(), measures=[short_giggle, long_giggle, UHH_MEASURE])
+    assert [(l["kind"], l["confidence"]) for l in labels[:2]] == [("laugh", "likely"), ("laugh", "possible")]
+    # Two or three bursts at the rate of laughter are a possible laugh after a punchline, and only there.
+    labels = classify_events(talk(), measures=[three_bursts, three_bursts, UHH_MEASURE])
+    assert [(l["kind"], l["confidence"]) for l in labels[:2]] == [("laugh", "possible"), ("sound", "possible")]
+    assert not is_filler(labels[1])
+    # A train with no voice in it is something handled or a clap, never a laugh.
+    rustle = {"bursts": 20, "burst_rate": 4.7, "voiced": 0.04}
+    assert classify_events(talk(), measures=[rustle, UHH_MEASURE, UHH_MEASURE])[0]["kind"] == "sound"
 
 
 def test_laugh_train_mid_sentence_is_only_possible():
@@ -253,7 +271,8 @@ def test_protected_span_runs_from_the_beat_before_the_punchline_to_the_pause_aft
     labels = classify_events(words, measures=[LAUGH_MEASURE, UHH_MEASURE, UHH_MEASURE])
     # The setup ends at 1.24 and the punchline starts at 1.5: that beat is protected.
     # Laugh 4.0-6.5, next word at 6.6: the 0.1 s pause is protected whole.
-    assert protected_spans(labels, words) == [(pytest.approx(1.24), pytest.approx(6.6))]
+    # The steady sound at 7.8-10.0 is no laugh, but it lasts over a second: it protects itself.
+    assert protected_spans(labels, words) == [(pytest.approx(1.24), pytest.approx(6.6)), (7.8, 10.0)]
 
 
 def test_pause_before_the_punchline_is_capped_at_one_second():
@@ -272,10 +291,12 @@ def test_pause_after_laugh_is_capped_at_one_second():
     assert protected_spans(labels, words) == [(0.0, 5.0)]
 
 
-def test_laugh_without_punchline_protects_itself_and_sounds_protect_nothing():
+def test_laugh_without_punchline_and_a_long_sound_protect_themselves_and_a_short_sound_protects_nothing():
     words = talk()
     labels = classify_events(words, measures=[UHH_MEASURE, LAUGH_MEASURE, UHH_MEASURE])
-    assert protected_spans(labels, words) == [(7.8, pytest.approx(10.1))]
+    # 4.0-6.5 is a steady sound of 2.5 s, 7.8-10.0 a laugh with its pause after, 11.3-11.6 a short "uhh".
+    assert protected_spans(labels, words) == [(4.0, 6.5), (7.8, pytest.approx(10.1))]
+    assert whole_spans(labels) == [(4.0, 6.5), (7.8, 10.0)]
 
 
 def run_on(start: float, seconds: float) -> list[dict]:

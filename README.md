@@ -93,6 +93,5 @@ PolyForm Noncommercial 1.0.0. You can sell the videos you make with it. You can'
 - **Timeline export, next up.** Send the edit to Premiere, Final Cut or Resolve as a timeline (FCPXML, Premiere XML and EDL) instead of a finished file, so you can finish in your own editor. It's built from the same kept pieces the render uses, and each cut carries Claude's reason as a marker.
 - Intel Macs, Windows and Linux.
 - Bring the server up in the first session without a Reconnect.
-- Keep laughs safe from the automatic trims at the harder paces.
 - Undo more than one step.
 - Ship the extras switched on.

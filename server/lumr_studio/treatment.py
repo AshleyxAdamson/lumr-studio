@@ -103,7 +103,7 @@ from lumr_studio.samples import (
     sentence_spans,
 )
 from lumr_studio.silences import SilenceProvider
-from lumr_studio.sounds import LAUGH, LIKELY, protected_spans
+from lumr_studio.sounds import LAUGH, LIKELY, protected_spans, whole_spans
 from lumr_studio.transcript import is_event, plain_text
 
 log = logging.getLogger(__name__)
@@ -315,9 +315,13 @@ class MadeEdit:
     # sound of the transcript, where a removal met a part of it quieter than
     # the measured silences (``edit.keep_words_whole``).
     edges_moved_out_of_words: int = 0
+    # Automatic removals the last check split around a laugh or a long sound
+    # (``edit.leave_sounds_whole``). Trims over one are dropped before that,
+    # so this stays 0 unless a later step widened a removal.
+    cuts_kept_off_sounds: int = 0
 
 
-_recipes: OrderedDict[tuple[Any, ...], MadeEdit] = OrderedDict()
+_recipes:OrderedDict[tuple[Any, ...], MadeEdit] = OrderedDict()
 _recipes_lock = threading.Lock()
 
 
@@ -332,13 +336,14 @@ def forget_recipes() -> None:
 def _recipe_key(cuts: list[Any], words: Words, duration: float, silences: list[Silence],
                 protected: list[Span], keeps: list[Span], treatment: Treatment, override_keeps: bool,
                 creator_cuts: list[dict[str, Any]], exact_keeps: list[Span],
-                picks: list[dict[str, Any]], filler_trims: list[dict[str, Any]]) -> tuple[Any, ...]:
+                picks: list[dict[str, Any]], filler_trims: list[dict[str, Any]],
+                whole: list[Span]) -> tuple[Any, ...]:
     return (
         json.dumps(cuts, sort_keys=True, default=str), words_key(words), round(float(duration), 3),
         silences_key(silences), tuple(protected), tuple(keeps), treatment, override_keeps,
         tuple((float(c["start"]), float(c["end"])) for c in creator_cuts), tuple(exact_keeps),
         tuple((float(c["start"]), float(c["end"])) for c in picks),
-        tuple((float(t["start"]), float(t["end"])) for t in filler_trims),
+        tuple((float(t["start"]), float(t["end"])) for t in filler_trims), tuple(whole),
     )
 
 
@@ -365,9 +370,12 @@ def make_edit(
     creator's (trims near a joke or inside a kept span are dropped there),
     then shorten each trim so its join leaves the pause the pace allows.
     Last, no automatic removal keeps an edge inside a word or a sound of the
-    transcript (``edit.keep_words_whole``).
+    transcript (``edit.keep_words_whole``), and none keeps any part of a
+    laugh or of a sound of a second or more (``edit.leave_sounds_whole``).
     ``sounds`` are the
-    sound labels; their laughs become the protected spans, and a filler
+    sound labels; their laughs and long sounds become the protected spans
+    and the sounds a cut of Claude's takes only when it covers them whole
+    (``sounds.whole_spans``), and a filler
     vocalization (``sounds.is_filler``: a held "umm" or "uhh", not the tail
     of the word before it) becomes a trim of its own while Filler words is
     on (``autocuts.vocalization_filler_trims``), whatever the pace. Its span
@@ -383,11 +391,12 @@ def make_edit(
     """
     level = treatment.level()
     protected = protected_spans(sounds, words)
+    whole = whole_spans(sounds)
     creator_cuts, exact_keeps = list(creator_cuts or []), list(exact_keeps or [])
     picks = list(picks or []) if treatment.picks_on else []
     filler_trims = vocalization_filler_trims(sounds, words)
     key = _recipe_key(cuts, words, duration, silences, protected, keeps, treatment, override_keeps,
-                      creator_cuts, exact_keeps, picks, filler_trims)
+                      creator_cuts, exact_keeps, picks, filler_trims, whole)
     with _recipes_lock:
         hit = _recipes.get(key)
         if hit is not None:
@@ -407,17 +416,19 @@ def make_edit(
     outcome = edits.build_edit(
         cuts, words, duration, auto_cuts=auto, silences=silences,
         keeps=keeps, protected=protected, override_keeps=override_keeps,
-        creator_cuts=creator_cuts, exact_keeps=exact_keeps, picks=picks,
+        creator_cuts=creator_cuts, exact_keeps=exact_keeps, picks=picks, whole_sounds=whole,
     )
     made = MadeEdit(outcome=outcome, treatment=treatment, level=level, shortest=shortest, planned=len(auto))
     hers = [(c["start"], c["end"]) for c in outcome.creator_placed]
     hers += [(c["start"], c["end"]) for c in outcome.picks if c["status"] == edits.PICK_OUT]
+    asked = hers + [(p["start"], p["end"]) for p in outcome.placed if not p["put_back"]]
     if FILLER_TRIM_KIND in treatment.trims:
         hers += [(t["start"], t["end"]) for t in filler_trims]
     if treatment.trims:
         outcome.cuts, made.pauses = settle_trims(outcome.cuts, words, silences, level, hers)
     chosen = hers + [(p["start"], p["end"]) for p in outcome.placed if not p["put_back"]]
     outcome.cuts, made.edges_moved_out_of_words = edits.keep_words_whole(outcome.cuts, words, chosen)
+    outcome.cuts, made.cuts_kept_off_sounds = edits.leave_sounds_whole(outcome.cuts, whole, asked)
     with _recipes_lock:
         _recipes[key] = copy.deepcopy(made)
         while len(_recipes) > RECIPE_CACHE_SIZE:

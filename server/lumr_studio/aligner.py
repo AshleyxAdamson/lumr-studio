@@ -21,6 +21,8 @@ from typing import Any
 from lumr_studio import word_times
 from lumr_studio.engine.alignment import _clamp_ends_to_silence, _decode_segment, normalize_word
 from lumr_studio.engine.audio_boundaries import Silence
+from lumr_studio.errors import StudioError
+from lumr_studio.project import Project
 
 # Long audio is aligned a window at a time: one pass over a 20 minute take
 # would blow up the model's attention memory.
@@ -84,6 +86,87 @@ def _place_words(model: Any, device: str, waveform: Any, words: list[str], label
             first.setdefault(k, span.start)
             last[k] = span.end
     return [(first[k] * ratio / rate, last[k] * ratio / rate) for k in range(len(words))]
+
+
+# A spoken word as the transcript has it: its text, start and end.
+_Said = tuple[str, float, float]
+
+
+def _said(word: dict[str, Any]) -> _Said:
+    return (str(word.get("word")), float(word["start"]), float(word["end"]))
+
+
+def _is_spoken(word: dict[str, Any]) -> bool:
+    return word.get("type") != "event"
+
+
+class Remembering:
+    """An aligner that answers for spoken words it has placed before, without running the model again.
+
+    ``transcribe`` measures the word times, finds the sounds between the
+    measured words, writes them into the transcript and measures again, so
+    each word gets its room up to the sounds found. An aligner places
+    spoken words only (``word_times`` puts every sound back where the
+    transcript had it), so the second run would put every word where the
+    first did, a minute later.
+
+    This wraps the real aligner for the length of one job. It remembers
+    each run, and starts out knowing the times saved with the project
+    (``of``): a transcript whose word times were measured before its sounds
+    were found is measured again from those, also on a machine that no
+    longer has the model. Words it has not placed go to the real aligner.
+    """
+
+    def __init__(self, aligner: word_times.Aligner) -> None:
+        self._aligner = aligner
+        self._placed: dict[_Said, tuple[float, float]] = {}
+
+    @classmethod
+    def of(cls, aligner: word_times.Aligner, project: Project) -> Remembering:
+        """``aligner``, knowing where the project's saved measured times put each word, when it has some."""
+        known = cls(aligner)
+        if not project.words_path.exists():
+            return known
+        times = word_times.read(project)
+        if times.source == word_times.MEASURED:
+            known._remember(
+                (
+                    (str(w.get("word")), float(w[word_times.RAW_START]), float(w[word_times.RAW_END])),
+                    (float(w.get(word_times.ALIGNED_START, w["start"])), float(w.get(word_times.ALIGNED_END, w["end"]))),
+                )
+                for w in times.words
+                if _is_spoken(w) and word_times.RAW_START in w and word_times.RAW_END in w
+            )
+        return known
+
+    def _remember(self, placed: Any) -> None:
+        """Keep where each word was put. Two words the transcript can't tell apart, put in two places, are kept by neither."""
+        self._placed = {}
+        unsure: set[_Said] = set()
+        for said, where in placed:
+            if self._placed.setdefault(said, where) != where:
+                unsure.add(said)
+        for said in unsure:
+            del self._placed[said]
+
+    def lacks(self) -> str:
+        """What is missing for aligning. Nothing, once it knows some words: ``align`` says so when it does not know them all."""
+        return "" if self._placed else self._aligner.lacks()
+
+    def align(self, video: Path, words: word_times.Words, silences: list[Silence]) -> word_times.Words:
+        spoken = [w for w in words if _is_spoken(w)]
+        if spoken and all(_said(w) in self._placed for w in spoken):
+            return [
+                {**w, **dict(zip(("start", "end"), self._placed[_said(w)]))} if _is_spoken(w) else dict(w)
+                for w in words
+            ]
+        lacks = self._aligner.lacks()
+        if lacks:
+            raise StudioError(lacks)
+        out = self._aligner.align(video, words, silences)
+        if len(out) == len(words):
+            self._remember((_said(w), (float(o["start"]), float(o["end"]))) for w, o in zip(words, out) if _is_spoken(w))
+        return out
 
 
 class Wav2Vec2Aligner:
