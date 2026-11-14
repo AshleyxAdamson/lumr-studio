@@ -32,11 +32,12 @@ Repetition is how people make a point land when they talk. Treat a repeat as con
 
 ## The padding test
 
-Look inside one sentence and its tail, never across the video. Padding is words that only say that sentence again.
+Look inside one sentence, its tail and the run-up to it, never across the video. Padding is words that only say that sentence again, or only announce that it is coming.
 
 | The line | Verdict |
 |---|---|
 | "The rise took most of the day because the kitchen was cold, **so that's what slowed it down. Yeah, it was really the cold.**" | The bold part says the sentence again. It goes; the line ends on "the kitchen was cold". |
+| "So how long does it rest? **Well, to get into that, the thing is,** overnight, in the fridge." | The bold part announces an answer and says nothing. It goes; the answer follows the question. A question or lead-in that sets up the line stays: this is the filler between the two. |
 | "...which is why I proof it overnight. **And it tastes better, too.**" | New information. It stays. |
 | "...and that's why the crust matters. **That's the whole loaf in a nutshell.**" | A summing-up. It stays. |
 | "I don't want to think about the timer, **I'd rather not hover over the oven.**" | Two ways of saying one feeling, and the feeling is the point of the video. It stays. |
