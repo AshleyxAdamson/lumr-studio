@@ -378,8 +378,15 @@ h2 .count .mine{color:var(--user)}
 .tright{flex:1 1 0; min-width:max-content; display:flex; justify-content:flex-end}
 #tnow{font-size:16px; color:var(--gold); font-weight:600; font-variant-numeric:tabular-nums}
 .tlen{font-size:12px; color:var(--text3); font-variant-numeric:tabular-nums}
-/* which clip is on screen, beside the clock. It gives way first when the row runs short of room. */
-#clipNow{font-size:12px; color:var(--text2); margin-left:6px; white-space:nowrap; font-variant-numeric:tabular-nums}
+/* which clip is on screen, beside the clock. It gives way first when the row runs short of room: it takes
+   only the room the row has left over, so it never moves Play off the middle or pushes the row past the
+   bar. When it does not fit whole it drops to a second line, out of sight, and a screen reader still says it. */
+#clipNow{
+  flex:1 1 0; width:0; min-width:0; height:18px; margin-left:-6px; display:flex; flex-wrap:wrap; align-items:baseline; overflow:hidden;
+  font-size:12px; line-height:18px; color:var(--text2); white-space:nowrap; font-variant-numeric:tabular-nums;
+}
+/* the room between the clock and the count, and a first line for the count to drop from */
+#clipNow::before{content:'\200b'; width:12px}
 #playBtn{min-height:32px; min-width:88px; padding:0 16px 0 13px; border-radius:16px; font-size:13px; gap:6px}
 #playBtn svg{width:13px; height:13px}
 .hop{min-height:32px; padding:4px 10px}
@@ -435,11 +442,12 @@ h2 .count .mine{color:var(--user)}
 #words .w.now:hover{background:var(--gold-soft)}
 #words .w.snd{font-style:italic}
 /* the first word of each clip carries the clip's name in front of it. The two never part at a line's end,
-   so the word keeps one box and picking words by where they sit works as before. */
+   so the word keeps one box and picking words by where they sit works as before. A long name is cut short
+   to leave its word room on the line, however narrow the box. */
 #words .w.clip1st{white-space:nowrap}
 #words .w.clip1st::before{
   content:attr(data-clip); display:inline-block; vertical-align:middle; margin:0 .5em 0 0; padding:1px 7px;
-  max-width:26em; overflow:hidden; text-overflow:ellipsis;
+  max-width:min(26em, calc(100% - 14em)); overflow:hidden; text-overflow:ellipsis;
   font-family:var(--sans); font-size:11px; font-style:normal; font-weight:600; line-height:1.4; letter-spacing:.02em;
   color:var(--text2); background:var(--ink); border:1px solid var(--line2); border-radius:999px;
 }
@@ -549,6 +557,8 @@ h2 .count .mine{color:var(--user)}
   position:absolute; left:4px; top:3px; font-size:10px; line-height:1; font-weight:600; color:var(--text);
   font-variant-numeric:tabular-nums; text-shadow:0 0 3px var(--ink), 0 0 3px var(--ink);
 }
+/* a clip that starts at the very end of the bar: its number sits before its line, so it stays on the bar */
+.clipmark[data-late] b{left:auto; right:5px}
 
 /* the "?" list: what the bar shows, then the keys */
 #shortcuts{top:calc(var(--top-h) + 6px); right:var(--s5); left:auto; width:min(360px, calc(100vw - 32px)); max-height:calc(100vh - var(--top-h) - 16px); overflow-y:auto}
@@ -3208,6 +3218,7 @@ $('keepBtn').addEventListener('click', keepPart);
    shows a play button under the pointer or the keyboard; that button alone, pressed
    and let go without a drag, plays the cluster from its start. */
 const bar = { box: $('bar'), track: $('barTrack'), here: -1, press: null };
+const LATE_MARK = 0.94;   /* a clip that starts past this share of the bar has no room after its line for its number */
 const BLOCK_ICONS = '<span class="go" aria-hidden="true"><svg class="play" viewBox="0 0 16 16"><path d="M4.5 2.5v11l9-5.5z" fill="currentColor"/></svg>' +
   '<svg class="pause" viewBox="0 0 16 16"><rect x="3.5" y="2.5" width="3" height="11" rx=".6" fill="currentColor"/><rect x="9.5" y="2.5" width="3" height="11" rx=".6" fill="currentColor"/></svg></span>';
 function renderBar(){
@@ -3224,8 +3235,10 @@ function renderBar(){
 }
 /** Where each clip of a joined video starts: a line on the bar with the clip's number. A plain video has none. */
 function renderClips(){
-  $('clips').innerHTML = !DUR ? '' : CLIPS.map(c =>
-    '<span class="clipmark" style="left:' + (Math.max(0, Math.min(DUR, c.start)) / DUR * 100).toFixed(3) + '%"><b>' + esc(c.n) + '</b></span>').join('');
+  $('clips').innerHTML = !DUR ? '' : CLIPS.map(c => {
+    const at = Math.max(0, Math.min(DUR, c.start)) / DUR;
+    return '<span class="clipmark"' + (at > LATE_MARK ? ' data-late' : '') + ' style="left:' + (at * 100).toFixed(3) + '%"><b>' + esc(c.n) + '</b></span>';
+  }).join('');
   clipShown = -2;
 }
 /** The playback, as the Core rules for the blocks read it. */

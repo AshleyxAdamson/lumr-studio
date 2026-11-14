@@ -2204,6 +2204,9 @@ def test_the_bar_marks_where_each_clip_starts_without_taking_a_press_or_any_heig
     assert re.search(r"#clips\{[^}]*pointer-events:none", html), "a press on a mark is a press on the bar"
     drawn = re.search(r"function renderClips\(\)\{(.*?)\n\}", html, re.S).group(1)
     assert "CLIPS.map(" in drawn and 'class="clipmark"' in drawn and "esc(c.n)" in drawn
+    # a clip that starts at the bar's very end has no room after its line: its number goes before it
+    assert "(at > LATE_MARK ? ' data-late' : '')" in drawn and "const LATE_MARK = 0.94;" in html
+    assert ".clipmark[data-late] b{left:auto; right:5px}" in html, "the last clip's number stays on the bar"
     assert "renderClips();" in re.search(r"function renderBar\(\)\{(.*?)\n\}", html, re.S).group(1)
     assert "C.clipLabel(CLIPS, clip)" in html[html.index("function paint(force){"):html.index("function dim(")], \
         "the slider's spoken value names the clip"
@@ -2221,6 +2224,17 @@ def test_the_clip_on_screen_is_counted_beside_the_clock_and_gives_way_first():
     narrow = [int(n) for n in re.findall(r"@container \(max-width:(\d+)px\)", html)]
     assert narrow == sorted(narrow, reverse=True) and narrow[0] > 500, "the clip count leaves before the video's length does"
     assert re.search(r"@container \(max-width:%dpx\)\{\s*#clipNow\{" % narrow[0], html)
+    # It adds nothing to the width the row needs: no width of its own, and a margin that takes back the
+    # gap before it. So a long clock or a high clip count never moves Play or pushes the row past the bar.
+    rule = re.search(r"\n#clipNow\{(.*?)\}", html, re.S).group(1)
+    for said in ("flex:1 1 0;", "width:0;", "min-width:0;", "margin-left:-6px;"):
+        assert said in rule, said
+    assert re.search(r"\.tleft\{[^}]*display:flex;[^}]*gap:6px\}", html), "the gap the margin takes back"
+    # a count that does not fit whole drops under an empty first line, where the row's height hides it
+    for said in ("display:flex;", "flex-wrap:wrap;", "height:18px;", "line-height:18px;", "overflow:hidden;", "white-space:nowrap;"):
+        assert said in rule, said
+    assert "#clipNow::before{content:'\\200b'; width:12px}" in html
+    assert "[hidden]{display:none!important}" in html, "a plain video still shows no count, whatever the count's own display"
 
 
 def test_the_first_word_of_each_clip_carries_the_clips_name_and_stays_one_box():
@@ -2231,7 +2245,10 @@ def test_the_first_word_of_each_clip_carries_the_clips_name_and_stays_one_box():
         "words that only change their marks still gain or lose the name"
     assert "this.els = this.box.children;" in render, "the box still holds one element a word, so word i is child i"
     assert "#words .w.clip1st{white-space:nowrap}" in html, "the name and its word never part at a line's end"
-    assert re.search(r"#words \.w\.clip1st::before\{\s*content:attr\(data-clip\); display:inline-block;", html)
+    chip = re.search(r"#words \.w\.clip1st::before\{\s*content:attr\(data-clip\); display:inline-block;(.*?)\}", html, re.S)
+    assert chip
+    # in a narrow box a long name is cut short, so its word stays on the line and inside the box
+    assert "max-width:min(26em, calc(100% - 14em)); overflow:hidden; text-overflow:ellipsis;" in chip.group(1)
 
 
 def test_the_clip_marks_are_explained_under_the_help_button():
