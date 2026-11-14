@@ -39,6 +39,9 @@ log = logging.getLogger(__name__)
 
 TASTE_FILE = "taste.json"
 EDIT_FILE = "edit.json"
+# Written into the project of a video whose edit was carried from another (``carry.py``):
+# ``{from_project}`` names the older project's folder.
+CARRIED_FILE = "carried.json"
 TASTE_VERSION = 2
 # The longest lists the profile carries.
 TOP = 10
@@ -202,6 +205,24 @@ def _ignoring(changes: dict[str, Any], requested: list[dict[str, Any]], words: l
     return out
 
 
+def _carried_away(folders: list[Path]) -> set[str]:
+    """The project folders whose edit was carried onto a newer video.
+
+    The newer project holds every change the older one did, moved, so the
+    older one is left out: a change counts once. A record that can't be read
+    names nothing.
+    """
+    names = set()
+    for folder in folders:
+        try:
+            record = json.loads((folder / CARRIED_FILE).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(record, dict) and isinstance(record.get("from_project"), str) and (folder / EDIT_FILE).is_file():
+            names.add(record["from_project"])
+    return names
+
+
 def _changed_projects(exclude: Path | None) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
     """``(name, edit, creator)`` for each project with something the creator changed, skipping ``exclude``.
 
@@ -223,10 +244,11 @@ def _changed_projects(exclude: Path | None) -> list[tuple[str, dict[str, Any], d
         folders = sorted(root.iterdir())
     except OSError:
         return []  # an unreadable projects folder costs the profile line, never the page or get_edit
+    carried = _carried_away(folders)
     for folder in folders:
         path = folder / EDIT_FILE
         try:
-            if not path.is_file() or (skip is not None and folder.resolve() == skip):
+            if not path.is_file() or folder.name in carried or (skip is not None and folder.resolve() == skip):
                 continue
             edit = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(edit, dict):

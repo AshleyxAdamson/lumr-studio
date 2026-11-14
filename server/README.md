@@ -71,8 +71,8 @@ Environment:
   `<LUMR_HOME>/studio/projects`, with `LUMR_HOME` resolved the way ClipForge
   resolves it (`engine/paths.py`), at call time.
 - `LUMR_STUDIO_EXTRAS` is a comma list of extras to switch on, `publish_kit`
-  and `overlays`. Empty by default: the server lists 14 tools. With both it
-  lists 18. An unknown name stops the server at start. Their skills come back
+  and `overlays`. Empty by default: the server lists 15 tools. With both it
+  lists 19. An unknown name stops the server at start. Their skills come back
   with an entry in `plugin.json` (`../GUIDE.md`, "Turning the extras on").
 - `ffmpeg` and `ffprobe` must be on `PATH`. There is no `hammy` command.
 - Transcribing runs `python -m lumr_studio.speech` in a process of its own,
@@ -151,6 +151,7 @@ by `../hooks/hooks.json` at session start) against stub programs on a trimmed
 | `jobs.py` | Background jobs, status, receipts |
 | `transcription.py` | The transcribe job: the speech process, then a check of the transcript. The same job measures the word times. |
 | `render_jobs.py` | The render and preview jobs |
+| `carry.py` | The `carry_edit` job: maps the footage two videos share (`time_map`), moves each saved span and each transcript word through it (`move_span`, `fill_from`), writes the new transcript without hearing anything twice, and builds the carried edit with the one recipe |
 | `reels.py` | The `assemble` job: joins clips into a reel (copy when whole clips match in every detail, else one encode in whole frames, with any clip in HDR or wide color turned into standard color), writes the `.reel.json` sequence file beside it, and finds it again (`reel_for`) for `get_edit` and `read_transcript` |
 | `publish_kit.py` | Chapter rules and the `publish-kit/` files. An extra: its tools (`chapter_times`, `save_publish_kit`) list only with `publish_kit` on |
 | `joins.py` | The self-check: every join read the way a viewer hears it, with a fix for Claude and a plain why for the creator |
@@ -263,7 +264,19 @@ exception is named in `creator_words.py` and tested in
   nor PQ), it gives the picture QuickTime gives, and it needs no working copy
   of the clip, so there is nothing more to name, clean up or keep honest to
   the frame. Changing the clips makes a new reel and a new
-  project; the cuts do not follow. `TOOLS.md`, `assemble`, is the contract.
+  project; the cuts do not follow on their own. `TOOLS.md`, `assemble`, is the contract.
+- **Carrying an edit (`carry_edit`).** A changed sequence is a new reel, so the
+  edit is taken to it, not kept in place. `carry.py` compares the two sequence
+  files: a stretch of a clip that plays in both reels maps old seconds to new
+  ones (`time_map`), and each saved span goes through that map with its start
+  and its end kept apart (`move_span`), so a cut that ended where a piece ends
+  never reaches into what plays next. The new transcript is the old one's raw
+  words moved the same way. Only stretches no transcript covers go to the
+  speech model, because a second hearing of the same sound can give other
+  words and move a cut. The moved spans are then built into an edit by the
+  one recipe, `treatment.make_edit`, so every rule of `set_edit` holds, and
+  the automatic trims are made again, not moved. The old project is only read.
+  `TOOLS.md`, `carry_edit`, is the contract.
 - **`gap_length` without `auto_tighten`** is an error, so it can't be
   silently ignored.
 - **Silences.** `set_edit` and `analyze_take` measure silences with

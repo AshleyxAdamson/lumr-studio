@@ -43,6 +43,11 @@ reviewed like any other. `get_edit` and `read_transcript` show where the clips
 sit inside a reel. Choosing which take to keep is the skill's job
 (`assemble-takes`), not the server's.
 
+Round 7 adds `carry_edit`. When a creator wants a clip added to an edited
+reel, taken out or moved, `assemble` builds the new sequence as a new reel and
+`carry_edit` takes the saved edit across: the cuts, the picks, what the creator
+did on the page, and the transcript itself, so nothing is heard twice.
+
 Words. A **cut** is a choice with a reason, Claude's or the creator's own: the
 page and the chat both say "cut". A **trim** is one of the small automatic
 ones: a long pause, a filler word, a stutter. The tools and this file say
@@ -52,7 +57,7 @@ reads. To the creator, name what goes: long pauses, filler words, stutters.
 
 ## What the plugin offers
 
-By default the server lists 14 tools: `assemble`, `transcribe`,
+By default the server lists 15 tools: `assemble`, `carry_edit`, `transcribe`,
 `read_transcript`, `analyze_take`, `find_words`, `get_edit`, `set_edit`,
 `preview`, `render`, `look`, `frames`, `review`, `job_status` and
 `forget_taste`. Four more are extras, off unless the
@@ -63,7 +68,7 @@ environment variable `LUMR_STUDIO_EXTRAS` names them, as a comma list:
 | `publish_kit` | `chapter_times`, `save_publish_kit` | `publish-kit` |
 | `overlays` | `set_overlays`, `get_overlays` | `add-visuals` |
 
-With `LUMR_STUDIO_EXTRAS=publish_kit,overlays` the server lists all 18. A name
+With `LUMR_STUDIO_EXTRAS=publish_kit,overlays` the server lists all 19. A name
 that is not an extra stops the server at start. An extra's skill folder sits
 in `extras/skills/`, outside the folder Claude Code scans, and comes back with
 an entry in `plugin.json` (`GUIDE.md`, "Turning the extras on"). The overlay
@@ -76,8 +81,9 @@ extras too, for when they are on.
 ## Rules for every tool
 
 - Every tool takes `video_path`, an absolute path to the source video, except
-  `assemble`, `job_status` and `forget_taste`. A reel is a video path: the
-  `reel` that `assemble` answers with goes in `video_path` for every other tool.
+  `assemble`, `job_status` and `forget_taste`, and `carry_edit`, which takes
+  two videos. A reel is a video path: the `reel` that `assemble` answers with
+  goes in `video_path` for every other tool.
 - The source video is never modified or overwritten. `assemble` never touches
   the clips it joins.
 - Results are short. A tool returns a summary and file paths. It never returns
@@ -109,6 +115,7 @@ had (see "A project after a move" below):
   review.json        the creator's decisions from the round 2 review page, if any
   sounds.json        which sounds in the transcript are likely laughs
   receipts.jsonl     one line per completed step
+  carried.json       written by `carry_edit`: which project this video's edit came from
   shares.jsonl       one line per send the creator made with Help improve Lumr:
                      {send_id, sent_at (a date), records}. Nothing else.
   exports/           rendered videos and previews
@@ -154,6 +161,10 @@ counts again, even on an old video. A second forget adds to the first.
 `ignored_words` and `ignored_kinds` are lower-case words and kinds of cut
 (`repeat`, `false_start`, `off_topic`, `other`, `likes`). A file that is
 missing or can't be read forgets nothing.
+
+A project whose edit was carried onto a newer video (`carry_edit`) is left out
+too: the newer project's `carried.json` names it as `from_project`, and the
+newer project holds the same changes, moved. A change counts once.
 
 `LUMR_SHARE_URL` is the address of the Lumr Studio team's server, for the review
 page's Send feedback form and its Help improve Lumr button. Unset, it is
@@ -497,7 +508,160 @@ It was not finished, and the tool will not build over it.
 
 Changing the sequence makes a new reel, and a new reel is a new video to every
 other tool. The cuts, the transcript and the page's state belong to the old
-reel and do not carry over.
+reel and do not follow on their own. `carry_edit` takes them across.
+
+### carry_edit
+
+Read only: no. Destructive: no. Long job.
+
+Carries a saved edit from one video onto another made from the same footage.
+Use it when a creator has an edited reel and wants a clip added, taken out or
+moved: `assemble` the new sequence, then call this. The new reel gets its
+transcript, its word times and the edit in one job, and nothing is cut or
+transcribed a second time.
+
+| Input | Type | Note |
+|---|---|---|
+| `from_video` | string | absolute path of the video that has the saved edit: the old reel, or a plain video that is now a clip of the new reel |
+| `to_video` | string | absolute path of the new reel. It must have no saved edit. |
+| `download_models` | bool, default false | fetch the models the last answer said were missing. Pass true only after the creator said yes. |
+
+| Answer | When |
+|---|---|
+| `{job_id}` | the carry started, or one is already running for `to_video`. The finished job's `result` is the report below. |
+| `{status: "needs_models", models, total_mb, note}` | a model the job needs is not on the machine. Nothing started. The same answer `transcribe` gives; `note` says to call `carry_edit` again. |
+| `{status: "downloading", job_id, models}` | `download_models` was true and a model was missing. When that job is done, call `carry_edit` again. |
+
+The speech model is needed only when a stretch of the new reel has no words to
+carry (see below). The word-timing model is needed only when the old edit sits
+on measured word times.
+
+Errors, each saying what to do: `from_video` has no saved edit; `to_video`
+already has one (a saved edit is never replaced: assemble the same pieces
+under another name and carry onto that reel, or change the edit that is there
+with `set_edit`); the two videos share no footage; both paths name the same
+video.
+
+#### The map
+
+The two videos are compared by the footage in them. A reel's sequence file
+says which seconds of which clip play where; a plain video is one clip,
+itself. A stretch of a clip that plays in both videos maps old seconds to new
+seconds. Say the old reel is three takes of a bread video and the new one has
+a shot of the oven joined in before the third:
+
+```
+old   take 1  0:00-0:40 | take 2  0:40-1:10 | take 3  1:10-2:00
+new   take 1  0:00-0:40 | take 2  0:40-1:10 | oven  1:10-1:25 | take 3  1:25-2:15
+```
+
+Takes 1 and 2 play where they did. Take 3 plays 15 seconds later. The oven
+shot is new. A take that was split in two, with nothing between the halves, is
+still one stretch. A take made longer or shorter shares the seconds both use.
+A clip used twice is told apart by its seconds.
+
+A span moves through the map with its ends kept apart: its start moves with
+the stretch it starts in, its end with the stretch it ends in. So:
+
+- A span inside one stretch arrives **whole**, on the same words.
+- A span that ran across a point where other footage now plays is **split**:
+  one part each side, and neither reaches into the new footage. A cut that took
+  the last word of take 2 and the first of take 3 becomes two cuts.
+- A span that lost part of its footage is **shortened**.
+- A span whose footage is not in the new video is **dropped**.
+- Footage that plays twice in the new video gets the span each time.
+
+A part under 0.05 s that a clip's edge clipped off is left out, and parts
+that meet in the new video, to within 0.05 s (a reel's pieces are whole
+frames), are one.
+
+#### The transcript
+
+When `to_video` has no transcript, the job writes `<to_video>.words.json` from
+words that already exist, in this order:
+
+1. `from_video`'s raw words, sound events (`"type": "event"`) included, each
+   moved with the stretch its middle sits in and never reaching past it.
+2. For a stretch still without words, the words of the clip it came from,
+   when that clip has a `.words.json` of its own beside it.
+3. For what is left, the speech model, run on that stretch alone. Stretches
+   under 0.3 s are left without words.
+
+Hearing the same sound again can give other words than the first time, and a
+cut placed on the old words would then land somewhere else. So nothing that
+was transcribed once is transcribed again. Each stretch the model hears is
+written to a temporary folder as 16 kHz mono sound, transcribed there, and the
+folder is removed. Nothing is written beside the creator's clips.
+
+When `to_video` already has a transcript it is left as it is, the report says
+so, and the edit is placed on those words by time.
+
+The word times are then measured the way `transcribe` measures them. A machine
+that can't measure them carries the edit on estimated times and says so.
+
+#### What is carried
+
+| From the old edit | How it arrives |
+|---|---|
+| Claude's cuts, with reason and kind | each moved through the map, then placed on the new words by `set_edit`'s rules. A split cut is two requests with the same reason. |
+| Claude's picks | found again on the word that plays where the picked word did, with a new id from that word's times. A pick whose word is gone, or reads differently, is dropped. |
+| The creator's own cuts, and words brought back one by one | moved, then drawn onto exactly the words they held |
+| Parts the creator kept or put back | moved; a split part is two kept parts |
+| Ratings | on the first place their cut plays now |
+| Pace, switches, slider values, and what Claude last asked for | as saved |
+| Overlays | moved, with their ids, files and look. One that other footage now plays inside covers its longest part; under 1 s left, it is dropped. Overlays already saved for `to_video` are left, and none are carried. |
+
+Automatic trims are not carried. The recipe makes them again on the new reel
+at the same pace, so their count can differ.
+
+#### The report
+
+The finished job's `result`:
+
+```
+{status: "carried", from_video, to_video,
+ transcript: {status: "written", words_path, word_count, carried_words,
+              words_from_clips, heard: [{clock, start, end, words}]}
+          or {status: "exists", words_path, note},
+ word_times: "measured" | "estimated", word_times_note?, aligning?,
+ cuts:         {total, carried, split, shortened, dropped, not_placed},
+ picks:        {total, carried, split, shortened, dropped, switch_on},
+ creator_cuts: {total, carried, split, shortened, dropped},
+ kept_parts:   {total, carried, split, shortened, dropped},
+ ratings:      {total, carried, split, shortened, dropped},
+ overlays:     {total, carried, split, shortened, dropped, note?},
+ treatment: {pace, take_out, gap_length, fine},
+ automatic_cuts, cut_count, duration, removed_seconds, new_duration,
+ joins, note}
+```
+
+`carried` counts the ones that arrived as they were. `split`, `shortened` and
+`dropped` are lists, one entry for each span that did not:
+
+```
+{was: {clock, start, end}, now: [{clock, start, end}], reason, why}
+```
+
+`was` is where it sat in the old video and `now` where it sits in the new one
+(empty for a dropped one). `why` is one plain sentence the creator can be
+told, such as "Other footage now plays in the middle of it, so it is in 2
+parts, one each side." Cuts carry `reason`; picks, the creator's cuts and kept
+parts carry `text`; overlays carry `id` and `file`. `cuts.not_placed` lists
+moved cuts the new words would not take, with `set_edit`'s own reason, such
+as a half that no longer removes a whole word. `picks` is missing when Claude
+had not picked, `ratings` when nothing was rated, and `overlays` when the old
+video has none. `duration` is the new reel's length and `new_duration` its
+length once edited. `joins` is the same self-check `set_edit` returns, on the
+edit as saved: read it and fix what it flags with `set_edit`.
+
+Tell the creator what carried, and name each cut that was split, shortened,
+dropped or not placed.
+
+The old video's project, transcript and reel are not written. The new
+project gets `edit.json`, `words-aligned.json`, `overlays.json` when
+overlays were carried, and `carried.json`, which names the project the edit
+came from. Once that file is there the old project no longer feeds `taste`,
+so a change the creator made counts once. The job's kind is `carry_edit`.
 
 ### transcribe
 
@@ -1532,7 +1696,7 @@ Read only: yes.
 
 | Input | Type | Note |
 |---|---|---|
-| `job_id` | string | from `assemble`, `transcribe`, `preview` or `render`, or from `export` in `get_edit` |
+| `job_id` | string | from `assemble`, `carry_edit`, `transcribe`, `preview` or `render`, or from `export` in `get_edit` |
 | `wait` | float, default 0 | seconds to wait for the job to finish before answering, at most 50 |
 
 Returns `{status: "running" | "done" | "failed", progress, result, error}`.

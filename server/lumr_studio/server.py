@@ -34,7 +34,9 @@ EXTRAS = offering.enabled_extras()
 _INSTRUCTIONS_START = (
     "Lumr Studio edits one video at a time. assemble joins several clips into one video, "
     "a reel; every other tool except job_status and forget_taste takes the absolute path of one "
-    "source video, which may be a reel. Times are seconds in the SOURCE video unless a "
+    "source video, which may be a reel (carry_edit takes two). When clips are added to an edited reel, taken out "
+    "or moved, assemble the new sequence and call carry_edit: it takes the saved edit and the transcript onto the "
+    "new reel, so nothing is cut or transcribed twice. Times are seconds in the SOURCE video unless a "
     "field says edited. Long work returns a job_id; call job_status with wait=50 "
     "until it is done. transcribe also measures the word times, in the same job; every "
     "answer that reads words says word_times, measured or estimated. The plugin needs two models on "
@@ -135,8 +137,27 @@ def assemble(
         Field(description="The clips in play order, 1 to 200. A clip may appear more than once, each time with its own start and end."),
     ],
 ) -> CallToolResult:
-    """Join several clips, or stretches of clips, into one video, the reel, in the order given. Use it when a video was recorded as several clips. The reel is an ordinary video: pass its path as video_path to every other tool (transcribe it, read it, cut it, review it, render it). Returns {job_id} while the reel is built, and the finished job's result carries the answer; or, when this exact sequence was joined before, the answer at once with status "exists". The answer is {status, reel (the path to pass on), name, duration, how, pieces: [{clip, start, end, reel_start, reel_end, converted_from?}], sequence_file, note}. how is copy when every piece is a whole clip and the clips match in every detail a copy depends on (nothing is re-encoded), or encode when any piece has a start or an end, or the clips differ in size, frame rate, time base or sound (one encode, at high quality). A clip recorded in HDR or wide color, as phones record by default, always makes the reel an encode, and the reel shows that clip in standard color (bt709) so it matches the others: its piece carries converted_from ("HDR" or "wide color") and note says so. Tell the creator in one sentence, such as "this clip was recorded in HDR; the joined video shows it in standard color". After a reel is built, get_edit names its clips under reel and read_transcript marks where each starts. The reel is a second full copy of the footage on disk, under the Lumr folder in studio/reels, and Studio never deletes it. Changing the sequence makes a new reel and a new project: the cuts made on the old reel do not follow. Nothing is overwritten."""
+    """Join several clips, or stretches of clips, into one video, the reel, in the order given. Use it when a video was recorded as several clips. The reel is an ordinary video: pass its path as video_path to every other tool (transcribe it, read it, cut it, review it, render it). Returns {job_id} while the reel is built, and the finished job's result carries the answer; or, when this exact sequence was joined before, the answer at once with status "exists". The answer is {status, reel (the path to pass on), name, duration, how, pieces: [{clip, start, end, reel_start, reel_end, converted_from?}], sequence_file, note}. how is copy when every piece is a whole clip and the clips match in every detail a copy depends on (nothing is re-encoded), or encode when any piece has a start or an end, or the clips differ in size, frame rate, time base or sound (one encode, at high quality). A clip recorded in HDR or wide color, as phones record by default, always makes the reel an encode, and the reel shows that clip in standard color (bt709) so it matches the others: its piece carries converted_from ("HDR" or "wide color") and note says so. Tell the creator in one sentence, such as "this clip was recorded in HDR; the joined video shows it in standard color". After a reel is built, get_edit names its clips under reel and read_transcript marks where each starts. The reel is a second full copy of the footage on disk, under the Lumr folder in studio/reels, and Studio never deletes it. Changing the sequence makes a new reel and a new project: the cuts made on the old reel do not follow on their own, so call carry_edit to take them across. Nothing is overwritten."""
     return _call(tools.assemble, name, [p.model_dump() for p in pieces])
+
+
+@_tool(title="Carry an edit to a new reel", annotations=_annotations("Carry an edit to a new reel", read_only=False))
+def carry_edit(
+    from_video: Annotated[
+        str,
+        Field(description="Absolute path to the video that has the saved edit: the old reel, or a plain video that is now a clip of the new reel."),
+    ],
+    to_video: Annotated[
+        str,
+        Field(description="Absolute path to the new reel, the one assemble built from the changed sequence. It must have no saved edit yet."),
+    ],
+    download_models: Annotated[
+        bool,
+        Field(description="Download the models carry_edit said were missing. Pass true only after the creator said yes to what needs_models listed."),
+    ] = False,
+) -> CallToolResult:
+    """Carry a saved edit from one video onto a new reel made from the same footage. Use it after the creator asked for a clip to be added to an edited reel, taken out or moved: call assemble with the new sequence, then this, and do not transcribe or cut the new reel yourself. Returns {job_id}; one job does three things. It writes the new reel's transcript from the old one's words, moved to where each clip now plays (the speech model hears only the stretches no transcript covers, since hearing the same sound twice can give other words). It measures the word times. It places the edit: your cuts with their reasons and kinds, your picks, the creator's own cuts, the parts they kept, their ratings, the pace and the switches, and their photos and clips. Automatic trims are made again at the same pace. The finished job's result is the report: transcript, word_times, then cuts, picks, creator_cuts, kept_parts, ratings and (when the old video has photos or clips placed) overlays, each with total, carried (arrived as they were) and split, shortened and dropped as lists of {was, now, why} with clock times (cuts also has not_placed), then treatment, cut_count, duration, removed_seconds, new_duration, and joins, the same self-check set_edit returns. A cut that ran across a point where a clip went in becomes two, one each side; one whose footage is gone is dropped. Read joins, fix what it flags with set_edit, and tell the creator in plain words what carried and what did not. When a model it needs is missing it starts nothing and returns {status: "needs_models", ...} as transcribe does: ask the creator, then call carry_edit again with download_models true, and once more when that job is done. Errors say what to do: from_video has no saved edit, to_video already has one (a saved edit is never replaced), or the two share no footage. The old video, its transcript and its edit are not changed."""
+    return _call(tools.carry_edit, from_video, to_video, download_models)
 
 
 @_tool(title="Read transcript", annotations=_annotations("Read transcript", read_only=True))
@@ -315,7 +336,7 @@ def forget_taste(
 @_tool(title="Job status", annotations=_annotations("Job status", read_only=True))
 def job_status(
     job_id: Annotated[
-        str, Field(description="Id returned by assemble, transcribe, preview or render, or found under export in get_edit.")
+        str, Field(description="Id returned by assemble, carry_edit, transcribe, preview or render, or found under export in get_edit.")
     ],
     wait: Annotated[
         float, Field(description="Seconds to wait for the job to finish before answering, at most 50.")

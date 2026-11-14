@@ -158,7 +158,7 @@ class JobRegistry:
             job = self._jobs.get(job_id)
         if job is None:
             raise StudioError(
-                f"No job with id {job_id!r}. Job ids come from assemble, transcribe, preview and render; "
+                f"No job with id {job_id!r}. Job ids come from assemble, carry_edit, transcribe, preview and render; "
                 "jobs are kept in memory, so a server restart forgets them. Start the job again."
             )
         return job
