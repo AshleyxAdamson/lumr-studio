@@ -356,7 +356,25 @@ def test_retranscribe_invalidates_the_cache(video, words):
     stat = project.words_path.stat()
     os.utime(project.words_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
     load_or_measure_labels(project, words, measure=measure)
+    assert len(measure.calls) == 1, "the same transcript with another time is the same transcript"
+    project.words_path.write_text(json.dumps([{**w, "energy_rms": 0.2} for w in words]))
+    load_or_measure_labels(project, words, measure=measure)
     assert len(measure.calls) == 2
+
+
+def test_a_cache_saved_by_an_earlier_build_is_still_used(video, words):
+    """Builds before the content hash keyed the cache on the transcript's size and its time in nanoseconds."""
+    project = open_project(str(video))
+    measure = CountingMeasure()
+    first = load_or_measure_labels(project, words, measure=measure)
+    stat = project.words_path.stat()
+    cached = json.loads((project.root / SOUNDS_FILE).read_text())
+    cached["transcript"] = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    (project.root / SOUNDS_FILE).write_text(json.dumps(cached))
+    # A copy to another Mac kept the time to the whole second only.
+    os.utime(project.words_path, ns=(stat.st_atime_ns, stat.st_mtime_ns // 1_000_000_000 * 1_000_000_000))
+    assert load_or_measure_labels(project, words, measure=measure) == first
+    assert len(measure.calls) == 1
 
 
 def test_corrupt_or_old_cache_is_rebuilt(video, words):

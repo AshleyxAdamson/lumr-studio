@@ -94,7 +94,8 @@ extras too, for when they are on.
 
 ## Project folder
 
-One per video, created on first use:
+One per video, created on first use. A video that moved keeps the folder it
+had (see "A project after a move" below):
 
 ```
 <LUMR_HOME>/studio/projects/<video stem>-<first 12 hex of sha1 of the resolved path>/
@@ -167,6 +168,71 @@ api/share/preview` under `review`.
 The transcript stays where the speech model writes it, beside the video, as
 `<video>.words.json`. The measured word times are the plugin's own and stay
 in the project folder.
+
+### A project after a move
+
+The folder's name holds a hash of the video's path. Move the video to another
+folder, or copy the Lumr folder to another home folder or another Mac, and
+the video asks for a folder that is not there, while its edit sits in a
+folder named for the old path. One function, `project.project_for`, chooses
+the folder for every tool, and it finds that one.
+
+A video with an `edit.json` in the folder named for its own path has that
+folder, and nothing else is looked at. Without one, another folder in the
+projects root is this video's project when all of this holds:
+
+- its name is `<this video's stem>-<12 hex>`, and its `edit.json` names a
+  `video` with the same file name and a `duration` within 0.05 s of this
+  video's;
+- the `video` it names is this very path, or is no longer there. A video
+  still at the path a folder was made for owns that folder, so a copy of a
+  video never takes the original's edit;
+- no other folder passes the same test. A folder whose edit names this very
+  path counts before one whose video is gone.
+
+Why that is safe enough: two different recordings rarely share a file name
+and a length to 0.05 s, the first of them has to be gone from its path, and
+this video has to have no saved edit of its own. When all of that still goes
+wrong, the edit is shown with `moved_from`, which names the path it was saved
+for, and `load_edit` already refuses an edit whose length is off by 0.5 s.
+
+The folder is used where it is. Nothing is moved, renamed, copied or
+deleted, so the rule that no tool deletes or overwrites a file it did not
+make holds without an exception. Every read and every save for the video
+lands in that one folder: its `edit.json`, its measured word times, its
+exports. An empty folder for the new path that an earlier build left beside
+it stays empty. The folder keeps its name, so `taste.json`, which names
+projects by folder name, still means the same projects. The next save writes
+the video's new path into `edit.json`. Paths saved earlier (`edit.json`
+`video`, lines in `receipts.jsonl`) are never read to find a file, so an old
+one breaks nothing. A photo or clip in `overlays.json` is read from the path
+saved there, and a render names the one that is gone and says to put it back.
+
+The first `get_edit` after the move carries `moved_from`, and writes one
+line in the folder's `receipts.jsonl`:
+
+```
+{"at": "...", "step": "project_found", "video": "<the path now>",
+ "saved_for": "<the path the edit was saved for>", "folder": "<folder name>"}
+```
+
+When a folder might hold this video's edit and was not used, nothing is
+guessed. The video keeps the folder named for its own path, with whatever is
+in it, and `get_edit` carries `project_note`, a plain sentence that names the
+folders:
+
+| The note says | What happened | What to do |
+|---|---|---|
+| several folders each hold an edit for a video with this name and length | two or more pass the test, such as a project folder copied twice | tell the creator. Once only the right folder is left in the projects root, it is used. |
+| a folder holds an edit for a video of another length | same file name, another `duration` | nothing, for a new recording under an old file name. If the creator expects an edit, tell them. |
+| a folder's video is still at its path | this video is a copy of one that has an edit | tell the creator the copy starts empty and where the edit is. |
+
+The note is there for as long as the video has no saved edit of its own. An
+edit saved for it lands in the folder named for its path and settles it.
+
+A project with no `edit.json` is not looked for: a video that was only
+transcribed gets its word times measured again after a move. A reel is a
+video like any other, so a reel that moved keeps its project the same way.
 
 ### Reels folder
 
@@ -271,6 +337,19 @@ Aligning takes about a minute for a 20 minute video. The text of the
 transcript never changes, only the times. A sound (a laugh, a breath) keeps
 the time the transcript gave it, less any part a measured word turns out to
 sit in; a sound that was words all along is dropped.
+
+The measured times are saved with the transcript they were made from:
+`"transcript": {"size", "sha256"}`, the transcript file's size in bytes and
+the hash of its content. They are read as `measured` for as long as the
+transcript beside the video has that size and content, whatever a copy did
+to the file's times, and `sounds.json` is keyed the same way. A transcript
+written again has other content, and the times are `estimated` until they
+are measured again. Files saved by earlier builds carry `{"size",
+"mtime_ns"}`, the transcript's modified time in nanoseconds. Such a key fits
+a transcript of that size modified less than a second from then, because a
+copy to another Mac may keep the time only to the second. The first read
+that finds it fitting saves `words-aligned.json` again with the content
+hash; nothing else in the file changes.
 
 When the word times change under a saved edit (aligned for the first time, or
 the video transcribed again), the edit is placed again on the new times, once.
@@ -608,6 +687,25 @@ result carries `reel`:
 
 It says which clip each stretch of the reel came from. A plain video has no
 `reel`.
+
+When the video's project was found in a folder made for another path (the
+video moved, or the Lumr folder was copied to another Mac), the first
+`get_edit` after that carries `moved_from`:
+
+```
+{folder: "<the project folder in use>",
+ video: "<the path the saved edit was made for>",
+ note: "This video's saved edit was found in a folder made for it at another path: ..."}
+```
+
+Tell the creator once. The edit, the word times and the exports are read and
+saved in that folder from then on, and later answers do not repeat it.
+
+When a folder that might hold this video's edit was not used, the result
+carries `project_note`, a plain sentence naming the folders and why. Read it
+before saying a video has no edit: with a `project_note`, an empty edit may
+only mean the saved one was not picked. "A project after a move" under
+"Project folder" lists the cases and what to do.
 
 When the creator changed something on the page, the result carries `creator`:
 
