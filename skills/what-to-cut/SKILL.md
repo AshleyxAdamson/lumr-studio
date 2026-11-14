@@ -23,7 +23,7 @@ The creator's words decide. A tool offers a pace, a switch, a list of candidates
 - **Jokes**, the line that sets each one up, and the beat after it.
 - **A fact said again.** "And it keeps for a week" in the baking part and again in the storing part is two viewers being told once each.
 - **A line that says how serious something is**, even when it rambles. "If it over-proofs, I don't know, it just collapses, it's bad" tells the viewer something a clean sentence didn't.
-- **A summing-up.** "That's the whole problem in a nutshell" is emphasis. The creator put it there to land the point.
+- **A summing-up.** "So that's the whole trick, really" is emphasis. The creator put it there to land the point.
 - **A reaction.** "Yeah, that was a letdown" after showing the flat loaf.
 - **An um inside the flow of a sentence.**
 - **Every "like"**, until the creator asks for likes to go.
@@ -39,7 +39,7 @@ Look inside one sentence, its tail and the run-up to it, never across the video.
 | "The rise took most of the day because the kitchen was cold, **so that's what slowed it down. Yeah, it was really the cold.**" | The bold part says the sentence again. It goes; the line ends on "the kitchen was cold". |
 | "So how long does it rest? **Well, to get into that, the thing is,** overnight, in the fridge." | The bold part announces an answer and says nothing. It goes; the answer follows the question. A question or lead-in that sets up the line stays: this is the filler between the two. |
 | "...which is why I proof it overnight. **And it tastes better, too.**" | New information. It stays. |
-| "...and that's why the crust matters. **That's the whole loaf in a nutshell.**" | A summing-up. It stays. |
+| "...and that's why the crust matters. **That's the whole trick, really.**" | A summing-up. It stays. |
 | "I don't want to think about the timer, **I'd rather not hover over the oven.**" | Two ways of saying one feeling, and the feeling is the point of the video. It stays. |
 
 Expect few. A video that already has its retakes and dead air out has little padding left. If your list is long, you are reading across the video; read it again inside each sentence. A tail you can't tell from a summing-up is a closer call: it stays until the creator picks it.
