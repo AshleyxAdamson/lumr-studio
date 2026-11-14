@@ -1013,6 +1013,7 @@ def test_get_edit_shows_the_clips_of_a_reel_and_nothing_for_a_plain_video(video,
     shown = tools.get_edit(str(reel), labels=unmeasured_labels)["reel"]
     assert shown == {
         "name": "seen",
+        "how": "copy",
         "pieces": [{k: p[k] for k in ("clip", "start", "end", "reel_start", "reel_end")} for p in result["pieces"]],
     }
 

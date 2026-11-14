@@ -59,6 +59,12 @@ leave an um in. Claude picks the ones that do not help and hands them to
 `set_edit` as `picks`, and the creator's one switch, now called Ums and
 likes, covers them with the likes.
 
+Round 9 adds a quality for the finished video. `render` and `assemble` take
+`quality`: `standard`, which is every file as it was, or `master`, for
+uploading: as close to the footage as an export gets, and a much bigger
+file. `get_edit` says what the footage is (`footage`), and the result of a
+render says what was made. See "Quality" under `render`.
+
 Words. A **cut** is a choice with a reason, Claude's or the creator's own: the
 page and the chat both say "cut". A **trim** is one of the small automatic
 ones: a long pause, a filler word, a stutter. The tools and this file say
@@ -132,7 +138,8 @@ had (see "A project after a move" below):
   shares.jsonl       one line per send the creator made with Help improve Lumr:
                      {send_id, sent_at (a date), records}. Nothing else.
   exports/           rendered videos and previews
-  work/              the edit's encode while overlays are drawn over it; emptied after
+  work/              the edit's encode while overlays are drawn over it (for a master
+                     render, a working file that loses nothing); emptied after
   looks/             pictures of joins made by `look`, and the stills `set_overlays` draws
   frames/            screenshots of the source video made by `frames`
   review/            the page's cached sound envelope, and stills from its frame route
@@ -279,8 +286,13 @@ that are not letters or digits turned into one `-`. `id` is the first 8 hex
 characters of a sha1 over the name and, for each piece, the resolved clip
 path, the clip's size in bytes, its modified time in nanoseconds, and the
 piece's start and end, and one fixed mark when a clip of the sequence is
-turned into standard color (see `assemble`). The same sequence of clips gives the same file name.
-A different sequence gives a different one. A reel is never overwritten, and Studio never deletes one. The folder holds a
+turned into standard color (see `assemble`), and another when the reel is
+encoded at `master` quality. The same sequence of clips at the same quality gives the same file name.
+A different sequence gives a different one, and so does the same sequence
+encoded at the other quality: the two reels sit side by side. A standard
+reel has no mark for its quality, so its name is the one it had before there
+was a choice. A copy has none either: it is the clips as they are, one reel
+whichever quality was asked for. A reel is never overwritten, and Studio never deletes one. The folder holds a
 full copy of the footage, so it grows with every different sequence; the
 creator clears it by deleting the folder or a reel and its `.reel.json`.
 
@@ -310,7 +322,10 @@ The sequence file is JSON:
 ```
 
 `made_at` is when the reel was built, in UTC. `clip_duration` is the whole clip's
-length. `start` and `end` are the part of it used.
+length. `start` and `end` are the part of it used. A reel whose `how` is
+`encode` also carries `"quality"`, `"standard"` or `"master"`. An encoded
+reel without it was made before there was a choice and is standard. A copy
+never has it.
 
 A reel is a video like any other. The first tool that takes it makes its
 project folder under `projects/`, named from the reel's file name and path as
@@ -409,6 +424,7 @@ The clips are not changed. The reel is a second full copy of the footage on disk
 |---|---|---|
 | `name` | string | a short name for the video being built. Plain letters (A to Z), digits, spaces, `-` and `_`. 1 to 60 characters. Accented letters are refused. |
 | `pieces` | list of 1 to 200 `{clip, start, end}` | the clips in play order |
+| `quality` | string, default `standard` | `standard` or `master`, for a reel that has to be encoded. See "The quality of a reel" below. |
 
 Each piece:
 
@@ -422,14 +438,16 @@ The same clip may appear more than once.
 
 | Answer | When |
 |---|---|
-| `{status: "exists", reel, name, duration, how, pieces, sequence_file, note}` | the reel for exactly this sequence is already built. Nothing runs. |
+| `{status: "exists", reel, name, duration, how, quality, pieces, sequence_file, size_mb, note}` | the reel for exactly this sequence, at this quality, is already built. Nothing runs. |
 | `{job_id}` | the reel has to be built. The finished job's `result` is the same dict with `status: "built"`. |
 
 `pieces` in the answer is `[{clip, start, end, reel_start, reel_end}]`, with
 `start` and `end` filled in. `reel_start` and `reel_end` are seconds in the
 reel: the running sum of the piece lengths. `reel` is an absolute path.
 `sequence_file` is the path of the `.reel.json` file. `how` is `copy` or
-`encode`. `note` says: use `reel` as `video_path` for every other tool.
+`encode`. `quality` is the one an encoded reel was made at; a copy has no
+such field. `size_mb` is the reel's size on disk in megabytes. `note` says:
+use `reel` as `video_path` for every other tool.
 
 A piece whose clip was recorded in HDR or in wide color also carries
 `converted_from`, `"HDR"` or `"wide color"`. The reel shows that clip in
@@ -478,7 +496,8 @@ It was not finished, and the tool will not build over it.
   change, to the frame. Each piece is its own ffmpeg input, and the filters
   run on one thread, so 200 pieces don't run ffmpeg out of threads. The reel is libx264,
   preset medium, CRF 16, yuv420p, with AAC at 256k and `+faststart`. CRF 16
-  because this file is encoded again at export. A clip with non-square
+  because this file is encoded again at export. At `quality: "master"` it
+  is CRF 12 with AAC at 320k and nothing else differs. A clip with non-square
   pixels is scaled as if its pixels were square.
 - **Clips in HDR or wide color.** A phone records HDR by default, and its
   picture written out as it is looks flat and grey beside a camera's. A clip
@@ -528,6 +547,37 @@ It was not finished, and the tool will not build over it.
 Changing the sequence makes a new reel, and a new reel is a new video to every
 other tool. The cuts, the transcript and the page's state belong to the old
 reel and do not follow on their own. `carry_edit` takes them across.
+
+#### The quality of a reel
+
+An export is cut from the reel, so it can only be as good as the reel.
+`quality` says how much of the clips an encoded reel keeps ("Quality" under
+`render` has the numbers):
+
+- A reel made at another quality is another reel. The id of a master
+  encode carries a mark, so it gets its own file and its own sequence file
+  beside the standard one, and a new project like any new reel. Neither
+  ever replaces the other. Asking again answers `exists` for the reel of
+  that quality.
+- A standard reel's id has no mark. It is the id every reel had before, so
+  a reel encoded by an earlier version is answered as `exists` for
+  `standard`, with `quality: "standard"`.
+- A copy loses nothing and ignores `quality`. It is one reel at either,
+  its answer has no `quality`, and when master was asked for `note` adds:
+  "These clips were joined as they are, with nothing compressed again, so
+  the reel is already as good as the clips and quality changes nothing
+  here."
+- One corner: a copy that came out the wrong length is built again as an
+  encode under the copy's name, at the quality asked for then. Asked for
+  later at the other quality, that reel is answered as it is, `note` says
+  which quality it was joined at, and that a reel of the other one needs
+  another `name`.
+- A master reel takes about as much disk as the clips it was made from
+  (0.5 to 1.1 times, on the test footage), where a standard one took 0.3
+  to 0.7 times. It took up to a fifth longer to build.
+- To move an edit from a standard reel to a master one, call `assemble`
+  with the same `name` and pieces (they are under `reel` in `get_edit`) and
+  `quality: "master"`, then `carry_edit` from the old reel to the new one.
 
 ### carry_edit
 
@@ -1086,6 +1136,8 @@ result carries `reel`:
 
 ```
 {name: "Bread week 5",
+ how: "copy" | "encode",
+ quality: "standard" | "master",
  pieces: [{clip, start, end, reel_start, reel_end}]}
 ```
 
@@ -1093,7 +1145,23 @@ It says which clip each stretch of the reel came from: `start` and `end` are
 the clip's own seconds, `reel_start` and `reel_end` where they play in the
 reel. Reel second `t` inside a piece is clip second `start + (t - reel_start)`.
 These are the pieces `assemble` was given, so a changed sequence can be
-built from them. A plain video has no `reel`.
+built from them. `how` says how the reel was joined, and `quality` is there
+for an encode only: a master export of a reel encoded at `standard` can only
+be as good as that reel. A plain video has no `reel`.
+
+The result carries `footage`, what the video being edited is:
+
+```
+{resolution: "1920x1080", fps: 25.0, video_bitrate_mbps: 30.95,
+ size_mb: 4640.2, kept_mb: 3102.7}
+```
+
+`video_bitrate_mbps` is the megabits of picture the file holds for each
+second, `size_mb` the file's size in megabytes, and `kept_mb` what the part
+the edit keeps takes in that file: `size_mb` times `new_duration` over
+`duration`. Read it before a master render, to tell the creator what they
+have and what they will get (see "Quality" under `render`). A fact ffprobe
+can't read is left out.
 
 When the video's project was found in a folder made for another path (the
 video moved, or the Lumr folder was copied to another Mac), the first
@@ -1207,11 +1275,14 @@ carries `export`:
 
 ```
 {job_id: "render-3f9c2a71b0de", status: "running" | "done" | "failed",
- edit_changed_since: false}
+ edit_changed_since: false, quality: "standard" | "master",
+ size_mb: 912.4, video_bitrate_mbps: 8.6}
 ```
 
 It is the latest full render, whoever started it: `render`, or the creator
-pressing Export video on the page. Pass `job_id` to `job_status` for the
+pressing Export video on the page. `quality` is the one it was started at;
+`size_mb` and `video_bitrate_mbps` are there once it is done, read from the
+file. Pass `job_id` to `job_status` for the
 progress, the output path, or the error. `edit_changed_since` is true when the
 saved edit now removes something else than that render holds, so its file is
 behind the edit. Jobs live in memory: after a server restart `export` is gone,
@@ -1529,23 +1600,126 @@ in the window are drawn; see "render and preview, with overlays".
 
 Read only: no. Destructive: no. Long job.
 
-| Input | Type |
-|---|---|
-| `video_path` | string |
+| Input | Type | Note |
+|---|---|---|
+| `video_path` | string | |
+| `quality` | string, default `standard` | `standard`, the everyday export, or `master`, for uploading: as close to the footage as an export gets, and a much bigger file |
 
-Renders the full edited video into `exports/` and returns `{job_id}`. A new
-file name each time. Nothing is overwritten. Saved overlays are drawn.
+Renders the full edited video into `exports/` and returns `{job_id,
+quality}`. A new file name each time. Nothing is overwritten, so a master
+export and a standard one of the same edit are two files. Saved overlays are
+drawn. A `quality` that is neither is refused, in a sentence that names the
+two and says what each is for, and nothing starts.
+
+When `quality` is `master` and the video is a reel that was encoded at
+`standard`, the answer, and later the result, carry `reel_note`: the export
+can only be as good as that reel, and to get closer to the clips they are
+joined again with `assemble` at `quality: "master"` and the edit is taken
+across with `carry_edit`.
+
+The finished job's `result` says what was made:
+
+```
+{output_path, duration, expected_duration, removed_seconds, kept_segments,
+ resolution, source_note,
+ quality: "master", size_mb: 3190.5, video_bitrate_mbps: 27.7,
+ made: "Master quality: the picture and the sound were compressed once, ..."}
+```
+
+`size_mb` is megabytes on disk and `video_bitrate_mbps` the megabits of
+picture the file holds for each second, both read from the file. `made` is
+a sentence on how the file was made, ready to pass on. The job's line in
+`receipts.jsonl` holds the same result.
 
 One full render runs per video at a time. The creator can start one from the
 page with Export video. While one is running, `render` starts nothing and
 returns the running one:
 
 ```
-{job_id, already_running: true, note}
+{job_id, already_running: true, quality, note}
 ```
 
+`quality` is the running one's. When it is not the one asked for, `note`
+says so and to call `render` again once it is done.
 Wait on that `job_id` with `job_status`. It holds the edit as saved when it
 started. If the edit changed since, call `render` again once it finishes.
+
+#### Quality
+
+Both qualities are H.264 High at preset medium in yuv420p, at the source's
+size and frame rate, with `+faststart`. They differ in how much of the
+picture and the sound they keep:
+
+| | `standard` | `master` |
+|---|---|---|
+| Picture, x264's CRF (lower keeps more) | 19 | 12 |
+| Sound | AAC 192k | AAC 320k |
+| An encoded reel (`assemble`) | CRF 16, AAC 256k | CRF 12, AAC 320k |
+| With overlays, the first pass writes | the edit at CRF 19 | a working file that loses nothing |
+
+`standard` is every file exactly as it was before there was a choice: the
+same ffmpeg commands, argument for argument. `preview` has no quality and
+stays at CRF 23.
+
+Quality does not change the picture's size. A source taller than 1440 is
+still scaled down to 1440 at export, at master too. `resolution` in the
+result says what came out: when it is smaller than `footage.resolution`,
+tell the creator.
+
+The master settings were measured, not picked, on three made-up clips of 10
+seconds, 1920x1080 at 25 frames a second, written the way a camera writes
+(H.264 High, full range, bt709 tags, 30 megabits of picture a second, AAC
+256k): `mandel`, a zoom into fine detail (ffmpeg's `mandelbrot`), and
+`testsrc` and `grainy`, moving test patterns with a little and with more
+noise (`testsrc2`). Each export is scored against the footage it read, with
+ffmpeg's own `psnr` and `libvmaf` filters: megabits a second, PSNR in dB,
+VMAF out of 100.
+
+| CRF | `mandel` | `testsrc` | `grainy` |
+|---|---|---|---|
+| 19 (`standard`) | 15.8, 44.5 dB, 96.1 | 8.6, 49.0 dB, 98.9 | 9.8, 48.1 dB, 98.9 |
+| 16 | 20.3, 47.5 dB, 98.0 | 10.6, 51.8 dB, 99.4 | 20.6, 50.7 dB, 99.4 |
+| 14 | 23.5, 49.1 dB, 98.8 | 12.3, 53.4 dB, 99.6 | 28.1, 52.6 dB, 99.6 |
+| 12 (`master`) | 27.0, 50.8 dB, 99.3 | 16.0, 54.8 dB, 99.7 | 33.9, 54.0 dB, 99.8 |
+| 10 | 30.7, 52.3 dB, 99.6 | 23.2, 56.5 dB, 99.8 | 39.9, 55.5 dB, 99.9 |
+
+- **CRF 12** is the first step where every clip scores 99.3 or more on VMAF
+  and 50 dB or more: by these scores, nothing a viewer could tell from the
+  footage. One step
+  further adds 14 to 46 percent to the file for 0.3 VMAF at most. The aim is
+  that closeness, not a number of megabits: a master export came out at 16
+  to 34 megabits a second here, 0.5 to 1.1 times what the footage itself
+  holds, and 1.7 to 3.5 times a standard export. YouTube's own
+  recommendation for 1080p SDR at 24 to 30 frames a second is 8, so a master
+  upload sits two to four times above it. A master render took 20 to 40
+  percent longer than a standard one.
+- **Preset medium.** Preset slow scored within 0.15 dB of medium at the same
+  size and took twice as long.
+- **AAC 320k.** Against the footage's own sound, 192k stayed within 26 dB
+  (signal to distortion, ffmpeg's `asdr`), 256k within 39 and 320k within 42.
+- **Range and color tags are carried, never changed.** At both qualities,
+  with and without overlays, a full-range bt709 clip comes out full range
+  and tagged bt709, a video-range one comes out video range, and a clip
+  with no tags comes out with none (ffmpeg 9.0). Squeezing full range into
+  video range would cost levels, and a tag the footage doesn't carry would
+  be a guess.
+
+What a master export will take on disk can be said before it is made:
+about what the kept part of the footage takes, `footage.kept_mb` in
+`get_edit` (0.5 to 1.1 times it on the test clips). A standard export took
+0.3 to 0.5 times it.
+
+A reel sits between the clips and the export, so it sets the ceiling. A
+master export of `mandel`, scored against the clip:
+
+| Cut from | PSNR | VMAF |
+|---|---|---|
+| the clip itself | 50.8 dB | 99.3 |
+| a `master` reel (CRF 12, 27.0 megabits a second) | 49.2 dB | 98.9 |
+| a `standard` reel (CRF 16, 20.3) | 46.3 dB | 97.4 |
+
+A reel at CRF 8 took 30 percent more disk than the master one for 0.3 dB,
+so a master reel is CRF 12 too. A reel that was copied is the clips.
 
 #### How render and preview cut
 
@@ -1560,7 +1734,8 @@ kept pieces export in about a minute and a half.
 - The file is as long as the edit says: `duration` matches
   `expected_duration` to the frame.
 - The encode is the same as before: H.264 High, CRF 19 for a render and 23
-  for a preview, AAC at 192k, the source's size and frame rate.
+  for a preview, AAC at 192k, the source's size and frame rate. A master
+  render is CRF 12 with AAC at 320k ("Quality" above).
 
 The pass needs ffmpeg's `asegment` filter, which came with ffmpeg 5. With an
 older ffmpeg both fall back to ClipForge's encode, whose time grows fast with
@@ -1584,6 +1759,31 @@ A preview draws only the overlays that show in its window, picking up a
 drift or a clip where it would be at that moment. The job's progress covers
 both passes, each with the share of the time it takes: at 50% about half
 the wait is over.
+
+At standard quality both passes are encodes at CRF 19, and the sound is
+copied by the second unless a clip's sound is mixed in. A master render
+must not pay for two. Its first pass writes a working file into `work/`
+that loses nothing: x264 at `-qp 0`, preset ultrafast, with ALAC sound and
+no `+faststart`. The pass that draws is then the one encode the picture and
+the sound get, at CRF 12 and AAC 320k, and `made` in the result says so. On
+`mandel`, with a photo over part of the talk, scored where nothing is
+drawn, on the real code:
+
+| | `standard` | `master` |
+|---|---|---|
+| No overlays | 44.0 dB, VMAF 95.8, 1.5 s | 49.7 dB, VMAF 99.3, 1.8 s |
+| A photo drawn | 42.8 dB, VMAF 94.2, 2.6 s | 49.7 dB, VMAF 99.3, 2.2 s |
+
+The second standard encode costs 1.2 dB. The working file costs nothing,
+and it is written at about 20 times the speed the footage plays, so the
+two master passes took about as long as the two standard ones (1.6 to 2.3
+seconds against 1.7 to 2.6 on the three clips). A first
+pass that was only nearly lossless (CRF 2) still cost 1.0 dB. The price is
+disk while the job runs: the working file held 54 to 120 megabits a second,
+1.7 to 3.9 times the footage, so allow four times `footage.kept_mb` free.
+It is removed when the job ends, finished or failed. When overlays are
+saved and none shows in the edit, nothing is drawn, the first pass is the
+result, and it is an ordinary master encode.
 
 ### look
 
@@ -1826,7 +2026,11 @@ Every change saves to the edit at once. The page plays the source video
 straight from disk. Nothing is uploaded. The address works until the Claude
 session ends.
 
-Export video starts the same job `render` starts, in the same registry. The
+Export video starts the same job `render` starts, in the same registry, at
+`standard` quality. The page offers no choice of quality: its words and
+layout were approved line by line, and a master export comes with a size
+and a wait that need saying first. A master export is asked for through
+Claude, with `render` and `quality: "master"`. The
 page shows its progress, then the file's name and folder. The creator may
 export without telling Claude, so after they used the page, read `export` in
 `get_edit` before rendering. When an export fails, the page tells the creator

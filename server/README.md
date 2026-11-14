@@ -150,7 +150,8 @@ by `../hooks/hooks.json` at session start) against stub programs on a trimmed
 | `timeline.py` | Source time to edited time, and back |
 | `jobs.py` | Background jobs, status, receipts |
 | `transcription.py` | The transcribe job: the speech process, then a check of the transcript. The same job measures the word times. |
-| `render_jobs.py` | The render and preview jobs |
+| `render_jobs.py` | The render and preview jobs. A full render takes a quality, and its result says what was made: the quality, the size, the megabits of picture a second, and how |
+| `quality.py` | The two qualities of a finished video and of an encoded reel, `standard` (every file as it was) and `master`, with the numbers behind them; the working file a master render with overlays writes so it encodes once; and `file_facts`, what a video file is |
 | `carry.py` | The `carry_edit` job: maps the footage two videos share (`time_map`), moves each saved span and each transcript word through it (`move_span`, `fill_from`), writes the new transcript without hearing anything twice, and builds the carried edit with the one recipe |
 | `reels.py` | The `assemble` job: joins clips into a reel (copy when whole clips match in every detail, else one encode in whole frames, with any clip in HDR or wide color turned into standard color), writes the `.reel.json` sequence file beside it, and finds it again (`reel_for`) for `get_edit` and `read_transcript` |
 | `publish_kit.py` | Chapter rules and the `publish-kit/` files. An extra: its tools (`chapter_times`, `save_publish_kit`) list only with `publish_kit` on |
@@ -192,7 +193,7 @@ creator's footage stays on the creator's machine: the server binds to
 | The bar: one block per cluster, shaded by its number of edits | `clusters[].level` |
 | A name tag on the video for a photo or clip | `overlays[]` |
 | A video joined from several clips: a line on the bar where each starts, numbered where there is room, "Clip 2 of 4" beside the clock, the clip's name before its first word | `reel.clips[]` (file names only, never a folder) |
-| Export video, with percent, the file's name and Copy path | `export`, `POST api/export`, `GET api/export` |
+| Export video, with percent, the file's name and Copy path. Always a standard export: a master one is asked for through Claude (`render` with `quality: "master"`) | `export`, `POST api/export`, `GET api/export` |
 
 The page adds `?muted=1` for tests: every media element is muted at volume 0.
 `?example=1` runs it from built-in example data with no server.
@@ -247,6 +248,20 @@ exception is named in `creator_words.py` and tested in
   packed transcript itself, as plain text ending in `NEXT <time>` or `END`,
   with `{text, phrase_count, next_start}` in `structured_content`. Errors still
   go through `ToolError`, so `is_error` works as before.
+- **Quality (`render`, `assemble`).** `standard` is pinned to the commands
+  every file was made with, so nothing that exists changes. `master` is one
+  set of numbers for an export and for an encoded reel (CRF 12, preset medium,
+  AAC 320k), chosen from scores against made-up camera-like footage and not
+  from a target of megabits; `TOOLS.md`, "Quality", has the tables. A master
+  render with overlays writes a lossless working file first, so it encodes
+  once. A master reel is another reel (a mark in its id), a copy has no
+  quality, and an encoded reel whose sequence file names none is standard.
+  The page's Export video stays standard: the page's words were approved
+  line by line, and a master export needs its size said first, which is
+  Claude's to say from `footage` in `get_edit`. The engine's own command
+  (the slow way, for an ffmpeg without `asegment`) is a generated copy, so
+  its settings are swapped on the argv (`render_jobs.written_as`), and only
+  for a master render.
 - **Several clips (`assemble`).** Studio can join several clips into one video,
   the reel, and every other tool takes the reel as its one video. This keeps the
   join step and the edit step apart: the edit format, the join check, the render

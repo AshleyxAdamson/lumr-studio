@@ -14,7 +14,11 @@ look for the sequence file, to show where each clip starts.
 ``id`` is the first 8 hex of a sha1 over the name and each piece (the clip's
 resolved path, byte size, mtime, and the start and end). The same sequence
 always lands on the same file, so asking twice builds once; a different
-sequence is a different file. Nothing is ever overwritten.
+sequence is a different file. Nothing is ever overwritten. A reel that has to
+be encoded can be made at ``standard`` or ``master`` quality (quality.py): a
+master one carries a mark in its id, so it sits beside the standard reel of
+the same sequence, and the sequence file records which it is. A copy is the
+clips as they are, so it is one reel whichever quality was asked for.
 
 Whole clips that agree in every detail a copy depends on are joined by
 copying: no quality is lost and it takes seconds. Otherwise, because a piece
@@ -56,6 +60,7 @@ from lumr_studio.jobs import JobHandle, Work
 from lumr_studio.overlay_render import FALLBACK_FPS, X264_ARGS, run_ffmpeg
 from lumr_studio.overlays import PROBE_TIMEOUT_SECONDS, VIDEO, probe_media
 from lumr_studio.project import now_iso, write_json_atomic
+from lumr_studio.quality import MASTER, QUALITIES, STANDARD, check_quality, megabytes
 
 # The kind of job that builds a reel.
 KIND = "assemble"
@@ -76,6 +81,14 @@ END_TOLERANCE = 0.05
 REEL_CRF = "16"
 REEL_AUDIO_ARGS = ("-c:a", "aac", "-b:a", "256k")
 REEL_SAMPLE_RATE = 48000
+# Part of the id of a reel encoded at master quality, so it lands beside the standard reel of the same
+# sequence and never on it. A standard reel has no such mark: its id is the one it had before there was a choice.
+MASTER_MARK = "master quality 1"
+# What an answer says when master was asked for and nothing had to be encoded.
+COPY_IS_WHOLE = (
+    "These clips were joined as they are, with nothing compressed again, so the reel is already as good "
+    "as the clips and quality changes nothing here."
+)
 
 # How a clip's picture can differ from standard color (bt709), by what ffprobe calls it.
 HDR = "HDR"
@@ -342,16 +355,23 @@ def check_pieces(
     return pieces
 
 
-def sequence_id(name: str, pieces: list[Piece]) -> str:
+def sequence_id(name: str, pieces: list[Piece], quality: str = STANDARD) -> str:
     """Eight hex characters that change when the name, a clip, or a piece's start or end changes.
 
     A sequence with a clip that is turned into standard color carries a mark
     of that too, so a reel joined before Studio converted such clips, with
     the HDR picture written as it was, is not answered as this reel.
+
+    A sequence that is encoded at master quality carries a mark of that, so
+    it is another reel than the standard one. A copy carries none: it is the
+    clips as they are at either quality, so it is one reel. A standard reel's
+    id is what it was before there was a choice.
     """
     parts: list[Any] = [name, [[str(p.clip), p.size, p.mtime_ns, p.start, p.end] for p in pieces]]
     if any(p.converted_from for p in pieces):
         parts.append(CONVERTED_MARK)
+    if quality == MASTER and how_to_join(pieces) == ENCODE:
+        parts.append(MASTER_MARK)
     return hashlib.sha1(json.dumps(parts).encode("utf-8")).hexdigest()[:8]
 
 
@@ -381,6 +401,7 @@ class ReelPlan:
     how: str
     reel: Path
     sequence: Path
+    quality: str = STANDARD  # what was asked for; it changes the file only when the reel is encoded
 
     @property
     def lengths(self) -> list[float]:
@@ -404,12 +425,16 @@ def frames_in(seconds: float, fps: str) -> int:
     return max(1, round(seconds * float(Fraction(fps))))
 
 
-def plan_reel(name: Any, raw_pieces: Any, *, can_convert: Callable[[], bool] = can_convert_color, **probes: Any) -> ReelPlan:
-    """Check the name and the pieces and work out the files. Writes nothing.
+def plan_reel(
+    name: Any, raw_pieces: Any, *, quality: Any = STANDARD, can_convert: Callable[[], bool] = can_convert_color, **probes: Any
+) -> ReelPlan:
+    """Check the name, the quality and the pieces and work out the files. Writes nothing.
 
-    Raises StudioError when a clip has to be turned into standard color and this ffmpeg can't do it.
+    Raises StudioError when ``quality`` is not one, or when a clip has to be
+    turned into standard color and this ffmpeg can't do it.
     """
     name = check_name(name)
+    quality = check_quality(quality).name
     pieces = check_pieces(raw_pieces, **probes)
     odd = next((p for p in pieces if p.converted_from), None)
     if odd is not None and not can_convert():
@@ -419,8 +444,8 @@ def plan_reel(name: Any, raw_pieces: Any, *, can_convert: Callable[[], bool] = c
             f"or make a standard color copy of the clip and join that ({COPY_BY_HAND})."
         )
     folder = (lumr_home() / "studio" / REELS_FOLDER / slug_for(name)).resolve()
-    reel = folder / f"{slug_for(name)}-{sequence_id(name, pieces)}.mp4"
-    return ReelPlan(name, pieces, how_to_join(pieces), reel, sequence_path_for(reel))
+    reel = folder / f"{slug_for(name)}-{sequence_id(name, pieces, quality)}.mp4"
+    return ReelPlan(name, pieces, how_to_join(pieces), reel, sequence_path_for(reel), quality)
 
 
 # ── The sequence file ─────────────────────────────────────────────────────────
@@ -438,10 +463,24 @@ def _sequence_record(plan: ReelPlan) -> dict[str, Any]:
             row["converted_from"] = p.converted_from
         rows.append(row)
         at += length
-    return {
+    record: dict[str, Any] = {
         "version": SEQUENCE_VERSION, "name": plan.name, "made_at": now_iso(), "how": plan.how,
         "duration": round(at, 3), "pieces": rows,
     }
+    if plan.how == ENCODE:
+        record["quality"] = plan.quality
+    return record
+
+
+def quality_of(record: dict[str, Any]) -> str | None:
+    """The quality an encoded reel was made at, from its sequence file; None for a copy, which has none.
+
+    A reel encoded before there was a choice says nothing, and was standard.
+    """
+    if record.get("how") != ENCODE:
+        return None
+    named = record.get("quality")
+    return named if named in QUALITIES else STANDARD
 
 
 def read_sequence(path: Path) -> dict[str, Any]:
@@ -494,18 +533,45 @@ def answer_for(status: str, plan: ReelPlan, record: dict[str, Any]) -> dict[str,
     """What assemble tells the caller about a reel: ``exists`` when it was there, ``built`` when the job made it.
 
     A piece whose clip was turned into standard color carries ``converted_from``, and ``note`` says so in plain words.
+    An encoded reel carries ``quality``, the one it was made at. A copy has none, and ``note`` says why when
+    master was asked for. ``size_mb`` is the reel's size on disk in megabytes.
     """
     keys = ("clip", "start", "end", "reel_start", "reel_end", "converted_from")
-    return {
+    answer: dict[str, Any] = {
         "status": status,
         "reel": str(plan.reel),
         "name": record["name"],
         "duration": record["duration"],
         "how": record["how"],
-        "pieces": [{k: p[k] for k in keys if k in p} for p in record["pieces"]],
-        "sequence_file": str(plan.sequence),
-        "note": " ".join(filter(None, [USE_THE_REEL, color_note(record["pieces"])])),
     }
+    made_at = quality_of(record)
+    if made_at:
+        answer["quality"] = made_at
+    answer["pieces"] = [{k: p[k] for k in keys if k in p} for p in record["pieces"]]
+    answer["sequence_file"] = str(plan.sequence)
+    size = megabytes(plan.reel)
+    if size is not None:
+        answer["size_mb"] = size
+    answer["note"] = " ".join(filter(None, [USE_THE_REEL, color_note(record["pieces"]), quality_note(plan.quality, made_at)]))
+    return answer
+
+
+def quality_note(asked: str, made_at: str | None) -> str:
+    """What to pass on when the reel is not at the quality asked for; empty when it is.
+
+    A copy has no quality, which only needs saying when master was asked
+    for. An encoded reel differs from what was asked only on a copy's name:
+    the plain join came out wrong once and was built again as an encode, at
+    the quality asked for then, and a reel is never built over.
+    """
+    if made_at is None:
+        return COPY_IS_WHOLE if asked == MASTER else ""
+    if made_at == asked:
+        return ""
+    return (
+        f"This reel was joined before at {made_at} quality, and Lumr Studio never builds over a reel. "
+        f"For a {asked} one, call assemble again with another name."
+    )
 
 
 def existing_answer(plan: ReelPlan) -> dict[str, Any] | None:
@@ -527,10 +593,12 @@ def existing_answer(plan: ReelPlan) -> dict[str, Any] | None:
 def reel_for(video: Path) -> dict[str, Any] | None:
     """Which clips a video is made of, or None when no sequence file sits beside it.
 
-    ``{name, pieces: [{clip, start, end, reel_start, reel_end}]}``: for each
-    piece, the clip seconds used and where they play in the reel, which is
-    what ``assemble`` needs to build the sequence again with a change. A
-    sequence file that can't be read counts as none: it must never stop an edit.
+    ``{name, how, quality?, pieces: [{clip, start, end, reel_start,
+    reel_end}]}``: for each piece, the clip seconds used and where they play
+    in the reel, which is what ``assemble`` needs to build the sequence again
+    with a change. ``how`` is ``copy`` or ``encode``, and an encoded reel
+    carries the ``quality`` it was made at. A sequence file that can't be
+    read counts as none: it must never stop an edit.
     """
     path = sequence_path_for(video)
     if not path.is_file():
@@ -539,10 +607,12 @@ def reel_for(video: Path) -> dict[str, Any] | None:
         record = read_sequence(path)
     except StudioError:
         return None
-    return {
-        "name": record["name"],
-        "pieces": [{k: p[k] for k in ("clip", "start", "end", "reel_start", "reel_end")} for p in record["pieces"]],
-    }
+    reel: dict[str, Any] = {"name": record["name"], "how": record["how"]}
+    made_at = quality_of(record)
+    if made_at:
+        reel["quality"] = made_at
+    reel["pieces"] = [{k: p[k] for k in ("clip", "start", "end", "reel_start", "reel_end")} for p in record["pieces"]]
+    return reel
 
 
 def clip_markers(reel: dict[str, Any]) -> list[tuple[float, str]]:
@@ -611,8 +681,11 @@ def matrix_of(piece: Piece) -> str:
     return "bt709" if piece.streams.width >= 1280 or piece.streams.height > 576 else "smpte170m"
 
 
-def encode_command(pieces: list[Piece], out: Path) -> list[str]:
+def encode_command(pieces: list[Piece], out: Path, quality: str = STANDARD) -> list[str]:
     """Trim each piece, fit it to the first clip's size and frame rate and to 48 kHz stereo, join, and encode once.
+
+    ``quality`` sets how much of the picture and the sound the encode keeps
+    (quality.py). The standard command is the one it always was.
 
     Each piece is its own input, seeked to its start, so a piece late in a
     long clip doesn't decode all that comes before it. Each piece then ends
@@ -654,10 +727,12 @@ def encode_command(pieces: list[Piece], out: Path) -> list[str]:
             f"apad,atrim=end_sample={samples}[a{i}]"
         )
     joined = "".join(f"[v{i}][a{i}]" for i in range(len(pieces))) + f"concat=n={len(pieces)}:v=1:a=1[v][a]"
+    made_at = check_quality(quality)
+    keeps = ("-crf", str(made_at.reel_crf), *made_at.reel_sound) if made_at.is_master else ("-crf", REEL_CRF, *REEL_AUDIO_ARGS)
     return [
         "ffmpeg", *QUIET, *(CONVERTER_DEVICE if converting else ()), *inputs,
         "-filter_complex_threads", "1", "-filter_complex", ";".join([*graph, joined]),
-        "-map", "[v]", "-map", "[a]", *X264_ARGS, "-crf", REEL_CRF, *REEL_AUDIO_ARGS,
+        "-map", "[v]", "-map", "[a]", *X264_ARGS, *keeps,
         "-movflags", "+faststart", str(out),
     ]
 
@@ -759,7 +834,7 @@ def builder(
                     fh.writelines(listing_line(p.clip) for p in current.pieces)
                 command = copy_command(listing, partial)
             else:
-                command = encode_command(current.pieces, partial)
+                command = encode_command(current.pieces, partial, current.quality)
             check = "Check that every clip plays through in a video player."
             odd = next((p for p in current.pieces if p.converted_from), None)
             if odd is not None:

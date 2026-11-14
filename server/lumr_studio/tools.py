@@ -43,10 +43,13 @@ from lumr_studio.project import (
     reserve_unique_path,
 )
 from lumr_studio.publish_kit import write_publish_kit
+from lumr_studio.quality import STANDARD, check_quality, file_facts
 from lumr_studio.render_jobs import (
     RENDER_KIND,
     holds_earlier_edit,
     preview_window,
+    quality_of,
+    reel_holds_back,
     render_preview,
     start_full_render,
 )
@@ -350,7 +353,9 @@ def transcribe(
     return {"status": "aligning", "job_id": job_id, **summary}
 
 
-def assemble(name: str, pieces: list[dict[str, Any]], *, jobs: JobRegistry = JOBS) -> dict[str, Any]:
+def assemble(
+    name: str, pieces: list[dict[str, Any]], quality: str = STANDARD, *, jobs: JobRegistry = JOBS
+) -> dict[str, Any]:
     """Join clips into one video, the reel, that every other tool then edits.
 
     ``pieces`` are ``{clip, start?, end?}`` in play order; ``start`` and
@@ -361,8 +366,12 @@ def assemble(name: str, pieces: list[dict[str, Any]], *, jobs: JobRegistry = JOB
     codec, size, frame rate, time base and sound are copied; if any piece has
     a start or an end, or the clips differ, the reel is encoded once. Nothing
     is overwritten: a different sequence is a different file.
+
+    ``quality`` is ``standard`` or ``master`` and matters only to a reel that
+    is encoded: a master reel is another file beside the standard one. A copy
+    loses nothing at either, and its answer says so when master was asked for.
     """
-    plan = reels.plan_reel(name, pieces)
+    plan = reels.plan_reel(name, pieces, quality=quality)
     # The reel's project, which exists before the reel does: the job needs one for its receipt.
     project = project_for(plan.reel)
     running = jobs.latest(reels.KIND, project)
@@ -528,11 +537,13 @@ def get_edit(
     and the creator can have Lumr forget it through Claude (``forget_taste``). When a full
     render of this video has run since the server started, ``export`` names
     its job, so Claude can follow an export the creator started from the
-    page. ``word_times`` says whether the word times are measured or
-    estimated. A reel made by ``assemble`` also carries ``reel``: its name
-    and where each clip sits in it. A video that moved keeps its project
-    (``project.project_for``): the first answer after the move says so under
-    ``moved_from``, and ``project_note`` names folders that might hold this
+    page, with the quality it was made at. ``footage`` says what the video
+    being edited is, and how much of it the edit keeps, so an export can be
+    described before it is made. ``word_times`` says whether the word times
+    are measured or estimated. A reel made by ``assemble`` also carries
+    ``reel``: its name, how it was joined, and where each clip sits in it.
+    A video that moved keeps its project (``project.project_for``): the
+    first answer after the move says so under ``moved_from``, and ``project_note`` names folders that might hold this
     video's edit and were not used, so an empty edit is never the whole story.
     """
     project = open_project(video_path)
@@ -549,6 +560,9 @@ def get_edit(
     reel = reels.reel_for(project.video)
     if reel:
         summary["reel"] = reel
+    footage = _footage(project, duration, summary["new_duration"])
+    if footage:
+        summary["footage"] = footage
     picked = _picks_summary(project, edit, duration)
     if picked:
         summary["picks"] = picked
@@ -568,6 +582,20 @@ def get_edit(
         words = word_times.load_words(project)
         summary["joins"] = _joins_report(project, edit.get("cuts", []), words, duration, labels(project, words))
     return _with_sounds_note(project, summary)
+
+
+def _footage(project: Project, duration: float, new_duration: float) -> dict[str, Any]:
+    """What the video being edited is, so Claude can say what an export of it will be before it is made.
+
+    ``{resolution, fps, video_bitrate_mbps, size_mb, kept_mb}``, each left
+    out when ffprobe can't read it. ``kept_mb`` is what the part the edit
+    keeps takes in this file: a master export lands near it, and a standard
+    one well under.
+    """
+    facts = file_facts(project.video)
+    if "size_mb" in facts and duration > 0:
+        facts["kept_mb"] = round(facts["size_mb"] * new_duration / duration, 1)
+    return facts
 
 
 def _counted_by_word(picks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -601,14 +629,24 @@ def _picks_summary(project: Project, edit: dict[str, Any], duration: float) -> d
 def _latest_export(project: Project, edit: dict[str, Any], jobs: JobRegistry) -> dict[str, Any] | None:
     """The latest full render of this video, from the page or from render, or None when there is none.
 
-    ``{job_id, status, edit_changed_since}``: pass ``job_id`` to job_status
-    for the progress, the file or the error. ``edit_changed_since`` is true
-    when the saved edit now removes something else than the render holds.
+    ``{job_id, status, edit_changed_since, quality}``: pass ``job_id`` to
+    job_status for the progress, the file or the error. ``edit_changed_since``
+    is true when the saved edit now removes something else than the render
+    holds. ``quality`` is the one it was started at, and a finished one also
+    carries ``size_mb`` and ``video_bitrate_mbps``, read from its file.
     """
     job = jobs.latest(RENDER_KIND, project)
     if job is None:
         return None
-    return {"job_id": job.job_id, "status": job.status, "edit_changed_since": holds_earlier_edit(job, edit)}
+    export: dict[str, Any] = {
+        "job_id": job.job_id, "status": job.status, "edit_changed_since": holds_earlier_edit(job, edit),
+        "quality": quality_of(job),
+    }
+    made = job.result if job.status == "done" and isinstance(job.result, dict) else {}
+    for key in ("size_mb", "video_bitrate_mbps"):
+        if key in made:
+            export[key] = made[key]
+    return export
 
 
 def _review_summary(project: Project, edit: dict[str, Any]) -> dict[str, Any] | None:
@@ -941,18 +979,34 @@ RENDER_ALREADY_RUNNING = (
 )
 
 
-def render(video_path: str, *, jobs: JobRegistry = JOBS) -> dict[str, Any]:
+def render(video_path: str, quality: str = STANDARD, *, jobs: JobRegistry = JOBS) -> dict[str, Any]:
     """Start rendering the full edited video into exports/.
+
+    ``quality`` is ``standard``, the everyday export, or ``master``, for
+    uploading: as close to the footage as an export gets, and a much bigger
+    file. The answer names the quality of the render it points at. A master
+    render of a reel that was encoded at standard carries ``reel_note``,
+    which says the reel holds it back and what to do.
 
     One full render runs per video at a time. The creator can start one from
     the page (Export video); when one is running, this answers its job id
-    with ``already_running: true`` and starts nothing.
+    with ``already_running: true`` and starts nothing. ``quality`` is then
+    the running one's, and ``note`` says so when it is not the one asked for.
     """
+    made_at = check_quality(quality)
     project = open_project(video_path)
-    job_id, started = start_full_render(project, jobs=jobs)
+    job_id, started = start_full_render(project, jobs=jobs, quality=made_at.name)
     if started:
-        return {"job_id": job_id}
-    return {"job_id": job_id, "already_running": True, "note": RENDER_ALREADY_RUNNING}
+        answer = {"job_id": job_id, "quality": made_at.name}
+        held_back = reel_holds_back(project.video, made_at)
+        if held_back:
+            answer["reel_note"] = held_back
+        return answer
+    running = quality_of(jobs.get(job_id))
+    note = RENDER_ALREADY_RUNNING
+    if running != made_at.name:
+        note += f" It is a {running} export, not the {made_at.name} one asked for: call render again with quality {made_at.name} once it is done."
+    return {"job_id": job_id, "already_running": True, "quality": running, "note": note}
 
 
 def look(

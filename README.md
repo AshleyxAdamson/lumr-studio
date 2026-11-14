@@ -34,6 +34,7 @@ On a 21:47 test take, measured word times took out more than twice as much at ev
 - **Ums read one at a time.** Claude sees every "um", even the ones a transcript leaves out. It takes out the ones that start a sentence or sit beside a clear pause, and leaves the ones that hold a sentence together.
 - **Several clips, one video.** Studio can join your clips into one video and follow your script. Claude finds every take of each line, keeps your best one, usually the last complete take, and cuts the rest. Then you fine-tune it on the review page. Your clips are never changed.
 - **A review page** in your browser. Double-click any word to cut it or bring it back, hear any cut, flip between the original and the edit, and export.
+- **A master export for upload day.** Ask Claude for it when a video is final: as close to your footage as an export gets, and a much bigger file. Claude says how big before it starts.
 - **Cuts you can tell apart.** Dim for the pace, red for Claude, teal for you.
 - **Learns from your fixes.** Every cut you put back or mark good or wrong, and every word you bring back, teaches it, and your next video starts from what you taught it. It stays on your Mac.
 - **UI feedback sessions.** Record your screen while you scroll through an app or a website and talk through what you'd change. Claude turns it into numbered notes, each with a time and screenshots of what was on screen. It shows them in chat, saves them to a file if you say yes, and can work through the fixes in your code. Nothing is cut, and the video isn't changed.
@@ -78,6 +79,8 @@ It runs in Claude Code, and in Cowork when the session runs on your Mac. Chat on
 > Use assemble-takes on ~/Movies/Bread/take-1.mp4, take-2.mp4, take-3.mp4 and take-4.mp4, in that order. Here's my script: (paste it).
 
 > Use splice-clips on my bread video. Put ~/Movies/Bread/oven.mov in where I say "watch this", and crumb.mov where I cut the loaf.
+
+> This one is final and I'm uploading it today. Export ~/Movies/Bread/week-5.mp4 at the best quality my footage allows.
 
 > Use ui-feedback on ~/Movies/app-walkthrough.mov
 

@@ -100,6 +100,8 @@ In chat:
 
 Then offer the review page (`review`), where each clip shows by name on the bar and in the words. Render only when the creator says go.
 
+A spliced video is always an encoded reel, so its `quality` sets how good an export can be. When the creator says this is the final, is for upload, or asks for the best quality, read `footage` and `reel` in `get_edit` first and say what they have and what the export will be: a master export (`render` with `quality: "master"`) is about `kept_mb` megabytes. If the reel's `quality` is `standard`, say plainly that a master export of it can only be as good as that reel, and what building it again costs: `assemble` with the same name and pieces and `quality: "master"` takes about as long as the first join and makes a second reel about as big as the clips, and `carry_edit` takes the edit across. If they say before step 5 that this is for upload, pass `quality: "master"` to `assemble` there and skip the second join.
+
 ## When the creator asks for a faster video
 
 Follow the `what-to-cut` skill's part on "Faster": it says what the ask means, whose the switches are, and what to say when pauses fall short. The call that raises the pace is `set_edit` with your cuts as `get_edit` lists them, `auto_tighten` true and a harder `pace`. The answer's `auto.take_out` lists the switches that are on: without `pauses` in it, the pace has no pause to shorten. Its `new_duration`, beside the one `get_edit` gave before, is how much shorter the talk got.
