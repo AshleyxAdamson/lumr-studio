@@ -636,7 +636,7 @@ def test_an_hdr_clip_joined_with_a_plain_one_comes_out_in_standard_color(jobs, t
     assert "phone.mov was recorded in HDR; the joined video shows it in standard color." in result["note"]
     record = reels.read_sequence(Path(result["sequence_file"]))
     assert [p.get("converted_from") for p in record["pieces"]] == [None, "HDR", None]
-    assert set(reels.reel_for(reel)["pieces"][1]) == {"clip", "reel_start", "reel_end"}
+    assert set(reels.reel_for(reel)["pieces"][1]) == {"clip", "start", "end", "reel_start", "reel_end"}
 
     # The clip is as it was, and the reel's folder holds the reel and its sequence file and no working copy.
     assert (hdr.read_bytes(), hdr.stat().st_mtime_ns) == before
@@ -995,7 +995,7 @@ def test_reel_for_finds_the_sequence_file_and_gives_none_for_a_plain_video(video
     reel, result = build_reel_with_words(video, jobs)
     found = reels.reel_for(reel)
     assert found["name"] == "seen"
-    assert [set(p) for p in found["pieces"]] == [{"clip", "reel_start", "reel_end"}] * 2
+    assert [set(p) for p in found["pieces"]] == [{"clip", "start", "end", "reel_start", "reel_end"}] * 2
     assert [Path(p["clip"]).name for p in found["pieces"]] == ["talk.mp4", "talk two.mp4"]
     assert found["pieces"][1]["reel_start"] == result["pieces"][1]["reel_start"]
 
@@ -1013,7 +1013,7 @@ def test_get_edit_shows_the_clips_of_a_reel_and_nothing_for_a_plain_video(video,
     shown = tools.get_edit(str(reel), labels=unmeasured_labels)["reel"]
     assert shown == {
         "name": "seen",
-        "pieces": [{k: p[k] for k in ("clip", "reel_start", "reel_end")} for p in result["pieces"]],
+        "pieces": [{k: p[k] for k in ("clip", "start", "end", "reel_start", "reel_end")} for p in result["pieces"]],
     }
 
 

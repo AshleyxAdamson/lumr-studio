@@ -321,7 +321,7 @@ class MadeEdit:
     cuts_kept_off_sounds: int = 0
 
 
-_recipes:OrderedDict[tuple[Any, ...], MadeEdit] = OrderedDict()
+_recipes: OrderedDict[tuple[Any, ...], MadeEdit] = OrderedDict()
 _recipes_lock = threading.Lock()
 
 

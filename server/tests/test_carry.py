@@ -7,6 +7,8 @@ clip joined in before the third.
 """
 
 import json
+import os
+import shutil
 import subprocess
 import threading
 from pathlib import Path
@@ -18,7 +20,7 @@ from creator_words import banned_in, decimal_times_in
 from tiny_models import tiny_set
 
 from lumr_studio import carry, edit as edits, overlay_tools, taste, tools, treatment, word_times
-from lumr_studio.carry import Part, Stretch, fill_from, move_span, time_map
+from lumr_studio.carry import Part, Stretch, at_their_paths_now, fill_from, move_span, time_map
 from lumr_studio.engine.render import probe_duration
 from lumr_studio.errors import StudioError
 from lumr_studio.overlays import load_overlays
@@ -102,6 +104,31 @@ def test_videos_with_no_clip_in_common_share_nothing():
 def test_a_piece_that_ends_a_frame_early_ends_its_stretch_there():
     new = [{"clip": "a", "start": 0, "end": 10.02, "reel_start": 0, "reel_end": 10.0}]
     assert as_tuples(time_map(sequence(("a", 0, 30)), new)) == [(0, 10, 0)]
+
+
+def test_a_clip_that_moved_is_the_new_videos_clip_of_its_name_and_length(tmp_path):
+    """A sequence file names clips by path; after a move the same footage has another one."""
+    here = tmp_path / "talk.mp4"
+    here.write_bytes(b"footage")
+    new = [{**p, "clip": str(here), "clip_duration": 30.0} for p in sequence(("x", 0, 12))]
+    gone = [{**p, "clip": "/another/mac/talk.mp4", "clip_duration": 30.02} for p in sequence(("x", 0, 30))]
+    assert [p["clip"] for p in at_their_paths_now(gone, new)] == [str(here)]
+    assert as_tuples(time_map(at_their_paths_now(gone, new), new)) == [(0, 12, 0)]
+
+    other_length = [{**p, "clip_duration": 31.0} for p in gone]
+    assert [p["clip"] for p in at_their_paths_now(other_length, new)] == ["/another/mac/talk.mp4"]
+    other_name = [{**p, "clip": "/another/mac/walk.mp4"} for p in gone]
+    assert [p["clip"] for p in at_their_paths_now(other_name, new)] == ["/another/mac/walk.mp4"]
+    # A clip still at its path is never taken for another: a copy does not get the original's edit.
+    still = tmp_path / "kept" / "talk.mp4"
+    still.parent.mkdir()
+    still.write_bytes(b"footage")
+    still_there = [{**p, "clip": str(still)} for p in gone]
+    assert [p["clip"] for p in at_their_paths_now(still_there, new)] == [str(still)]
+    # Two clips of the new video that both fit: nothing is guessed.
+    twin = tmp_path / "twin" / "talk.mp4"
+    two = new + [{**new[0], "clip": str(twin)}]
+    assert [p["clip"] for p in at_their_paths_now(gone, two)] == ["/another/mac/talk.mp4"]
 
 
 # ── moving one span ───────────────────────────────────────────────────────────
@@ -507,6 +534,78 @@ def test_a_change_the_creator_made_counts_once_after_it_is_carried(scene, video)
     learned = tools.get_edit(str(another), labels=unmeasured_labels)["taste"]
     assert learned["videos"] == 1
     assert learned["cut_by_hand"] == [["about", 1]]
+
+
+def test_what_she_asked_to_forget_stays_forgotten_after_it_is_carried(video, jobs):
+    """Carried changes get new ids in a new folder; the note of what to forget goes with them."""
+    old = edited_old_reel(video, jobs)
+    taste.forget_all()
+    another = video.with_name("another.mp4")
+    another.write_bytes(video.read_bytes())
+    another.with_suffix(".words.json").write_text(json.dumps(make_words()))
+    assert "taste" not in tools.get_edit(str(another), labels=unmeasured_labels)
+    new, _ = new_reel(video, jobs)
+
+    carried(old, new, jobs)
+
+    assert "taste" not in tools.get_edit(str(another), labels=unmeasured_labels), "the carry brought nothing back"
+    # A change she makes on the new reel after that counts, as one made after forgetting always does.
+    treatment.add_cut(ctx_for(new), {"start": 0.95, "end": 1.5})  # "everyone"
+    learned = tools.get_edit(str(another), labels=unmeasured_labels)["taste"]
+    assert learned["videos"] == 1 and learned["cut_by_hand"] == [["everyone", 1]]
+
+
+def test_a_carry_with_nothing_forgotten_writes_no_note_of_it(scene):
+    assert not taste.taste_path().exists()
+
+
+# ── after a move ──────────────────────────────────────────────────────────────
+
+
+def test_the_edit_of_a_video_that_moved_since_is_carried(video, jobs, tmp_path):
+    """The old video's project sits in a folder named for the path it had; it is found as every tool finds it."""
+    tools.set_edit(str(video), [FALSE_START], **QUIET)
+    made_for = open_project(str(video)).root
+    there = tmp_path / "elsewhere"
+    there.mkdir()
+    moved = there / video.name
+    shutil.move(video, moved)
+    shutil.move(video.with_suffix(".words.json"), moved.with_suffix(".words.json"))
+    built = assemble(jobs, "moved since", [{"clip": str(moved)}, {"clip": str(other_clip(there)), "start": 0.0, "end": 3.0}])
+    reel = Path(built["reel"])
+
+    report = carried(moved, reel, jobs)
+
+    assert report["cuts"]["carried"] == 1 and report["transcript"]["carried_words"] == len(make_words())
+    cut = claude_cuts(reel)[0]
+    assert said_in(reel, cut["start"], cut["end"]) == ["today", "we", "talk", "about", "editing", "[vocalization]"]
+    record = json.loads((open_project(str(reel)).root / taste.CARRIED_FILE).read_text())
+    assert record["from_project"] == made_for.name, "the project that stops teaching is the one that holds the old edit"
+
+
+def test_a_reel_copied_to_another_mac_is_carried_onto_a_reel_joined_there(video, jobs, tmp_path, monkeypatch):
+    """The old reel's sequence file names its clips where they were; the new reel is joined from where they are."""
+    old = edited_old_reel(video, jobs)
+    gone = [said_in(old, c["start"], c["end"]) for c in claude_cuts(old)]
+    home, projects = Path(os.environ["LUMR_HOME"]), Path(os.environ["LUMR_STUDIO_PROJECTS_DIR"])
+    there = tmp_path / "other-mac"
+    (there / "footage").mkdir(parents=True)
+    shutil.move(home, there / "lumr-home")
+    shutil.move(projects, there / "projects")
+    clip = there / "footage" / video.name
+    shutil.move(video, clip)
+    monkeypatch.setenv("LUMR_HOME", str(there / "lumr-home"))
+    monkeypatch.setenv("LUMR_STUDIO_PROJECTS_DIR", str(there / "projects"))
+    old_there = there / "lumr-home" / old.relative_to(home)
+    new, _ = new_reel(clip, jobs)
+
+    report = carried(old_there, new, jobs)
+
+    # As on the first Mac: the first cut whole, the one across the new clip in two, the last take's dropped.
+    cuts = report["cuts"]
+    assert (cuts["total"], cuts["carried"], len(cuts["split"]), len(cuts["dropped"])) == (3, 1, 1, 1)
+    assert [said_in(new, c["start"], c["end"]) for c in claude_cuts(new)][0] == gone[0]
+    assert report["creator_cuts"]["carried"] == 1 and report["transcript"]["status"] == "written"
 
 
 # ── refusals, and the other ways in ───────────────────────────────────────────

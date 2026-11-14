@@ -20,6 +20,7 @@ You are editing footage you can't hear. Check your own work with the tools befor
 - Where a scripted line was recorded more than once, the last complete take is the one that plays, the lead-in question included.
 - Everything the creator needs to read goes in the chat.
 - To wait for a job, call `job_status` with `wait: 50`.
+- When `transcribe` or `carry_edit` answers `needs_models`, nothing has downloaded. Tell the creator what would download, how big and from where, and ask. Only on a yes, call it again with `download_models` true.
 
 ## 1. Find the cues
 
@@ -57,7 +58,7 @@ In chat, one table: the cue line, the clip, the excerpt's times, how long, why. 
 
 A **splice point** is where a clip goes in: right after the last word of the cue line, at the start of the wait. Take the time from the transcript.
 
-Call `assemble` with the whole sequence in play order: the creator's footage up to the first splice point, the excerpt, the footage from that point to the next, and so on. For a joined video, use the clips and times under `reel` in `get_edit`, and split the piece a splice point falls in. Give the new video a new name.
+Call `assemble` with the whole sequence in play order: the creator's footage up to the first splice point, the excerpt, the footage from that point to the next, and so on. For a joined video, start from the pieces under `reel` in `get_edit`, each with its `clip`, `start` and `end`, and split the piece a splice point falls in. The transcript's times are seconds in the joined video, and a piece's `start` and `end` are seconds in its clip: second `t` of the joined video, inside a piece, is clip second `start + (t - reel_start)`. Give the new video a new name.
 
 When the answer says a clip was recorded in HDR, tell the creator in one sentence. The joined video shows it in standard color.
 
@@ -72,13 +73,13 @@ Done when the report's cuts add up: every cut of the old edit is carried, split,
 
 For every splice point, both sides of it:
 
-- `look` at the join into the clip and the join out of it. The talk ends on a whole word and the clip starts on one.
-- `preview` around it, with enough `pad` to hold the cue line, the whole excerpt and the line after. Keep each preview's path.
+- `look` at the time the clip starts in the new video and at the time it ends: the `reel_start` and `reel_end` of its piece in the `assemble` answer. `look` draws the cut nearest that time, or the plain footage when no cut is within its `span`. Either way, find the splice in the stills and the words: the talk ends on a whole word and the clip starts on one.
+- `preview` with `at` in the middle of the excerpt and `pad` at half the excerpt's length plus 8 seconds, so it holds the cue line, the whole excerpt and the line after. `pad` is at most 30: for an excerpt longer than 40 seconds, make two previews, one at each end of it. Keep each preview's path.
 - `read_transcript` across it. The cue line, the excerpt and the next line read as one thought.
 
-The pace tightens pauses inside the clips too. Laughs and other sounds are safe, but a clip where someone thinks out loud can lose its air. If an excerpt reads rushed, tell the creator they can select it on the review page and press Keep.
+The pace tightens pauses inside the clips too. A laugh and any sound of a second or more always play whole, but a clip where someone thinks out loud can lose its air. If an excerpt reads rushed, tell the creator they can select it on the review page and press Keep.
 
-Done when every splice has a clean `look` on both sides and a preview.
+Done when every splice has a clean `look` at both ends of its clip and a preview.
 
 ## 7. Present
 
@@ -93,4 +94,4 @@ Then offer the review page (`review`), where each clip shows by name on the bar 
 
 ## When the creator asks for a faster video
 
-"Faster", "tighter" and "more momentum" mean shorter pauses. Raise the pace with long pauses on and the other switches as the creator left them, and say how much shorter the talk got. If that falls short of what they asked for, say so, and say that the rest would mean taking out sentences. That choice is theirs.
+"Faster", "tighter" and "more momentum" mean shorter pauses. Raise the pace: call `set_edit` with your cuts as `get_edit` lists them, `auto_tighten` true and a harder `pace`. The switches stay as the creator left them, and only the creator changes one, on the page. The answer's `auto.take_out` lists the switches that are on: without `pauses` in it the pace has no pause to shorten, so tell the creator that switch is theirs to turn on. Say how much shorter the talk got. If that falls short of what they asked for, say so, and say that the rest would mean taking out sentences. That choice is theirs.

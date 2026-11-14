@@ -134,7 +134,7 @@ by `../hooks/hooks.json` at session start) against stub programs on a trimmed
 | Module | Job |
 |---|---|
 | `server.py` | MCP wiring only: tool names, annotations, input models, error mapping. Registers a tool only when `offering.py` offers it |
-| `offering.py` | The one list of tool names: the 12 editor tools, and the extras (publish kit, overlays) behind `LUMR_STUDIO_EXTRAS` |
+| `offering.py` | The one list of tool names: the 15 editor tools, and the extras (publish kit, overlays) behind `LUMR_STUDIO_EXTRAS` |
 | `tools.py` | One plain function per tool; what the tests call |
 | `project.py` | Project folder, atomic writes, receipts, new export names. `project_for` is the one place a video's folder is chosen, and it finds the folder of a video that moved |
 | `transcript.py` | Load and validate `words.json`; pack it into phrase lines |
@@ -155,7 +155,7 @@ by `../hooks/hooks.json` at session start) against stub programs on a trimmed
 | `reels.py` | The `assemble` job: joins clips into a reel (copy when whole clips match in every detail, else one encode in whole frames, with any clip in HDR or wide color turned into standard color), writes the `.reel.json` sequence file beside it, and finds it again (`reel_for`) for `get_edit` and `read_transcript` |
 | `publish_kit.py` | Chapter rules and the `publish-kit/` files. An extra: its tools (`chapter_times`, `save_publish_kit`) list only with `publish_kit` on |
 | `joins.py` | The self-check: every join read the way a viewer hears it, with a fix for Claude and a plain why for the creator |
-| `sounds.py` | Likely laughs told apart from other sounds |
+| `sounds.py` | The sounds between the words found by their loudness (`find_sounds`), likely laughs told apart from other sounds, and the spans no automatic trim may take |
 | `look.py` | One picture of a join, for Claude |
 | `pace.py` | The six pace stops, the two sliders, and the pause each setting leaves |
 | `treatment.py` | The page's state and every change the page can make |

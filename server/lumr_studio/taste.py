@@ -143,6 +143,37 @@ def forget_all() -> dict[str, int]:
     return {"videos": noted}
 
 
+def stay_forgotten(
+    from_project: str, to_project: str, renamed: dict[str, list[tuple[str, str]]],
+    old_treatment: Any, new_treatment: Any,
+) -> None:
+    """Keep what was forgotten about one project forgotten in the project its edit was carried to.
+
+    ``forget_all`` notes a project's changes by id under its folder name. A
+    carried change sits in another folder under another id (an id names a
+    span's times), and the older project stops teaching, so without this
+    the carry would bring back everything the creator asked to forget.
+    ``renamed`` is ``{keep | creator_cuts | ratings: [(old id, new id)]}``
+    for each change that was carried. The newer project is noted with the
+    new id of every change whose old id was forgotten, and with its own
+    treatment when the old one's was still the forgotten one. A project
+    nothing was forgotten about writes nothing.
+    """
+    marker = _marker()
+    was = marker["forgotten"].get(from_project)
+    if not was:
+        return
+    before = marker["forgotten"].get(to_project, {})
+    entry: dict[str, Any] = {}
+    for key in ("keep", "creator_cuts", "ratings"):
+        gone = set(_strings(was.get(key)))
+        entry[key] = _union(_strings(before.get(key)), [new for old, new in renamed.get(key, []) if old in gone])
+    still_forgotten = isinstance(was.get("treatment"), dict) and was["treatment"] == old_treatment
+    entry["treatment"] = new_treatment if still_forgotten and isinstance(new_treatment, dict) else before.get("treatment")
+    marker["forgotten"][to_project] = entry
+    _write_marker(marker)
+
+
 def forget_word(word: str) -> str:
     """Stop learning from one word, on every video. Answers the word as it is kept: lower case, no punctuation."""
     said = _said(word) if isinstance(word, str) else ""

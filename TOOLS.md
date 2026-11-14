@@ -166,7 +166,11 @@ missing or can't be read forgets nothing.
 
 A project whose edit was carried onto a newer video (`carry_edit`) is left out
 too: the newer project's `carried.json` names it as `from_project`, and the
-newer project holds the same changes, moved. A change counts once.
+newer project holds the same changes, moved. A change counts once. What was
+forgotten about the older project stays forgotten: `carry_edit` adds the
+newer project to `forgotten`, with the new id of each carried change whose
+old id was listed, and with its treatment when the older one's was still the
+snapshot.
 
 `LUMR_SHARE_URL` is the address of the Lumr Studio team's server, for the review
 page's Send feedback form and its Help improve Lumr button. Unset, it is
@@ -579,6 +583,14 @@ A part under 0.05 s that a clip's edge clipped off is left out, and parts
 that meet in the new video, to within 0.05 s (a reel's pieces are whole
 frames), are one.
 
+A sequence file names its clips by path. When the old reel's clips have
+moved since it was joined (another folder, another Mac), a clip of the old
+reel is taken to be a clip of the new one when it is no longer at its path
+and exactly one clip of the new reel has its file name and its length to
+0.05 s: the rule a moved project is found by ("A project after a move"). A
+clip still at its path is never taken for another. `from_video`'s own
+project is found the same way, so an edit made before the move carries.
+
 #### The transcript
 
 When `to_video` has no transcript, the job writes `<to_video>.words.json` from
@@ -599,11 +611,16 @@ was transcribed once is transcribed again. Each stretch the model hears is
 written to a temporary folder as 16 kHz mono sound, transcribed there, and the
 folder is removed. Nothing is written beside the creator's clips.
 
-When `to_video` already has a transcript it is left as it is, the report says
-so, and the edit is placed on those words by time.
+When `to_video` already has a transcript its words are left as they are,
+the report says so, and the edit is placed on those words by time.
 
-The word times are then measured the way `transcribe` measures them. A machine
-that can't measure them carries the edit on estimated times and says so.
+The word times are then measured the way `transcribe` measures them, and the
+transcript is looked through for sounds the same way ("Sounds" under
+`transcribe`), before the edit is placed: the sounds that came with the old
+words are replaced by the ones this look finds in the new video, and a
+transcript that was already there, measured or not, is looked through if it
+never was. The report carries `sounds` as `transcribe`'s does. A machine that can't measure word times carries the
+edit on estimated times and says so.
 
 #### What is carried
 
@@ -630,6 +647,7 @@ The finished job's `result`:
               words_from_clips, heard: [{clock, start, end, words}]}
           or {status: "exists", words_path, note},
  word_times: "measured" | "estimated", word_times_note?, aligning?,
+ sounds?: {found, on}, sounds_note?,
  cuts:         {total, carried, split, shortened, dropped, not_placed},
  picks:        {total, carried, split, shortened, dropped, switch_on},
  creator_cuts: {total, carried, split, shortened, dropped},
@@ -949,11 +967,14 @@ result carries `reel`:
 
 ```
 {name: "Bread week 5",
- pieces: [{clip, reel_start, reel_end}]}
+ pieces: [{clip, start, end, reel_start, reel_end}]}
 ```
 
-It says which clip each stretch of the reel came from. A plain video has no
-`reel`.
+It says which clip each stretch of the reel came from: `start` and `end` are
+the clip's own seconds, `reel_start` and `reel_end` where they play in the
+reel. Reel second `t` inside a piece is clip second `start + (t - reel_start)`.
+These are the pieces `assemble` was given, so a changed sequence can be
+built from them. A plain video has no `reel`.
 
 When the video's project was found in a folder made for another path (the
 video moved, or the Lumr folder was copied to another Mac), the first
@@ -1347,7 +1368,7 @@ Read only: no. Destructive: no. Long job.
 |---|---|---|
 | `video_path` | string | |
 | `at` | float | source time to preview around |
-| `pad` | float, default 6.0 | seconds shown before and after |
+| `pad` | float, default 6.0 | seconds of edited video shown before and after, above 0 and at most 30 |
 
 Renders a short clip of the edited result around one point and returns
 `{job_id}`. The finished job gives the clip's path. Saved overlays that show

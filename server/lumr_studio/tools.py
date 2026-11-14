@@ -426,7 +426,9 @@ def carry_edit(
         )
         handle.set_progress(0.4)
         timed: dict[str, Any] = {}
-        if word_times.source_of(project) != word_times.MEASURED:
+        # A transcript that was already there may be measured and still never looked through for
+        # sounds. The edit is placed after the look, so no automatic cut of it takes a laugh.
+        if word_times.source_of(project) != word_times.MEASURED or needs_a_look(project):
             timed = _measure_word_times(project, aligner, silences, labels)
         handle.set_progress(0.8)
         placed = carry.place_edit(plan, silences=silences, labels=labels)

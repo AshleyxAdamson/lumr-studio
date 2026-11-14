@@ -272,6 +272,38 @@ def test_a_video_whose_sound_cannot_be_read_keeps_its_words_and_says_so(take, jo
     assert not sounds_checked(open_project(str(take)))
 
 
+def test_an_edit_carried_onto_a_transcript_nobody_looked_through_is_placed_after_the_look(take, jobs):
+    """A new reel that already has a transcript and measured times, both from before sounds were found.
+
+    The carried edit is made at the same pace on that reel. Placed before the
+    look, its pause cuts took the giggle as the pause it reads as.
+    """
+    aligner = SameTimes()
+    job = tools.transcribe(str(take), aligner=aligner, silences=no_silences, jobs=jobs)
+    assert jobs.wait(job["job_id"], timeout=60)["status"] == "done"
+    tools.set_edit(str(take), [{"start": 12.1, "end": 13.1, "reason": "the ending drags"}], auto_tighten=True, pace="max", silences=no_silences)
+    halves = [{"clip": str(take), "start": 0.0, "end": 8.0}, {"clip": str(take), "start": 8.0, "end": TAKE_SECONDS}]
+    built = jobs.wait(tools.assemble("in two halves", halves, jobs=jobs)["job_id"], timeout=60)["result"]
+    reel = open_project(built["reel"])
+    reel.words_path.write_text(json.dumps(said()))
+    word_times.align_project(reel, aligner=aligner, silences=no_silences)
+    assert word_times.source_of(reel) == "measured" and not sounds_checked(reel)
+
+    started = tools.carry_edit(str(take), built["reel"], transcriber=never_transcribes, aligner=aligner, silences=no_silences, jobs=jobs)
+    done = jobs.wait(started["job_id"], timeout=60)
+    assert done["status"] == "done", done
+    report = done["result"]
+
+    assert report["transcript"]["status"] == "exists" and report["sounds"] == {"found": 2, "on": "measured"}
+    assert sounds_checked(reel) and NOT_CHECKED not in report["joins"]["text"]
+    assert taken(reel.video, GIGGLE) == 0, "the giggle plays whole in the carried edit"
+    assert report["cuts"]["carried"] == 1
+    saved = json.loads(reel.edit_path.read_text())["cuts"]
+    again = tools.transcribe(built["reel"], transcriber=never_transcribes, aligner=aligner, silences=no_silences, jobs=jobs)
+    assert again["status"] == "exists", "nothing is left for transcribe to find"
+    assert json.loads(reel.edit_path.read_text())["cuts"] == saved
+
+
 # ── What Claude is told ───────────────────────────────────────────────────────
 
 

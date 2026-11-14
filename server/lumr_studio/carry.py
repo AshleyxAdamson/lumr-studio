@@ -49,15 +49,15 @@ from typing import Any
 
 from lumr_studio import edit as edits
 from lumr_studio import overlays as overlay_files
-from lumr_studio import reels, word_times
+from lumr_studio import reels, taste, word_times
 from lumr_studio import treatment as treatments
 from lumr_studio.errors import StudioError
 from lumr_studio.project import (
+    SAME_LENGTH_SECONDS,
     Project,
     now_iso,
     open_project,
-    project_dir_name,
-    projects_root,
+    project_for,
     resolve_video,
     words_path_for,
     write_json_atomic,
@@ -362,6 +362,35 @@ def footage_of(video: Path, duration: float) -> Pieces:
         return [whole]
 
 
+def at_their_paths_now(old: Pieces, new: Pieces) -> Pieces:
+    """``old`` with each clip that moved named by the path it has in ``new``.
+
+    A sequence file names its clips by path. After a move (another folder,
+    another home folder, another Mac) the old reel's clips and the new
+    reel's are the same footage under two paths, and by path alone the two
+    reels would share nothing. An old clip is one of the new video's when it
+    is no longer at its path and exactly one clip of the new video has its
+    file name and its length to ``SAME_LENGTH_SECONDS``: the rule a moved
+    project is found by (``project.project_for``). A clip still at its path
+    is never taken for another, and nothing is guessed between two that fit.
+    """
+    lengths: dict[str, Any] = {}
+    for p in new:
+        lengths.setdefault(str(p["clip"]), p.get("clip_duration"))
+    now: dict[str, str] = {}
+    for p in old:
+        clip, length = str(p["clip"]), p.get("clip_duration")
+        if clip in now or clip in lengths or not _finite(length) or Path(clip).exists():
+            continue
+        fits = [
+            theirs for theirs, long in lengths.items()
+            if Path(theirs).name == Path(clip).name and _finite(long) and abs(long - length) <= SAME_LENGTH_SECONDS
+        ]
+        if len(fits) == 1:
+            now[clip] = fits[0]
+    return [{**p, "clip": now.get(str(p["clip"]), p["clip"])} for p in old]
+
+
 def _clip_transcripts(pieces: Pieces) -> list[tuple[Words, list[Stretch]]]:
     """The transcript of each clip of the new video that has one beside it, with where its seconds play."""
     found = []
@@ -407,7 +436,8 @@ def plan_carry(from_video: str, to_video: str) -> CarryPlan:
     edit, the new one already has one, or the two share no footage.
     """
     old_video = resolve_video(from_video)
-    source = Project(video=old_video, root=projects_root() / project_dir_name(old_video))
+    # The old video may have moved since it was edited: its project is found as every tool finds it.
+    source = project_for(old_video)
     if resolve_video(to_video) == old_video:
         raise StudioError("from_video and to_video are the same video. Pass the video that has the edit and the new one.")
     old_duration = source.duration()
@@ -416,6 +446,7 @@ def plan_carry(from_video: str, to_video: str) -> CarryPlan:
         raise StudioError(
             f"{old_video.name} has no saved edit, so there is nothing to carry. "
             "Check that from_video is the video that was edited, or make the edit on to_video with set_edit."
+            + (f" {source.note}" if source.note else "")
         )
     target = open_project(to_video)
     if target.edit_path.exists():
@@ -425,7 +456,8 @@ def plan_carry(from_video: str, to_video: str) -> CarryPlan:
             "as to_video. To keep the edit that is there, change it with set_edit."
         )
     duration = target.duration()
-    old_pieces, new_pieces = footage_of(old_video, old_duration), footage_of(target.video, duration)
+    new_pieces = footage_of(target.video, duration)
+    old_pieces = at_their_paths_now(footage_of(old_video, old_duration), new_pieces)
     stretches = time_map(old_pieces, new_pieces)
     if not stretches:
         raise StudioError(
@@ -572,9 +604,15 @@ def _carried_requests(old: list[Any], stretches: list[Stretch]) -> tuple[list[di
     return requested, origin, moves, tally
 
 
+Renamed = list[tuple[str, str]]
+
+
 def _carried_word_spans(old: list[Any], stretches: list[Stretch], said: edits.SaidOrder, prefix: str,
-                        tally: _Tally) -> list[dict[str, Any]]:
-    """Spans that hold exactly the words picked (the creator's cuts, the words she brought back), moved onto the same words."""
+                        tally: _Tally, renamed: Renamed) -> list[dict[str, Any]]:
+    """Spans that hold exactly the words picked (the creator's cuts, the words she brought back), moved onto the same words.
+
+    ``renamed`` gains ``(old id, new id)`` for each one placed: an id names a span's times, so it changes with them.
+    """
     out = []
     for raw in old:
         if not _is_span(raw):
@@ -592,6 +630,7 @@ def _carried_word_spans(old: list[Any], stretches: list[Stretch], said: edits.Sa
             if "words" in raw:
                 piece["words"] = len(chosen)
             out.append(piece)
+            renamed.append((edits.creator_cut_id(raw) if prefix == edits.CREATOR_ROW_PREFIX else treatments.keep_id(raw), piece["id"]))
         text = str(raw.get("text", ""))
         if not parts:
             tally.dropped(raw, WHY_NO_WORD if moved.parts else WHY_DROPPED, text=text)
@@ -600,11 +639,12 @@ def _carried_word_spans(old: list[Any], stretches: list[Stretch], said: edits.Sa
     return sorted(out, key=lambda c: float(c["start"]))
 
 
-def _carried_keeps(old: list[Any], stretches: list[Stretch], words: Words, said: edits.SaidOrder) -> tuple[list[dict[str, Any]], _Tally]:
+def _carried_keeps(old: list[Any], stretches: list[Stretch], words: Words, said: edits.SaidOrder,
+                   renamed: Renamed) -> tuple[list[dict[str, Any]], _Tally]:
     """The parts the creator kept, moved. Words brought back one by one stay on those words."""
     tally = _Tally(len(old))
     exact = [k for k in old if isinstance(k, dict) and k.get("origin") == treatments.ORIGIN_EXACT]
-    out = _carried_word_spans(exact, stretches, said, edits.KEEP_PREFIX, tally)
+    out = _carried_word_spans(exact, stretches, said, edits.KEEP_PREFIX, tally, renamed)
     for raw in old:
         if raw in exact:
             continue
@@ -618,6 +658,7 @@ def _carried_keeps(old: list[Any], stretches: list[Stretch], words: Words, said:
             if "text" in raw and moved.how != WHOLE:
                 piece["text"] = _said([w for w in words if a <= _mid(w) <= b])
             out.append(piece)
+            renamed.append((treatments.keep_id(raw), piece["id"]))
         tally.add(raw, moved.how, parts, moved.why(), text=str(raw.get("text", "")), note=str(raw.get("note", "")))
     return sorted(out, key=lambda k: float(k["start"])), tally
 
@@ -654,7 +695,8 @@ def _carried_picks(old: list[dict[str, Any]], stretches: list[Stretch], said: ed
     return sorted(out.values(), key=lambda k: float(k["start"])), tally
 
 
-def _carried_ratings(old: list[dict[str, Any]], stretches: list[Stretch]) -> tuple[list[dict[str, Any]], _Tally]:
+def _carried_ratings(old: list[dict[str, Any]], stretches: list[Stretch],
+                     renamed: Renamed) -> tuple[list[dict[str, Any]], _Tally]:
     """The creator's ratings of Claude's cuts, each on the first place its cut plays now."""
     tally = _Tally(len(old))
     out = []
@@ -669,6 +711,7 @@ def _carried_ratings(old: list[dict[str, Any]], stretches: list[Stretch]) -> tup
             continue
         a, b = parts[0]
         out.append({**raw, "id": f"{edits.RATING_PREFIX}{a:.2f}-{b:.2f}", "start": a, "end": b})
+        renamed.append((str(raw.get("id")), out[-1]["id"]))
         tally.report["carried"] += 1
     return out, tally
 
@@ -816,11 +859,14 @@ def place_edit(plan: CarryPlan, *, silences: SilenceProvider, labels: LabelsFor)
     asked = _old_requests(old)
     requested, origin, moves, cuts = _carried_requests(asked, plan.stretches)
     hers = _Tally(len(old.get("creator_cuts", [])))
-    creator_cuts = _carried_word_spans(old.get("creator_cuts", []), plan.stretches, said, edits.CREATOR_ROW_PREFIX, hers)
-    keep, kept = _carried_keeps(old.get("keep", []), plan.stretches, words, said)
+    new_ids: dict[str, Renamed] = {"creator_cuts": [], "keep": [], "ratings": []}
+    creator_cuts = _carried_word_spans(
+        old.get("creator_cuts", []), plan.stretches, said, edits.CREATOR_ROW_PREFIX, hers, new_ids["creator_cuts"],
+    )
+    keep, kept = _carried_keeps(old.get("keep", []), plan.stretches, words, said, new_ids["keep"])
     old_picks = treatments.saved_picks(old)
     picks, picked = _carried_picks(old_picks, plan.stretches, said) if old_picks is not None else (None, None)
-    ratings, rated = _carried_ratings(treatments.saved_ratings(old), plan.stretches)
+    ratings, rated = _carried_ratings(treatments.saved_ratings(old), plan.stretches, new_ids["ratings"])
     treatment = _old_treatment(old)
 
     made = treatments.make_edit(
@@ -844,6 +890,8 @@ def place_edit(plan: CarryPlan, *, silences: SilenceProvider, labels: LabelsFor)
         "version": CARRIED_VERSION, "at": now_iso(), "from_video": str(plan.source.video),
         "from_project": plan.source.root.name,
     })
+    # What the creator asked Lumr to forget about the old video stays forgotten under its new ids.
+    taste.stay_forgotten(plan.source.root.name, project.root.name, new_ids, old.get("treatment"), saved.get("treatment"))
 
     refused, which = _not_placed(made, requested, origin, asked)
     for i, moved in enumerate(moves):

@@ -55,7 +55,7 @@ from lumr_studio.errors import StudioError
 from lumr_studio.jobs import JobHandle, Work
 from lumr_studio.overlay_render import FALLBACK_FPS, X264_ARGS, run_ffmpeg
 from lumr_studio.overlays import PROBE_TIMEOUT_SECONDS, VIDEO, probe_media
-from lumr_studio.project import Project, now_iso, project_dir_name, projects_root, write_json_atomic
+from lumr_studio.project import now_iso, write_json_atomic
 
 # The kind of job that builds a reel.
 KIND = "assemble"
@@ -393,11 +393,6 @@ class ReelPlan:
     def total(self) -> float:
         return sum(self.lengths)
 
-    @property
-    def project(self) -> Project:
-        """The reel's project, which exists before the reel does: the job needs one for its receipt."""
-        return Project(video=self.reel, root=projects_root() / project_dir_name(self.reel))
-
 
 def sequence_path_for(video: Path) -> Path:
     """Where the sequence file of a reel sits: beside it, same stem."""
@@ -532,8 +527,10 @@ def existing_answer(plan: ReelPlan) -> dict[str, Any] | None:
 def reel_for(video: Path) -> dict[str, Any] | None:
     """Which clips a video is made of, or None when no sequence file sits beside it.
 
-    ``{name, pieces: [{clip, reel_start, reel_end}]}``. A sequence file that
-    can't be read counts as none: it must never stop an edit.
+    ``{name, pieces: [{clip, start, end, reel_start, reel_end}]}``: for each
+    piece, the clip seconds used and where they play in the reel, which is
+    what ``assemble`` needs to build the sequence again with a change. A
+    sequence file that can't be read counts as none: it must never stop an edit.
     """
     path = sequence_path_for(video)
     if not path.is_file():
@@ -544,7 +541,7 @@ def reel_for(video: Path) -> dict[str, Any] | None:
         return None
     return {
         "name": record["name"],
-        "pieces": [{k: p[k] for k in ("clip", "reel_start", "reel_end")} for p in record["pieces"]],
+        "pieces": [{k: p[k] for k in ("clip", "start", "end", "reel_start", "reel_end")} for p in record["pieces"]],
     }
 
 

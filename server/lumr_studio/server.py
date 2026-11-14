@@ -246,7 +246,7 @@ def set_edit(
 def preview(
     video_path: VideoPath,
     at: Annotated[float, Field(description="Source time to preview around.")],
-    pad: Annotated[float, Field(description="Seconds of edited video shown before and after.")] = 6.0,
+    pad: Annotated[float, Field(description="Seconds of edited video shown before and after, at most 30.")] = 6.0,
 ) -> CallToolResult:
     """Render a short clip of the edited result around one point. Returns {job_id}; the finished job gives the clip path."""
     return _call(tools.preview, video_path, at, pad)
