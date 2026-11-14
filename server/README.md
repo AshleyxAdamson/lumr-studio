@@ -151,7 +151,7 @@ by `../hooks/hooks.json` at session start) against stub programs on a trimmed
 | `jobs.py` | Background jobs, status, receipts |
 | `transcription.py` | The transcribe job: the speech process, then a check of the transcript. The same job measures the word times. |
 | `render_jobs.py` | The render and preview jobs |
-| `reels.py` | The `assemble` job: joins clips into a reel (copy when whole clips match in every detail, else one encode in whole frames), writes the `.reel.json` sequence file beside it, and finds it again (`reel_for`) for `get_edit` and `read_transcript` |
+| `reels.py` | The `assemble` job: joins clips into a reel (copy when whole clips match in every detail, else one encode in whole frames, with any clip in HDR or wide color turned into standard color), writes the `.reel.json` sequence file beside it, and finds it again (`reel_for`) for `get_edit` and `read_transcript` |
 | `publish_kit.py` | Chapter rules and the `publish-kit/` files. An extra: its tools (`chapter_times`, `save_publish_kit`) list only with `publish_kit` on |
 | `joins.py` | The self-check: every join read the way a viewer hears it, with a fix for Claude and a plain why for the creator |
 | `sounds.py` | Likely laughs told apart from other sounds |
@@ -254,7 +254,14 @@ exception is named in `creator_words.py` and tested in
   builds of one sequence (two servers, or a restart over a surviving ffmpeg)
   can't swap files. Whole clips are copied only when they agree on every detail
   a copy depends on, time base and sound profile included; otherwise the reel is
-  encoded, in whole frames, so the times in the sequence file are the real ones. Changing the clips makes a new reel and a new
+  encoded, in whole frames, so the times in the sequence file are the real ones.
+  A clip in HDR or wide color is turned into bt709 inside that one encode, by
+  macOS itself through ffmpeg's `scale_vt` filter, and never copied. That
+  filter was chosen because this ffmpeg's own filters can't do it (Homebrew's
+  build has no `zscale` or `libplacebo`, and `colorspace` knows neither HLG
+  nor PQ), it gives the picture QuickTime gives, and it needs no working copy
+  of the clip, so there is nothing more to name, clean up or keep honest to
+  the frame. Changing the clips makes a new reel and a new
   project; the cuts do not follow. `TOOLS.md`, `assemble`, is the contract.
 - **`gap_length` without `auto_tighten`** is an error, so it can't be
   silently ignored.

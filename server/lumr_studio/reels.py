@@ -23,6 +23,12 @@ frame rate and sound, and encodes once, at a quality high enough for the
 export that follows to encode it again. Each encoded piece is a whole number
 of frames long, and that length is what the sequence file records.
 
+A clip recorded in HDR (HLG or PQ) or in wide color (BT.2020) is turned into
+standard color (bt709) inside that same ffmpeg run, by macOS's own converter
+(the ``scale_vt`` filter), so it matches the other clips and what QuickTime
+shows. Such a sequence is never copied, every piece of it ends up bt709, and
+the reel is tagged bt709. The clip is not changed and no working copy is made.
+
 Each build writes its own ``<slug>-<id>.<random>.partial.mp4`` and moves it to
 the reel's name only if nothing is there. A partial left by a build that died
 is never touched: Studio did not make it in this run, so it does not remove it.
@@ -39,7 +45,7 @@ import secrets
 import subprocess
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -71,6 +77,25 @@ REEL_CRF = "16"
 REEL_AUDIO_ARGS = ("-c:a", "aac", "-b:a", "256k")
 REEL_SAMPLE_RATE = 48000
 
+# How a clip's picture can differ from standard color (bt709), by what ffprobe calls it.
+HDR = "HDR"
+WIDE_COLOR = "wide color"
+HDR_TRANSFERS = ("arib-std-b67", "smpte2084")  # HLG and PQ
+WIDE_PRIMARIES = ("bt2020",)
+WIDE_MATRICES = ("bt2020nc", "bt2020c")
+UNNAMED = ("", "unknown", "unspecified")  # a color tag the clip leaves out
+# The ffmpeg filter that hands frames to macOS to convert. Homebrew's ffmpeg has it from 6.1 on.
+CONVERTER = "scale_vt"
+# Part of the id of a sequence with a converted clip, so a reel joined before the conversion existed is not taken for this one.
+CONVERTED_MARK = "standard color 1"
+# The names ffmpeg's scale filter takes for a clip's YCbCr matrix, by what ffprobe calls it.
+SCALE_MATRICES = {
+    "bt709": "bt709", "smpte170m": "smpte170m", "bt470bg": "bt470", "fcc": "fcc", "smpte240m": "smpte240m",
+}
+
+# What to run when Studio can't convert a clip itself: every Mac has avconvert.
+COPY_BY_HAND = "avconvert --preset Preset1920x1080 --source CLIP --output COPY.mov"
+
 USE_THE_REEL = (
     "Use reel as the video_path for every other tool: transcribe it, read it, cut it, review it. "
     "read_transcript marks where each clip starts."
@@ -101,6 +126,12 @@ class Streams:
     audio_profile: str = ""
     sample_aspect_ratio: str = ""
     field_order: str = ""
+    # How the picture's colors are written. They never decide whether clips agree
+    # (two clips equal in all of the above are equal with these left out); they
+    # decide whether a clip has to be turned into standard color.
+    color_transfer: str = field(default="", compare=False)
+    color_primaries: str = field(default="", compare=False)
+    color_space: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)
@@ -124,6 +155,21 @@ class Piece:
     @property
     def whole(self) -> bool:
         return self.start == 0.0 and self.end == self.duration
+
+    @property
+    def converted_from(self) -> str | None:
+        """``HDR`` or ``wide color`` when the clip's picture has to be turned into standard color, else None.
+
+        HDR is a clip whose brightness is written as HLG or PQ. Wide color is
+        any other clip in BT.2020 colors: read as bt709 its colors come out
+        pale, the same fault in a milder form, so it takes the same road.
+        """
+        streams = self.streams
+        if streams.color_transfer in HDR_TRANSFERS:
+            return HDR
+        if streams.color_primaries in WIDE_PRIMARIES or streams.color_space in WIDE_MATRICES:
+            return WIDE_COLOR
+        return None
 
 
 def _finite_seconds(value: Any) -> bool:
@@ -185,7 +231,21 @@ def probe_streams(path: Path, *, run: Callable[..., Any] = subprocess.run) -> St
         audio_profile=str(audio.get("profile") or ""),
         sample_aspect_ratio=str(video.get("sample_aspect_ratio") or ""),
         field_order=str(video.get("field_order") or ""),
+        color_transfer=str(video.get("color_transfer") or ""),
+        color_primaries=str(video.get("color_primaries") or ""),
+        color_space=str(video.get("color_space") or ""),
     )
+
+
+def can_convert_color(*, run: Callable[..., Any] = subprocess.run) -> bool:
+    """Whether this ffmpeg has the filter that turns HDR into standard color."""
+    try:
+        out = run(
+            ["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True, timeout=PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return any(line.split()[1:2] == [CONVERTER] for line in (out.stdout or "").splitlines())
 
 
 def check_name(name: Any) -> str:
@@ -283,8 +343,15 @@ def check_pieces(
 
 
 def sequence_id(name: str, pieces: list[Piece]) -> str:
-    """Eight hex characters that change when the name, a clip, or a piece's start or end changes."""
-    parts = [name, [[str(p.clip), p.size, p.mtime_ns, p.start, p.end] for p in pieces]]
+    """Eight hex characters that change when the name, a clip, or a piece's start or end changes.
+
+    A sequence with a clip that is turned into standard color carries a mark
+    of that too, so a reel joined before Studio converted such clips, with
+    the HDR picture written as it was, is not answered as this reel.
+    """
+    parts: list[Any] = [name, [[str(p.clip), p.size, p.mtime_ns, p.start, p.end] for p in pieces]]
+    if any(p.converted_from for p in pieces):
+        parts.append(CONVERTED_MARK)
     return hashlib.sha1(json.dumps(parts).encode("utf-8")).hexdigest()[:8]
 
 
@@ -292,7 +359,11 @@ def how_to_join(pieces: list[Piece]) -> str:
     """``copy`` when every piece is a whole clip and the clips agree on every detail a copy depends on, else ``encode``.
 
     A piece with a start or an end is never copied: it needs a cut, and a cut needs an encode.
+    Nor is a sequence with a clip in HDR or wide color, two such clips alone
+    included: a copy would keep the picture as it was recorded.
     """
+    if any(p.converted_from for p in pieces):
+        return ENCODE
     first = pieces[0].streams
     agree = all(p.whole and p.streams == first for p in pieces)
     return COPY if agree and first.video_codec == "h264" and first.audio_codec == "aac" else ENCODE
@@ -338,10 +409,20 @@ def frames_in(seconds: float, fps: str) -> int:
     return max(1, round(seconds * float(Fraction(fps))))
 
 
-def plan_reel(name: Any, raw_pieces: Any, **probes: Any) -> ReelPlan:
-    """Check the name and the pieces and work out the files. Writes nothing."""
+def plan_reel(name: Any, raw_pieces: Any, *, can_convert: Callable[[], bool] = can_convert_color, **probes: Any) -> ReelPlan:
+    """Check the name and the pieces and work out the files. Writes nothing.
+
+    Raises StudioError when a clip has to be turned into standard color and this ffmpeg can't do it.
+    """
     name = check_name(name)
     pieces = check_pieces(raw_pieces, **probes)
+    odd = next((p for p in pieces if p.converted_from), None)
+    if odd is not None and not can_convert():
+        raise StudioError(
+            f"{odd.clip.name} was recorded in {odd.converted_from}, and the ffmpeg on this Mac can't turn that into "
+            f"standard color: it has no {CONVERTER} filter. Install the current ffmpeg with Homebrew (brew install ffmpeg), "
+            f"or make a standard color copy of the clip and join that ({COPY_BY_HAND})."
+        )
     folder = (lumr_home() / "studio" / REELS_FOLDER / slug_for(name)).resolve()
     reel = folder / f"{slug_for(name)}-{sequence_id(name, pieces)}.mp4"
     return ReelPlan(name, pieces, how_to_join(pieces), reel, sequence_path_for(reel))
@@ -354,10 +435,13 @@ def _sequence_record(plan: ReelPlan) -> dict[str, Any]:
     at = 0.0
     rows = []
     for p, length in zip(plan.pieces, plan.lengths):
-        rows.append({
+        row: dict[str, Any] = {
             "clip": str(p.clip), "clip_duration": p.duration, "start": p.start, "end": p.end,
             "reel_start": round(at, 3), "reel_end": round(at + length, 3),
-        })
+        }
+        if p.converted_from:
+            row["converted_from"] = p.converted_from
+        rows.append(row)
         at += length
     return {
         "version": SEQUENCE_VERSION, "name": plan.name, "made_at": now_iso(), "how": plan.how,
@@ -389,17 +473,43 @@ def read_sequence(path: Path) -> dict[str, Any]:
     return record
 
 
+def color_note(rows: list[dict[str, Any]]) -> str:
+    """What to tell the creator about the clips that were turned into standard color; empty when none was."""
+    kinds: dict[str, str] = {}  # clip name -> HDR or wide color, in play order, each clip once
+    for row in rows:
+        if isinstance(row.get("converted_from"), str):
+            kinds.setdefault(Path(row["clip"]).name, row["converted_from"])
+    if not kinds:
+        return ""
+    how = " or ".join(sorted(set(kinds.values())))
+    if len(kinds) == 1:
+        told = (
+            f"{next(iter(kinds))} was recorded in {how}; the joined video shows it in standard color. "
+            "The clip itself was not changed."
+        )
+    else:
+        told = (
+            f"{', '.join(kinds)} were recorded in {how}; the joined video shows them in standard color. "
+            "The clips themselves were not changed."
+        )
+    return f"{told} Tell the creator in one sentence."
+
+
 def answer_for(status: str, plan: ReelPlan, record: dict[str, Any]) -> dict[str, Any]:
-    """What assemble tells the caller about a reel: ``exists`` when it was there, ``built`` when the job made it."""
+    """What assemble tells the caller about a reel: ``exists`` when it was there, ``built`` when the job made it.
+
+    A piece whose clip was turned into standard color carries ``converted_from``, and ``note`` says so in plain words.
+    """
+    keys = ("clip", "start", "end", "reel_start", "reel_end", "converted_from")
     return {
         "status": status,
         "reel": str(plan.reel),
         "name": record["name"],
         "duration": record["duration"],
         "how": record["how"],
-        "pieces": [{k: p[k] for k in ("clip", "start", "end", "reel_start", "reel_end")} for p in record["pieces"]],
+        "pieces": [{k: p[k] for k in keys if k in p} for p in record["pieces"]],
         "sequence_file": str(plan.sequence),
-        "note": USE_THE_REEL,
+        "note": " ".join(filter(None, [USE_THE_REEL, color_note(record["pieces"])])),
     }
 
 
@@ -465,6 +575,45 @@ def copy_command(listing: Path, out: Path) -> list[str]:
     ]
 
 
+# Hand the frames to macOS, which turns HDR and wide color into bt709 the way QuickTime does, and take them back.
+# The range is set first because the upload reads every frame as video range. scale_vt converts the matrix too
+# but leaves the old name on the frame, so setparams puts the right one on.
+TO_STANDARD_COLOR = (
+    "scale=out_range=tv,format=p010le,hwupload,"
+    f"{CONVERTER}=color_matrix=bt709:color_primaries=bt709:color_transfer=bt709,"
+    "hwdownload,format=p010le,setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709"
+)
+CONVERTER_DEVICE = ("-init_hw_device", "videotoolbox=vt", "-filter_hw_device", "vt")
+BT709_TAGS = "setparams=color_primaries=bt709:color_trc=bt709"
+
+
+def to_standard_color(piece: Piece) -> str:
+    """The filters that turn this piece's picture into bt709.
+
+    macOS converts by the frame's own tags and leaves a frame alone when one
+    is missing. HLG and PQ are only ever written in BT.2020 colors, so an HDR
+    clip that leaves its primaries or its matrix out is given them first.
+    """
+    missing = []
+    if piece.converted_from == HDR:
+        if piece.streams.color_primaries in UNNAMED:
+            missing.append("color_primaries=bt2020")
+        if piece.streams.color_space in UNNAMED:
+            missing.append("colorspace=bt2020nc")
+    return (f"setparams={':'.join(missing)}," if missing else "") + TO_STANDARD_COLOR
+
+
+def matrix_of(piece: Piece) -> str:
+    """The YCbCr matrix a plain clip is written in, as the scale filter names it.
+
+    A clip that doesn't say is read the way players read it: bt709 when it is HD, the older smpte170m when smaller.
+    """
+    named = SCALE_MATRICES.get(piece.streams.color_space)
+    if named:
+        return named
+    return "bt709" if piece.streams.width >= 1280 or piece.streams.height > 576 else "smpte170m"
+
+
 def encode_command(pieces: list[Piece], out: Path) -> list[str]:
     """Trim each piece, fit it to the first clip's size and frame rate and to 48 kHz stereo, join, and encode once.
 
@@ -474,10 +623,17 @@ def encode_command(pieces: list[Piece], out: Path) -> list[str]:
     the same length, so the reel's pieces are exactly as long as the
     sequence file says. Without that, ffmpeg rounds each piece's picture up
     to whole frames and the error adds up over the reel.
+
+    When a piece is in HDR or wide color (``Piece.converted_from``) the whole
+    reel is made bt709: that piece goes through ``to_standard_color`` first,
+    every other piece is brought to the bt709 matrix by the scale it already
+    has, and each is tagged bt709, so the reel's own tags are true of every
+    frame. A sequence with no such piece is built exactly as before.
     """
     first = pieces[0]
     fps = first.streams.fps
     width, height = first.width - first.width % 2, first.height - first.height % 2
+    converting = any(p.converted_from for p in pieces)
     inputs: list[str] = []
     graph: list[str] = []
     for i, p in enumerate(pieces):
@@ -486,9 +642,14 @@ def encode_command(pieces: list[Piece], out: Path) -> list[str]:
         if p.start > 0:
             inputs += ["-ss", f"{p.start:.3f}"]
         inputs += ["-t", f"{p.length:.3f}", "-i", str(p.clip)]
+        before = matrix = tags = ""
+        if converting:
+            before = f"{to_standard_color(p)}," if p.converted_from else ""
+            matrix = f":in_color_matrix={'bt709' if p.converted_from else matrix_of(p)}:out_color_matrix=bt709"
+            tags = f",{BT709_TAGS}"
         graph.append(
-            f"[{i}:v:0]setpts=PTS-STARTPTS,scale={width}:{height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},format=yuv420p,"
+            f"[{i}:v:0]setpts=PTS-STARTPTS,{before}scale={width}:{height}:force_original_aspect_ratio=decrease{matrix},"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},format=yuv420p{tags},"
             f"tpad=stop_mode=clone:stop=-1,trim=end_frame={frames}[v{i}]"
         )
         graph.append(
@@ -497,7 +658,8 @@ def encode_command(pieces: list[Piece], out: Path) -> list[str]:
         )
     joined = "".join(f"[v{i}][a{i}]" for i in range(len(pieces))) + f"concat=n={len(pieces)}:v=1:a=1[v][a]"
     return [
-        "ffmpeg", *QUIET, *inputs, "-filter_complex_threads", "1", "-filter_complex", ";".join([*graph, joined]),
+        "ffmpeg", *QUIET, *(CONVERTER_DEVICE if converting else ()), *inputs,
+        "-filter_complex_threads", "1", "-filter_complex", ";".join([*graph, joined]),
         "-map", "[v]", "-map", "[a]", *X264_ARGS, "-crf", REEL_CRF, *REEL_AUDIO_ARGS,
         "-movflags", "+faststart", str(out),
     ]
@@ -601,10 +763,14 @@ def builder(
                 command = copy_command(listing, partial)
             else:
                 command = encode_command(current.pieces, partial)
-            run(
-                command, partial, total=current.total, on_progress=handle.set_progress,
-                doing="join the clips into", check="Check that every clip plays through in a video player.",
-            )
+            check = "Check that every clip plays through in a video player."
+            odd = next((p for p in current.pieces if p.converted_from), None)
+            if odd is not None:
+                check += (
+                    f" If they all do, turning {odd.clip.name} from {odd.converted_from} into standard color is what failed: "
+                    f"make a standard color copy of it and join that ({COPY_BY_HAND})."
+                )
+            run(command, partial, total=current.total, on_progress=handle.set_progress, doing="join the clips into", check=check)
             check_length(current, partial)
         finally:
             if listing is not None:
