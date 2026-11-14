@@ -34,6 +34,9 @@ EXPORT_WORDS = {
     "get_edit": ("export", "job_id"),
     "review": ("export", "ask the creator"),
 }
+# Claude Code cuts a server's instructions, and each tool's description, off at 2 KB. What comes after is never
+# read: the last sentences of the instructions say that no tool deletes a file, and assemble's say to call carry_edit.
+CLIENT_CUTS_AT = 2048
 # What Claude must read to forget safely: ask before everything, and it takes no video.
 FORGET_WORDS = ("everything", "word", "kind", "ask the creator")
 
@@ -176,6 +179,10 @@ def test_the_server_offers_only_the_editor_slice_by_default(video, plugin_data):
     assert {t.name for t in listed} == set(EDITOR_TOOLS)
     assert "set_overlays" not in instructions and "overlays" not in instructions.lower()
     assert hidden.is_error and "Unknown tool" in hidden.content[0].text
+    assert len(instructions) <= CLIENT_CUTS_AT, len(instructions)
+    assert instructions.endswith("and nothing removes it.") and "take quality" in instructions
+    cut_off = {t.name: len(t.description) for t in listed if len(t.description) > CLIENT_CUTS_AT}
+    assert not cut_off, f"the end of these descriptions is never read: {cut_off}"
 
 
 @pytest.mark.skipif(not shutil.which("uv"), reason="uv not installed")

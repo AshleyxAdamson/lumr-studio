@@ -259,6 +259,44 @@ def test_connecting_word_long_after_the_sentence_breaks_the_link():
     assert classify_events(words)[0]["kind"] == "sound"
 
 
+@pytest.mark.parametrize("pause, is_its_laugh", [(0.3, True), (1.4, True), (1.5, True), (1.6, False), (33.0, False)])
+def test_a_sound_is_the_laugh_of_a_line_only_when_it_starts_soon_after_it(pause, is_its_laugh):
+    # The line ends at 1.64. A noise half a minute into the wait after it is no laugh at that line.
+    words = spoken_run("I dropped the pie.", 0.0)
+    start = round(1.64 + pause, 2)
+    words.append(event(start, start + 2.0))
+    words += spoken_run("Moving on.", start + 3.0)
+    (label,) = classify_events(words)
+    assert (label["kind"], label["punchline"]) == (("laugh", [0.0, pytest.approx(1.64)]) if is_its_laugh else ("sound", None))
+    # A real laugh that comes late is still a laugh, by its bursts. It has no punchline, so it protects itself and its beat only.
+    (measured,) = classify_events(words, measures=[LAUGH_MEASURE])
+    assert measured["kind"] == "laugh" and (measured["punchline"] is not None) is is_its_laugh
+    protected = protected_spans([measured], words)
+    assert protected == [(0.0 if is_its_laugh else start, pytest.approx(start + 3.0))]
+
+
+def test_a_noise_late_in_a_wait_does_not_hold_the_wait_off_the_pace():
+    # The shape that went wrong on a real edit, with a full stop before the wait: a line, half a minute, a noise.
+    words = spoken_run("So you fold the dough over.", 10.0)
+    line_end = words[-1]["end"]
+    words.append(event(45.74, 53.74))
+    words += spoken_run("Now it rests.", 55.1)
+    (label,) = classify_events(words)
+    assert (label["kind"], label["punchline"]) == ("sound", None)
+    assert protected_spans([label], words) == [(45.74, 53.74)], "the noise plays whole, and the wait before it is the pace's to take"
+    assert whole_spans([label]) == [(45.74, 53.74)]
+    assert line_end < 45.74 - 30
+
+
+def test_the_bouts_of_one_laugh_share_its_punchline_and_a_sound_long_after_them_does_not():
+    words = spoken_run("I dropped the pie.", 0.0)  # ends 1.64
+    words += [event(2.0, 4.0), event(5.2, 7.2), event(13.0, 15.0), event(16.2, 18.2)]
+    words += spoken_run("Moving on.", 20.0)
+    labels = classify_events(words)
+    assert [lb["punchline"] is not None for lb in labels] == [True, True, False, False]
+    assert [lb["kind"] for lb in labels] == ["laugh", "laugh", "sound", "sound"], "1.2 s after the first bout, then 5.8 s after the second"
+
+
 def test_no_events_no_labels():
     assert classify_events(spoken_run("Just talk.", 0.0)) == []
 
@@ -408,6 +446,27 @@ def test_corrupt_or_old_cache_is_rebuilt(video, words):
     (project.root / SOUNDS_FILE).write_text(json.dumps(data))
     load_or_measure_labels(project, words, measure=measure)
     assert len(measure.calls) == 2
+
+
+def test_labels_cached_before_a_far_off_sound_stopped_being_a_laugh_are_judged_again_without_measuring_again(video):
+    words = spoken_run("So you fold the dough over.", 1.0) + [event(14.0, 16.5)] + spoken_run("Now it rests.", 17.4)
+    video.with_suffix(".words.json").write_text(json.dumps(words))
+    project = open_project(str(video))
+    measure = CountingMeasure()
+    now = load_or_measure_labels(project, words, measure=measure)
+    assert [(lb["kind"], lb["punchline"]) for lb in now] == [("sound", None)]
+    # The cache as 0.4.1 wrote it: the noise eleven seconds into the wait called a laugh at the line before the wait.
+    path = project.root / SOUNDS_FILE
+    cached = json.loads(path.read_text())
+    assert cached["version"] == 5
+    cached["version"] = 4
+    cached["labels"] = [{**lb, "kind": "laugh", "punchline": [1.0, 3.0]} for lb in cached["labels"]]
+    path.write_text(json.dumps(cached))
+    assert load_or_measure_labels(project, words, measure=measure) == now, "judged again by today's rule"
+    assert len(measure.calls) == 1, "from the measures already saved"
+    assert json.loads(path.read_text())["version"] == 5
+    load_or_measure_labels(project, words, measure=measure)
+    assert len(measure.calls) == 1
 
 
 def test_no_events_means_no_measuring(video):

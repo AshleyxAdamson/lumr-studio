@@ -23,8 +23,10 @@ picture a second; TOOLS.md, "Quality", has the tables):
 A master export with photos or clips drawn over it would be two encodes. Its
 first pass writes a working file that loses nothing instead (x264 at qp 0,
 preset ultrafast, with ALAC sound), so the pass that draws is the one encode
-the picture and the sound get. That file is big, up to four times the
-footage, and is removed when the export is done.
+the picture and the sound get. That file is big, two to ten times the
+footage it holds and the most when the footage is grainy, and is removed
+when the export is done, finished or failed. Nothing checks the disk for
+room first.
 
 Neither quality changes the picture's range or its color tags: ffmpeg carries
 them from the source to the export.

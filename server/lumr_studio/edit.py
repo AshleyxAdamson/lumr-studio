@@ -880,7 +880,8 @@ def _stopped_at_sound_message(sound: Span) -> str:
 def _restored_message(span: Span) -> str:
     return (
         f"overlaps {span[0]:.2f}-{span[1]:.2f}, which the creator restored "
-        "on the review page. Leave it in. If the creator has now asked for this "
+        "on the review page. This cut is not in the edit, so what it would remove still plays: "
+        "tell the creator which cut it was. If the creator has now asked for this "
         "cut, call set_edit again with override_keeps=true."
     )
 

@@ -41,9 +41,9 @@ Span = tuple[float, float]
 SENTENCE_GAP_SECONDS = 1.0
 # A sound belongs to what was said before it only when it starts this soon
 # after: a laugh right after its punchline does, a noise half a minute into
-# a wait does not. The number is the one ``sounds`` already holds for how
-# long before a laugh its line may have ended (``_punchline``, which asks
-# it when a connecting word sits between the two). It is longer than the
+# a wait does not. The number is the one ``sounds`` holds for how long
+# before a laugh its line may have ended (``_punchline``): the pace and the
+# join check call a sound a line's laugh by the same limit. It is longer than the
 # pause that ends a sentence for a word: a creator waits a beat for a
 # laugh, and at ``SENTENCE_GAP_SECONDS`` a laugh a little over a second
 # after its line would be split from it. Without a limit a kept part

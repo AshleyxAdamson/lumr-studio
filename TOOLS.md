@@ -574,7 +574,8 @@ An export is cut from the reel, so it can only be as good as the reel.
   another `name`.
 - A master reel takes about as much disk as the clips it was made from
   (0.5 to 1.1 times, on the test footage), where a standard one took 0.3
-  to 0.7 times. It took up to a fifth longer to build.
+  to 0.7 times. Grainy footage takes more: 2.6 times on the `heavy` clip
+  ("Quality" under `render`). It took up to a fifth longer to build.
 - To move an edit from a standard reel to a master one, call `assemble`
   with the same `name` and pieces (they are under `reel` in `get_edit`) and
   `quality: "master"`, then `carry_edit` from the old reel to the new one.
@@ -829,6 +830,20 @@ What no automatic cut may take, at any pace and with every switch on:
 A cut that Claude or the creator asks for over the whole of a laugh still
 takes it out, and the join check flags it (`removes_laugh`).
 
+A sound is the laugh of the line before it only when it starts within 1.5 s
+of that line's last word, or of a sound that does (the bouts of one long
+laugh), or right after one connecting word said within 1.5 s of the line
+("pie. And"). Only then does its label carry `punchline`, and only then are
+the line and the pause between the two kept from the pace and watched by
+the join check. A sound further off is judged by its own shape: a noise
+half a minute into a wait is a `sound`, it plays whole when it lasts a
+second or more, and the wait before it is a pause like any other. Before
+0.4.2 the line before a sound counted as its punchline however far back it
+was, so such a noise could read as `(laugh?)`, hold the whole wait off the
+pace, and have the join check ask for a cut of the wait to be dropped.
+`sounds.json` written before then is judged again, from the measures it
+already holds, the first time it is read.
+
 An um (`kind: "um"`) is a held hesitation, an "um" or "uh" the speech model
 wrote no word for. All of this holds for it:
 
@@ -957,7 +972,8 @@ Sounds that aren't speech appear on their own line, labeled by kind:
 0.2s)` is anything else: a breath, a bump. The labels come from
 the sound's length, its place in the sentence, and its measured shape: a
 laugh comes in bursts, four or five a second, breathy or pitched like a
-giggle. They are estimates. A laugh marks the line before it as a punchline.
+giggle. They are estimates. A laugh that starts within 1.5 s of the line
+before it marks that line as a punchline (see "Sounds" under `transcribe`).
 
 An um the speech model wrote no word for is the one sound that is no line of
 its own. It reads in its sentence, where it is said, as `(um 0.5s)`:
@@ -1410,7 +1426,11 @@ The server validates before saving:
 
 Returns `{applied: [...], adjusted: [...], rejected: [...],
 removed_seconds, new_duration, joins}`. Each adjusted entry shows the
-requested and final times. With `auto_tighten` the result also carries
+requested and final times. Read `rejected` first: a rejected cut is not in
+the edit, so what it would remove still plays. When its `why` is a part
+the creator kept or put back, tell the creator which cut it was, and pass
+`override_keeps` only on their yes.
+With `auto_tighten` the result also carries
 `auto`: the pace, `fine` (the two values behind it), the kinds taken out, and how many trims were planned,
 shortened, dropped, or skipped to protect a joke or a kept span. `cleared`
 is true when an empty list cleared the edit. `word_times` says what the cuts
@@ -1709,6 +1729,20 @@ about what the kept part of the footage takes, `footage.kept_mb` in
 `get_edit` (0.5 to 1.1 times it on the test clips). A standard export took
 0.3 to 0.5 times it.
 
+Grain raises all of it, because grain is detail to an encoder. Two more
+made-up clips, `grain` and `heavy` (`testsrc2` with `noise=alls=5:allf=t`
+and `alls=12`, new noise on every frame, 20 seconds at the same size,
+range and 30 megabits a second, cut to 15), went through `render` itself:
+
+| | `grain` | `heavy` |
+|---|---|---|
+| A master export, megabits a second | 51.0, 1.7 times `kept_mb` | 87.6, 2.9 times |
+| A standard export | 28.2, 0.9 times | 42.4, 1.4 times |
+| The working file of a master export with a photo | 195, 6.4 times | 304, 9.9 times |
+
+So say "about `kept_mb`, and up to three times that if the footage is
+grainy", and give `size_mb` from the result once it is made.
+
 A reel sits between the clips and the export, so it sets the ceiling. A
 master export of `mandel`, scored against the clip:
 
@@ -1779,8 +1813,12 @@ and it is written at about 20 times the speed the footage plays, so the
 two master passes took about as long as the two standard ones (1.6 to 2.3
 seconds against 1.7 to 2.6 on the three clips). A first
 pass that was only nearly lossless (CRF 2) still cost 1.0 dB. The price is
-disk while the job runs: the working file held 54 to 120 megabits a second,
-1.7 to 3.9 times the footage, so allow four times `footage.kept_mb` free.
+disk while the job runs: the working file held 54 to 120 megabits a second
+on the three clips, 1.7 to 3.9 times the footage, and 195 and 304 on the
+two grainy ones, 6.4 and 9.9 times ("Quality" above). So allow ten times
+`footage.kept_mb` free, and tell the creator that number before the render
+starts. Nothing checks the disk first: when it fills, the job fails with
+ffmpeg's own words and the working file is removed.
 It is removed when the job ends, finished or failed. When overlays are
 saved and none shows in the edit, nothing is drawn, the first pass is the
 result, and it is an ordinary master encode.
@@ -2122,9 +2160,9 @@ of the first sentence it touches to the end of the last one
   exclamation mark, or before a pause of 1 s.
 - A sound belongs to the sentence before it when it starts within 1.5 s of
   the last word or sound before it. So a punchline keeps its laugh, a laugh
-  keeps its bouts, and an um stays inside its sentence. 1.5 s is the limit
-  `sounds.py` already holds for how long after a line ends its laugh may
-  start.
+  keeps its bouts, and an um stays inside its sentence. 1.5 s is also how
+  soon after a line a sound must start to be that line's laugh to the pace
+  and the join check (`sounds.py`, see "Sounds" under `transcribe`).
 - A sound further off stands alone: it is part of no sentence, and neither
   is the pause before it. The first word after it starts a new sentence. So
   a kept line ends at its last word. It never reaches across a wait to a
@@ -2147,10 +2185,11 @@ sentence with no full stop can run long, and a part that grew with it is
 never left unsaid.
 
 The three samples and the blocks on the bar start and end on the same
-spans, a lone sound among them. `read_transcript`, `find_words` and the
-`joins` check read sentences their own way and did not change: the
-transcript prints a sound as a line of its own, and `find_words` counts the
-pause before a sound as a pause.
+spans, a lone sound among them. `read_transcript` and `find_words` read
+sentences their own way and did not change: the transcript prints a sound
+as a line of its own, and `find_words` counts the pause before a sound as a
+pause. The pace and the `joins` check read the sound labels, which hold the
+same 1.5 s between a line and its laugh.
 
 Before 0.4.2 a sound belonged to the sentence before it however late it
 came, so a line kept before a long wait reached to the end of a noise in

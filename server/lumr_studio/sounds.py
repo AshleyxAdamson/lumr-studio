@@ -533,6 +533,12 @@ UNMEASURED_MIN_SECONDS = 1.8
 # laughter ("pie. And [laugh]"). The sentence end may sit this many spoken
 # words back, if it ended no more than this long before the event.
 PUNCHLINE_MAX_WORDS_BETWEEN = 1
+# A laugh belongs to a line only when it starts this soon after it, or this
+# soon after a sound that does (the bouts of one long laugh). A noise half a
+# minute into a wait is no laugh at the line before the wait: called one, it
+# held the whole wait off the pace, and the join check told Claude to drop
+# its cut of the wait. ``samples.sentence_spans`` holds the same limit for
+# what a kept part and a sample take with a line.
 PUNCHLINE_MAX_SECONDS_BEFORE = 1.5
 # A run-on sentence before a laugh can last 16 seconds. The joke is its end:
 # the punchline starts after the sentence's last pause of this length, and
@@ -544,7 +550,9 @@ PUNCHLINE_MAX_SECONDS = 8.0
 def _punchline(words: list[dict[str, Any]], index: int) -> list[float] | None:
     """``[start, end]`` of the sentence that ends just before event ``words[index]``.
 
-    The sentence end must be the last spoken word, or at most
+    The sentence end must be the last spoken word, with the event starting
+    within ``PUNCHLINE_MAX_SECONDS_BEFORE`` of it or of a sound between the
+    two that does (``_follows_closely``), or at most
     ``PUNCHLINE_MAX_WORDS_BETWEEN`` words back and within
     ``PUNCHLINE_MAX_SECONDS_BEFORE`` of the event. None otherwise.
 
@@ -559,6 +567,8 @@ def _punchline(words: list[dict[str, Any]], index: int) -> list[float] | None:
             continue
         if between and event_start - float(words[i]["end"]) > PUNCHLINE_MAX_SECONDS_BEFORE:
             return None
+        if not between and not _follows_closely(words, i, index):
+            return None
         rest = spoken_before[between + 1:]
         end = float(words[i]["end"])
         run_on = _runs_past_limit(words, rest, end)
@@ -571,6 +581,22 @@ def _punchline(words: list[dict[str, Any]], index: int) -> list[float] | None:
             first = j
         return [float(words[first]["start"]), end]
     return None
+
+
+def _follows_closely(words: list[dict[str, Any]], said: int, index: int) -> bool:
+    """Whether event ``words[index]`` follows spoken word ``words[said]`` with nothing but sounds between, each close behind the last.
+
+    Each sound from ``said`` to ``index`` must start within
+    ``PUNCHLINE_MAX_SECONDS_BEFORE`` of the end of what came before it, the
+    word or the sounds so far, which is how ``samples.sentence_spans``
+    decides that a sound belongs to the sentence before it.
+    """
+    last_end = float(words[said]["end"])
+    for j in range(said + 1, index + 1):
+        if round(float(words[j]["start"]) - last_end, 3) > PUNCHLINE_MAX_SECONDS_BEFORE:
+            return False
+        last_end = max(last_end, float(words[j]["end"]))
+    return True
 
 
 def _runs_past_limit(words: list[dict[str, Any]], before: list[int], end: float) -> bool:
@@ -845,7 +871,11 @@ SOUNDS_FILE = "sounds.json"
 # Bump when the measures or the rule change, so old caches are rebuilt.
 # 3: a pitched laugh in bursts is a laugh, not only a breathy one.
 # 4: a held hesitation is named ``UM``.
-SOUNDS_VERSION = 4
+# 5: a sound is the laugh of a line only when it follows it closely (``_follows_closely``).
+SOUNDS_VERSION = 5
+# A cache from this version on holds the measures as they are made today: only
+# the rule that reads them changed since, so they are judged again, not measured again.
+MEASURES_SINCE_VERSION = 4
 
 
 def _made_as_before(times: str) -> int | None:
@@ -866,7 +896,8 @@ def load_or_measure_labels(
     a copy to another Mac does not. It also says which word times the labels
     were judged on, and how those were made: a punchline is found from the
     words before a laugh, so when the word times change the sounds are
-    judged again. The measures
+    judged again, and so are they when the rule that judges them changed
+    (``SOUNDS_VERSION``). The measures
     already saved are used again when the sounds sit where they sat; sounds
     that moved are measured again. With no transcript file on disk the
     labels are measured and not cached. Raises StudioError when measuring
@@ -886,9 +917,12 @@ def load_or_measure_labels(
             cached = json.loads(cache_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             cached = {}
-        if cached.get("version") == SOUNDS_VERSION and word_times.same_transcript(cached.get("transcript"), project):
+        version = cached.get("version")
+        known = isinstance(version, int) and MEASURES_SINCE_VERSION <= version <= SOUNDS_VERSION
+        if known and word_times.same_transcript(cached.get("transcript"), project):
             same_times = cached.get("word_times", word_times.ESTIMATED) == times
-            if same_times and cached.get("word_times_made_as", _made_as_before(times)) == made_as:
+            same_rule = version == SOUNDS_VERSION
+            if same_rule and same_times and cached.get("word_times_made_as", _made_as_before(times)) == made_as:
                 return cached["labels"]
             if cached.get("spans", spans) == spans:
                 measures = cached.get("measures")

@@ -523,6 +523,22 @@ def test_keeping_a_lone_sound_inside_a_cut_of_claudes_says_how_much_came_back(vi
         tools.set_edit(str(video), [WAIT], **QUIET)
 
 
+def test_a_noise_late_in_a_wait_is_no_laugh_at_the_line_before_it_so_the_cut_of_the_wait_reads_clean(video):
+    # The same talk with a full stop before the wait. The noise comes 6.5 s after the line: the join check must
+    # not call it that line's laugh and ask for the cut of the wait to be dropped.
+    rows = [dict(zip(("word", "start", "end", "type"), row)) for row in WAIT_TALK]
+    rows = [{**r, "word": "over."} if r["word"] == "over," else r for r in rows]
+    video.with_suffix(".words.json").write_text(json.dumps(rows))
+    labels = unmeasured_labels(open_project(str(video)), rows)
+    assert [(lb["kind"], lb["punchline"]) for lb in labels] == [("laugh", [0.5, 2.5]), ("sound", None)]
+    result = tools.set_edit(str(video), [WAIT], **QUIET)
+    assert result["rejected"] == [] and result["removed_seconds"] > 9.0
+    assert "removes_laugh" not in result["joins"]["by_flag"], result["joins"]["text"]
+    # The joke keeps what it had: a cut over its laugh, half a second after the line, is still flagged.
+    result = tools.set_edit(str(video), [OVER_THE_LAUGH, WAIT], **QUIET)
+    assert result["joins"]["by_flag"] == {"removes_laugh": 1}, result["joins"]["text"]
+
+
 def test_a_cut_inside_a_kept_part_cannot_be_kept_out(video):
     ctx = edited(video)
     state = treatment.add_keep(ctx, {"start": 9.0, "end": 9.2})

@@ -134,6 +134,8 @@ def test_cut_in_a_span_the_creator_restored_is_rejected(words):
     assert outcome.cuts == []
     why = outcome.rejected[0]["why"]
     assert "the creator restored" in why and "override_keeps=true" in why
+    # A rejected cut plays, and the creator hears about it: the sentence never says to leave it at that.
+    assert "still plays" in why and "tell the creator which cut it was" in why and "Leave it in" not in why
 
 
 def test_override_keeps_lets_the_cut_through(words):
